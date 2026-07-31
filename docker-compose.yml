@@ -48,6 +48,14 @@ x-worker-deps: &worker-deps
   judge:
     condition: service_started
 
+# npm/pnpm registry for the image builds. Defaults to the public registry, so
+# external contributors and CI need no configuration. scripts/dev-compose.sh
+# auto-detects the host's registry (npm config get registry, which reads ~/.npmrc)
+# and forwards it here, so engineers behind a private proxy (e.g. Microsoft's npm
+# proxy) build with no setup. Export NPM_CONFIG_REGISTRY to override the detected value.
+x-npm-build-args: &npm-build-args
+  NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}
+
 services:
   # ===========================================================================
   # Infrastructure services
@@ -274,6 +282,8 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      args:
+        <<: *npm-build-args
       target: builder
     environment:
       MONGO_CONNECTION_STRING: ${MONGO_CONNECTION_STRING:-mongodb://mongodb:27017}
@@ -295,6 +305,8 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      args:
+        <<: *npm-build-args
     restart: on-failure:5
     ports:
       - "${API_PORT:-3100}:80"
@@ -389,6 +401,8 @@ services:
     build:
       context: .
       dockerfile: apps/model-scanners/copilot/Dockerfile
+      args:
+        <<: *npm-build-args
     depends_on:
       api:
         condition: service_started
@@ -408,6 +422,8 @@ services:
     build:
       context: .
       dockerfile: apps/model-scanners/anthropic/Dockerfile
+      args:
+        <<: *npm-build-args
     depends_on:
       api:
         condition: service_started
@@ -428,6 +444,8 @@ services:
     build:
       context: .
       dockerfile: apps/judge/Dockerfile
+      args:
+        <<: *npm-build-args
     ports:
       - "${JUDGE_PORT:-3200}:80"
     environment:
@@ -469,6 +487,8 @@ services:
     build:
       context: .
       dockerfile: apps/token-manager/Dockerfile
+      args:
+        <<: *npm-build-args
     ports:
       - "${TOKEN_MANAGER_PORT:-3300}:80"
     environment:
@@ -496,6 +516,8 @@ services:
     build:
       context: .
       dockerfile: apps/scheduler/Dockerfile
+      args:
+        <<: *npm-build-args
     restart: on-failure:5
     environment:
       <<: *common-env
@@ -526,6 +548,8 @@ services:
     build:
       context: .
       dockerfile: apps/portal/Dockerfile
+      args:
+        <<: *npm-build-args
     profiles: [portal]
     ports:
       - "${PORTAL_PORT:-5100}:80"
@@ -590,6 +614,7 @@ services:
       context: .
       dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
       args:
+        <<: *npm-build-args
         CLAUDE_CODE_ACP_VERSION: ${CLAUDE_CODE_ACP_VERSION:-}
     profiles: [claude-code]
     group_add:
@@ -694,6 +719,7 @@ services:
       context: .
       dockerfile: apps/workers/coder-acp-copilot/Dockerfile
       args:
+        <<: *npm-build-args
         COPILOT_CLI_VERSION: ${COPILOT_CLI_VERSION:-}
     profiles: [copilot]
     group_add:
@@ -756,6 +782,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/report-generator/Dockerfile
+      args:
+        <<: *npm-build-args
     profiles: [report]
     environment:
       <<: *common-env
@@ -781,6 +809,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/post-processor/Dockerfile
+      args:
+        <<: *npm-build-args
     profiles: [post-processor]
     environment:
       <<: *common-env
@@ -798,6 +828,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/post-processor/Dockerfile
+      args:
+        <<: *npm-build-args
     profiles: [post-processor]
     environment:
       <<: *common-env
