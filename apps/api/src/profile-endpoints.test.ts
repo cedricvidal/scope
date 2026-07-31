@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import request from "supertest";
 import { app, _injectTestDependencies } from "./index.js";
+import { useTestServer } from "./test-server.js";
 import { createAllMockDependencies, createMockCollection } from "./test-helpers.js";
 
 const TEST_PROJECT_ID = "test-project";
@@ -32,6 +33,7 @@ vi.mock("./task-prompt-llm.js", () => ({
 }));
 
 describe("Profile API Endpoints", () => {
+  const testServer = useTestServer(app);
   let mocks: ReturnType<typeof createAllMockDependencies>;
 
   beforeAll(() => {
@@ -60,7 +62,7 @@ describe("Profile API Endpoints", () => {
       profileCol.insertOne = vi.fn().mockResolvedValue({ insertedId: "p-new" });
       versionCol.insertOne = vi.fn().mockResolvedValue({ insertedId: "pv-new" });
 
-      const res = await request(app)
+      const res = await request(testServer())
         .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "Test Profile",
@@ -92,7 +94,7 @@ describe("Profile API Endpoints", () => {
         ref: "github/org/my-skill@abc1234",
       });
 
-      const res = await request(app)
+      const res = await request(testServer())
         .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "With Skills",
@@ -123,7 +125,7 @@ describe("Profile API Endpoints", () => {
         commitHash: "abc1234",
       });
 
-      const res = await request(app)
+      const res = await request(testServer())
         .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "Pinned Skills",
@@ -139,7 +141,7 @@ describe("Profile API Endpoints", () => {
     });
 
     it("rejects missing name", async () => {
-      const res = await request(app)
+      const res = await request(testServer())
         .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           workerType: "coder-acp-copilot",
@@ -150,7 +152,7 @@ describe("Profile API Endpoints", () => {
     });
 
     it("rejects missing model", async () => {
-      const res = await request(app)
+      const res = await request(testServer())
         .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "No Model",
@@ -161,7 +163,7 @@ describe("Profile API Endpoints", () => {
     });
 
     it("rejects extensions on non-vscode worker", async () => {
-      const res = await request(app)
+      const res = await request(testServer())
         .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "Bad Combo",
@@ -185,7 +187,7 @@ describe("Profile API Endpoints", () => {
         createdAt: new Date(),
       });
 
-      const res = await request(app)
+      const res = await request(testServer())
         .post("/api/v1/profiles/p-1")
         .send({
           workerType: "coder-acp-copilot",
@@ -220,7 +222,7 @@ describe("Profile API Endpoints", () => {
         createdAt: new Date(),
       });
 
-      const res = await request(app).get(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`);
+      const res = await request(testServer()).get(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`);
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
@@ -235,7 +237,7 @@ describe("Profile API Endpoints", () => {
       const profileCol = mocks.profileCollection as any;
       profileCol.findOne = vi.fn().mockResolvedValue(null);
 
-      const res = await request(app).get("/api/v1/profiles/nonexistent");
+      const res = await request(testServer()).get("/api/v1/profiles/nonexistent");
 
       expect(res.status).toBe(404);
     });
@@ -259,7 +261,7 @@ describe("Profile API Endpoints", () => {
         createdAt: new Date(),
       });
 
-      const res = await request(app).get("/api/v1/profiles/p-1");
+      const res = await request(testServer()).get("/api/v1/profiles/p-1");
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("name", "My Profile");
@@ -279,7 +281,7 @@ describe("Profile API Endpoints", () => {
       });
       profileCol.updateOne = vi.fn().mockResolvedValue({ matchedCount: 1 });
 
-      const res = await request(app).delete("/api/v1/profiles/p-1");
+      const res = await request(testServer()).delete("/api/v1/profiles/p-1");
 
       expect(res.status).toBe(204);
       expect(profileCol.updateOne).toHaveBeenCalledOnce();
@@ -289,7 +291,7 @@ describe("Profile API Endpoints", () => {
       const profileCol = mocks.profileCollection as any;
       profileCol.findOne = vi.fn().mockResolvedValue(null);
 
-      const res = await request(app).delete("/api/v1/profiles/nonexistent");
+      const res = await request(testServer()).delete("/api/v1/profiles/nonexistent");
 
       expect(res.status).toBe(404);
     });
@@ -316,7 +318,7 @@ describe("Profile API Endpoints", () => {
         }),
       });
 
-      const res = await request(app).get("/api/v1/profiles/p-1/versions");
+      const res = await request(testServer()).get("/api/v1/profiles/p-1/versions");
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
