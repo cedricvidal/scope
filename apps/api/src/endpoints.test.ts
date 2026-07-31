@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { type Server } from "node:http";
 import request from "supertest";
-import { app, _injectTestDependencies } from "./index.js";
+import { app as expressApp, _injectTestDependencies } from "./index.js";
 import { _resetRunFacetsCacheForTests } from "./routes/requests/index.js";
 import { createAllMockDependencies, createMockCollection } from "./test-helpers.js";
 
@@ -35,10 +36,23 @@ vi.mock("./task-prompt-llm.js", () => ({
 
 describe("API Endpoints", () => {
   let mocks: ReturnType<typeof createAllMockDependencies>;
+  // Bind the Express app to a single long-lived ephemeral server for the whole
+  // suite. `request(expressApp)` would otherwise spin up (and tear down) a
+  // fresh server on every call; across 150+ sequential requests those per-call
+  // servers and their sockets close asynchronously, so a socket from the
+  // previous test can still be closing when the next request is issued. That
+  // race intermittently corrupted responses (HTTP "Parse Error" / timeouts)
+  // and made unrelated tests flaky. One persistent server removes the churn.
+  let app: Server;
 
   beforeAll(() => {
+    app = expressApp.listen(0);
     mocks = createAllMockDependencies();
     _injectTestDependencies(mocks);
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => app.close(() => resolve()));
   });
 
   beforeEach(() => {
