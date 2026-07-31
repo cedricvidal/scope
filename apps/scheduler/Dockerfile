@@ -1,7 +1,8 @@
 FROM node:22.22.0-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
-
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
+ENV npm_config_registry=${NPM_CONFIG_REGISTRY}
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
@@ -38,7 +39,8 @@ CMD ["/app/scripts/dev-entrypoint.sh"]
 FROM node:22.22.0-slim
 
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
-
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
+ENV npm_config_registry=${NPM_CONFIG_REGISTRY}
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
