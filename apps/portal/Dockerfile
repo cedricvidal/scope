@@ -1,8 +1,12 @@
 # Shared Portal dependency layer
 FROM node:20-alpine AS deps
-RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
-ENV npm_config_registry=${NPM_CONFIG_REGISTRY}
+ENV npm_config_registry=${NPM_CONFIG_REGISTRY} \
+    COREPACK_NPM_REGISTRY=${NPM_CONFIG_REGISTRY}
+# corepack bootstraps pnpm from the registry's per-version metadata endpoint,
+# which some private registry proxies don't serve; fall back to a pinned global
+# install (honors npm_config_registry) so restricted networks can still build.
+RUN corepack enable && (corepack prepare pnpm@10.29.1 --activate || npm install -g pnpm@10.29.1 --force)
 WORKDIR /app
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/portal/package.json apps/portal/
