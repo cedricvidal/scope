@@ -48,9 +48,10 @@ import {
 } from "@/components/list-layout";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useStrictAgentCapabilities } from "@/hooks/useStrictAgentCapabilities";
 import { useModelCapabilities, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { formatDate, formatId, formatDuration, truncate, cn } from "@/lib/utils";
-import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
+import { isAgentAvailable, isAgentVersionAvailable, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, RunStatus, RunOutcome, IterationOp, BulkResubmitOverrides, RunSortField, RunFacetBucket } from "@/types";
 
 const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "submissionId", "criteria", "model", "profile", "os", "priority", "version", "dateFrom", "dateTo", "groupBy", "turns", "turnsOp", "maxIter", "maxIterOp"] as const;
@@ -448,6 +449,7 @@ function NumericComparatorRow({
 export function RunsList() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const strictAgentCapabilities = useStrictAgentCapabilities();
   const detailOutlet = useOutlet();
   const { id: activeId } = useParams<{ id?: string }>();
   const [searchParams] = useSearchParams();
@@ -699,11 +701,10 @@ export function RunsList() {
     queryFn: () => api.listProfiles(),
     staleTime: 60_000,
   });
-  // Lazy queries for the resubmit override dialog.
+  // Registry data also supplies worker labels for filters and historical values.
   const { data: agentsData = [] } = useQuery({
     queryKey: ["agents", "runs-list-resubmit"],
     queryFn: () => api.listAgents(),
-    enabled: resubmitDialogOpen,
     staleTime: 60_000,
   });
   const { data: mcpServersData = [] } = useQuery({
@@ -716,6 +717,14 @@ export function RunsList() {
   const profileNameById = useMemo(
     () => new Map((profilesData ?? []).map((profile) => [profile._id, profile.name])),
     [profilesData],
+  );
+  const registeredAgents = useMemo(
+    () => agentsData.filter((agent) => !agent.deletedAt),
+    [agentsData],
+  );
+  const agentNameById = useMemo(
+    () => new Map(registeredAgents.map((agent) => [agent._id, agent.name])),
+    [registeredAgents],
   );
 
   // Flat-mode rows: the server already applied every filter and the sort, so the
@@ -1119,32 +1128,69 @@ export function RunsList() {
   );
 
   const availableAgents = useMemo(
-    () => agentsData.filter((a) => !a.deletedAt && a.available !== false),
+    () => agentsData.filter(isAgentAvailable),
     [agentsData],
   );
+  const selectableProfiles = useMemo(
+    () => (profilesData ?? []).filter((profile) =>
+      isAgentVersionAvailable(
+        agentsData.find((agent) => agent._id === profile.version.workerType),
+        profile.version.agentVersion,
+      )),
+    [agentsData, profilesData],
+  );
+  const keepingPinnedSourceProfiles = resubmitOverrides.profileId === undefined;
+  const activeProfileIsAvailable = keepingPinnedSourceProfiles
+    ? selectedRunsList.every((run) =>
+        !run.profileId
+        || isAgentVersionAvailable(
+          agentsData.find((agent) => agent._id === run.workerType),
+          run.agentVersion,
+        ))
+    : (!activeProfile
+      || selectableProfiles.some((profile) => profile._id === activeProfile._id));
 
   // When a profile is active, its values take precedence.
   const effectiveWorker = activeProfile
     ? activeProfile.version.workerType
     : (resubmitOverrides.workerType ?? selectedRunsSummary.worker);
   const effectiveAgent = useMemo(
-    () => availableAgents.find((a) => a._id === effectiveWorker),
-    [availableAgents, effectiveWorker],
+    () => registeredAgents.find((a) => a._id === effectiveWorker),
+    [registeredAgents, effectiveWorker],
   );
-  const { capabilitiesMap: resubmitCapabilitiesMap, activeModelIds: resubmitActiveModelIds } = useModelCapabilities(effectiveWorker || undefined);
+  const effectiveCapabilities = effectiveAgent?.capabilities;
+  const supportsReasoningEffort = !strictAgentCapabilities || effectiveCapabilities?.supportsReasoningEffort === true;
+  const supportsMcpServers = !strictAgentCapabilities || effectiveCapabilities?.supportsMcpServers === true;
+  const supportsSkills = !strictAgentCapabilities || effectiveCapabilities?.supportsSkills === true;
+  const supportsExtensions = !strictAgentCapabilities || effectiveCapabilities?.supportsExtensions === true;
+  const {
+    capabilitiesMap: resubmitCapabilitiesMap,
+    activeModelIds: resubmitActiveModelIds,
+    capabilitiesLoaded: resubmitCapabilitiesLoaded,
+  } = useModelCapabilities(effectiveWorker || undefined);
   const availableModels = resubmitActiveModelIds.length > 0
     ? resubmitActiveModelIds
     : (effectiveAgent?.supportedModels ?? []);
   const effectiveModel = activeProfile
     ? activeProfile.version.model
     : (resubmitOverrides.model ?? selectedRunsSummary.model);
-  const resubmitSupportedEfforts = effectiveModel
+  const resubmitSupportedEfforts = effectiveModel && supportsReasoningEffort
     ? (resubmitCapabilitiesMap.get(effectiveModel)?.reasoningEffort ?? [])
     : [];
+  const keepingSourceWorker = !activeProfile && resubmitOverrides.workerType === undefined;
+  const showMcpServers = supportsMcpServers
+    || (activeProfile?.version.mcpServers?.length ?? 0) > 0
+    || (keepingSourceWorker && (selectedRunsSummary.isMultiMcp || (selectedRunsSummary.mcpServers?.length ?? 0) > 0));
+  const showSkills = supportsSkills
+    || (activeProfile?.version.skillRevisions?.length ?? 0) > 0
+    || (keepingSourceWorker && (selectedRunsSummary.isMultiSkills || (selectedRunsSummary.skillRevisions?.length ?? 0) > 0));
+  const showExtensions = supportsExtensions
+    || (activeProfile?.version.extensions?.length ?? 0) > 0
+    || (keepingSourceWorker && (selectedRunsSummary.isMultiExtensions || (selectedRunsSummary.extensions?.length ?? 0) > 0));
 
   // Auto-clear/auto-select effort when the effective model changes.
   useEffect(() => {
-    if (!resubmitDialogOpen) return;
+    if (!resubmitDialogOpen || !resubmitCapabilitiesLoaded) return;
     const current = resubmitOverrides.reasoningEffort;
     if (resubmitSupportedEfforts.length === 1) {
       if (current !== resubmitSupportedEfforts[0]) {
@@ -1159,7 +1205,7 @@ export function RunsList() {
         });
       }
     }
-  }, [effectiveModel, resubmitSupportedEfforts, resubmitDialogOpen, resubmitOverrides.reasoningEffort]);
+  }, [effectiveModel, resubmitCapabilitiesLoaded, resubmitSupportedEfforts, resubmitDialogOpen, resubmitOverrides.reasoningEffort]);
 
   const isBusy =
     bulkDeleteMutation.isPending ||
@@ -1224,10 +1270,24 @@ export function RunsList() {
   // every selectable value appears with an accurate full-dataset count — not just
   // the values present on the loaded page. Enum dimensions show all known values
   // (even at count 0); open-ended dimensions show only values that exist.
-  const workerOptions = useMemo(
-    () => enumFacetOptions(WORKER_TYPES as readonly string[], facets?.workerType),
-    [facets],
-  );
+  const workerOptions = useMemo(() => {
+    const facetWorkerIds = (facets?.workerType ?? [])
+      .map((bucket) => bucket.value)
+      .filter((value) => value !== EMPTY_FILTER_VALUE);
+    const workerIds = [...new Set([...registeredAgents.map((agent) => agent._id), ...facetWorkerIds])];
+    return enumFacetOptions(workerIds, facets?.workerType)
+      .map((option) => ({
+        ...option,
+        label: option.value === EMPTY_FILTER_VALUE
+          ? option.label
+          : (agentNameById.get(option.value) ?? option.value),
+      }))
+      .sort((a, b) => {
+        if (a.value === EMPTY_FILTER_VALUE) return 1;
+        if (b.value === EMPTY_FILTER_VALUE) return -1;
+        return a.label.localeCompare(b.label);
+      });
+  }, [agentNameById, facets, registeredAgents]);
   const statusOptions = useMemo(
     () => enumFacetOptions(STATUS_LIST as readonly string[], facets?.status),
     [facets],
@@ -1352,16 +1412,19 @@ export function RunsList() {
       sortable: true,
       width: "180px",
       hidden: columnVisibility.isHidden("worker"),
-      cell: (r) => (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Badge variant="outline" className="max-w-[160px] min-w-0 font-mono text-xs cursor-default">
-              <span className="block min-w-0 truncate">{truncate(r.workerType, 18)}</span>
-            </Badge>
-          </TooltipTrigger>
-          <TooltipContent className="text-xs">{r.workerType}</TooltipContent>
-        </Tooltip>
-      ),
+      cell: (r) => {
+        const workerLabel = agentNameById.get(r.workerType) ?? r.workerType;
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline" className="max-w-[160px] min-w-0 text-xs cursor-default">
+                <span className="block min-w-0 truncate">{truncate(workerLabel, 18)}</span>
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent className="text-xs">{workerLabel}</TooltipContent>
+          </Tooltip>
+        );
+      },
     },
     {
       id: "version",
@@ -2674,6 +2737,7 @@ export function RunsList() {
                     // Profile values take precedence — clear field overrides it controls.
                     delete next.workerType;
                     delete next.model;
+                    delete next.reasoningEffort;
                     delete next.mcpServers;
                     delete next.skillRevisions;
                     delete next.extensions;
@@ -2693,7 +2757,7 @@ export function RunsList() {
                         : selectedRunsSummary.isMultiProfile ? "Mixed (keep each)" : "None"}
                     </SelectItem>
                     <SelectItem value="__none__">None (detach profile)</SelectItem>
-                    {(profilesData ?? []).map((p) => (
+                    {selectableProfiles.map((p) => (
                       <SelectItem key={p._id} value={p._id}>
                         {p.name} <span className="text-muted-foreground">v{p.latestVersion}</span>
                       </SelectItem>
@@ -2716,19 +2780,35 @@ export function RunsList() {
                   Worker
                 </Label>
                 {activeProfile ? (
-                  <span className="text-sm text-muted-foreground">{activeProfile.version.workerType}</span>
+                  <span className="text-sm text-muted-foreground">
+                    {agentNameById.get(activeProfile.version.workerType) ?? activeProfile.version.workerType}
+                  </span>
                 ) : (
                 <Select
                   value={resubmitOverrides.workerType ?? "__keep__"}
                   onValueChange={(v) => setResubmitOverrides((prev) => {
                     const next = { ...prev };
-                    if (v === "__keep__") { delete next.workerType; } else { next.workerType = v; }
-                    delete next.model;
-                    const effectiveWorkerType = v === "__keep__" ? selectedRunsSummary.worker : v;
-                    if (effectiveWorkerType && !effectiveWorkerType.includes("vscode")) {
-                      next.extensions = null;
-                    } else {
+                    if (v === "__keep__") {
+                      delete next.workerType;
+                      delete next.model;
+                      delete next.reasoningEffort;
+                      delete next.mcpServers;
+                      delete next.skillRevisions;
                       delete next.extensions;
+                      return next;
+                    }
+                    next.workerType = v;
+                    next.model = null;
+                    next.reasoningEffort = null;
+                    const nextAgent = availableAgents.find((agent) => agent._id === v);
+                    if (strictAgentCapabilities && nextAgent?.capabilities?.supportsMcpServers !== true) {
+                      next.mcpServers = null;
+                    }
+                    if (strictAgentCapabilities && nextAgent?.capabilities?.supportsSkills !== true) {
+                      next.skillRevisions = null;
+                    }
+                    if (strictAgentCapabilities && nextAgent?.capabilities?.supportsExtensions !== true) {
+                      next.extensions = null;
                     }
                     return next;
                   })}
@@ -2739,7 +2819,7 @@ export function RunsList() {
                   <SelectContent>
                     <SelectItem value="__keep__">
                       {selectedRunsSummary.worker
-                        ? selectedRunsSummary.worker
+                        ? (agentNameById.get(selectedRunsSummary.worker) ?? selectedRunsSummary.worker)
                         : selectedRunsSummary.isMultiWorker ? "Mixed (keep each)" : "—"}
                     </SelectItem>
                     {availableAgents
@@ -2747,9 +2827,6 @@ export function RunsList() {
                       .map((a) => (
                         <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
                       ))}
-                    {availableAgents.length === 0 && WORKER_TYPES.filter((w) => w !== selectedRunsSummary.worker).map((w) => (
-                      <SelectItem key={w} value={w}>{w}</SelectItem>
-                    ))}
                   </SelectContent>
                 </Select>
                 )}
@@ -2801,7 +2878,14 @@ export function RunsList() {
               </div>
 
               {/* Reasoning effort */}
-              {resubmitSupportedEfforts.length > 0 && (
+              {activeProfile?.version.reasoningEffort ? (
+              <div className="flex items-center gap-4 mb-3" title="Controlled by profile">
+                <Label className="text-sm w-32 shrink-0 flex items-center gap-1.5">
+                  <Lock className="h-3 w-3 text-muted-foreground" />Reasoning effort
+                </Label>
+                <span className="text-sm text-muted-foreground">{activeProfile.version.reasoningEffort}</span>
+              </div>
+              ) : resubmitSupportedEfforts.length > 0 && (
               <div className="flex items-center gap-4 mb-3">
                 <Label className="text-sm w-32 shrink-0">Reasoning effort</Label>
                 <Select
@@ -2859,7 +2943,7 @@ export function RunsList() {
               </div>
 
               {/* MCP servers */}
-              {activeProfile ? (
+              {showMcpServers && (activeProfile ? (
               <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
                 <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
                   <Lock className="h-3 w-3 text-muted-foreground" />MCP Servers
@@ -2932,10 +3016,10 @@ export function RunsList() {
                   )}
                 </div>
               </div>
-              )}
+              ))}
 
               {/* Skills */}
-              {activeProfile ? (
+              {showSkills && (activeProfile ? (
               <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
                 <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
                   <Lock className="h-3 w-3 text-muted-foreground" />Skills
@@ -3015,11 +3099,11 @@ export function RunsList() {
                   })()}
                 </div>
               </div>
-              )}
+              ))}
 
-              {/* Extensions (VS Code workers only) */}
+              {/* Extensions */}
               {activeProfile ? (
-                effectiveWorker?.includes("vscode") && (
+                showExtensions && (
                 <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
                   <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
                     <Lock className="h-3 w-3 text-muted-foreground" />Extensions
@@ -3030,7 +3114,7 @@ export function RunsList() {
                 </div>
                 )
               ) : (
-              effectiveWorker?.includes("vscode") && (
+              showExtensions && (
               <div className="flex items-start gap-4">
                 <Label className="text-sm w-32 shrink-0 pt-2">Extensions</Label>
                 <div className="flex-1 space-y-1.5">
@@ -3109,7 +3193,7 @@ export function RunsList() {
                 e.preventDefault();
                 bulkResubmitMutation.mutate({ ids: [...selectedIds], count: resubmitCount, overrides: resubmitOverrides });
               }}
-              disabled={bulkResubmitMutation.isPending}
+              disabled={bulkResubmitMutation.isPending || !activeProfileIsAvailable}
             >
               {bulkResubmitMutation.isPending ? "Re-submitting…" : "Re-submit"}
             </AlertDialogAction>

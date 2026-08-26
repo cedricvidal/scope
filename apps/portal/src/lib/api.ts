@@ -794,7 +794,12 @@ export const api = {
   // ─── Version ───────────────────────────────────────────────────────────────
 
   /** Get API version information (commit hash and build time) */
-  getVersion: (): Promise<{ commit: string; buildTime: string; environment?: string }> => {
+  getVersion: (): Promise<{
+    commit: string;
+    buildTime: string;
+    environment?: string;
+    strictAgentCapabilities?: boolean;
+  }> => {
     return request("/version");
   },
 

@@ -6,7 +6,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useOutlet, useParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import type { ProfileWithVersion } from "@/types";
-import { WORKER_TYPES } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2 } from "lucide-react";
@@ -65,6 +64,15 @@ export function ProfileList() {
     queryKey: ["profiles"],
     queryFn: () => api.listProfiles(),
   });
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents"],
+    queryFn: api.listAgents,
+    staleTime: 60_000,
+  });
+  const agentNameById = useMemo(
+    () => new Map(agents.filter((agent) => !agent.deletedAt).map((agent) => [agent._id, agent.name])),
+    [agents],
+  );
 
   const deleteMutation = useMutation({
     mutationFn: (profileId: string) => api.deleteProfile(profileId),
@@ -100,12 +108,14 @@ export function ProfileList() {
       const wt = p.version?.workerType;
       if (wt) map.set(wt, (map.get(wt) ?? 0) + 1);
     }
-    return WORKER_TYPES.map((wt) => ({
-      value: wt,
-      label: wt,
-      count: map.get(wt) ?? 0,
-    })).filter((o) => o.count > 0);
-  }, [profiles]);
+    return [...map.entries()]
+      .map(([workerId, count]) => ({
+        value: workerId,
+        label: agentNameById.get(workerId) ?? workerId,
+        count,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [profiles, agentNameById]);
 
   const filteredProfiles = useMemo(() => {
     const workers = state.getFilterList("worker");
@@ -180,7 +190,7 @@ export function ProfileList() {
       header: "Worker",
       sortable: true,
       cell: (p: ProfileWithVersion) => (
-        <span className="font-mono text-xs">{p.version.workerType}</span>
+        <span className="text-xs">{agentNameById.get(p.version.workerType) ?? p.version.workerType}</span>
       ),
     }] : []),
     ...(!columnVisibility.isHidden("model") ? [{

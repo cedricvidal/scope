@@ -182,14 +182,6 @@ export interface GateRunSummary {
   iterations: number;
 }
 
-export const WORKER_TYPES = [
-  "coder-acp-claude-code",
-  "coder-acp-copilot",
-  "coder-acp-copilot-windows"
-] as const;
-
-export type WorkerType = (typeof WORKER_TYPES)[number];
-
 export const STATUS_LIST: RunStatus[] = [
   "pending",
   "queued",
@@ -674,7 +666,7 @@ export interface AgentVersion {
   gitCommit: string;
   buildTime: string;
   imageTag: string;
-  queueName: string;
+  queueName?: string;
   status: "active" | "retired";
   createdAt: string;
 }
@@ -682,6 +674,9 @@ export interface AgentVersion {
 // Agent capabilities declared at the worker level
 export interface AgentCapabilities {
   supportsReasoningEffort?: boolean;
+  supportsMcpServers?: boolean;
+  supportsSkills?: boolean;
+  supportsExtensions?: boolean;
 }
 
 // Coding Agent types
@@ -698,6 +693,30 @@ export interface CodingAgent {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
+}
+
+export function getActiveAgentVersions(agent: CodingAgent): AgentVersion[] {
+  return (agent.versions ?? []).filter(
+    (version) => version.status === "active" && (version.queueName?.trim().length ?? 0) > 0,
+  );
+}
+
+export function isAgentAvailable(agent: CodingAgent): boolean {
+  return agent.available === true
+    && !agent.deletedAt
+    && getActiveAgentVersions(agent).length > 0;
+}
+
+export function isAgentVersionAvailable(
+  agent: CodingAgent | undefined,
+  agentVersion?: string,
+): boolean {
+  return !!agent
+    && isAgentAvailable(agent)
+    && (!agentVersion
+      || getActiveAgentVersions(agent).some(
+        (version) => version.agentVersion === agentVersion,
+      ));
 }
 
 // MCP Server types

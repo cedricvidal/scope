@@ -4,7 +4,7 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { CodingAgent, AgentVersion } from "@/types";
+import { isAgentAvailable, type CodingAgent, type AgentVersion } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -288,7 +288,7 @@ export function AgentDetail() {
                 <div>
                   <dt className="text-xs text-muted-foreground">Availability</dt>
                   <dd className="mt-0.5">
-                    {agent.available === false ? (
+                    {!isAgentAvailable(agent) ? (
                       <Badge variant="secondary">Unavailable</Badge>
                     ) : (
                       <Badge variant="default">Available</Badge>
@@ -325,6 +325,9 @@ export function AgentDetail() {
               const caps = agent.capabilities;
               const entries: { label: string; supported: boolean }[] = [
                 { label: "Reasoning Effort", supported: !!caps?.supportsReasoningEffort },
+                { label: "MCP Servers", supported: !!caps?.supportsMcpServers },
+                { label: "Skills", supported: !!caps?.supportsSkills },
+                { label: "Extensions", supported: !!caps?.supportsExtensions },
               ];
               return (
                 <div className="flex flex-wrap gap-2">

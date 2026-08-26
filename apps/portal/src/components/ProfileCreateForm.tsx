@@ -22,7 +22,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import type { CodingAgent, McpServerDocument, ProfileWithVersion } from "@/types";
+import { useStrictAgentCapabilities } from "@/hooks/useStrictAgentCapabilities";
+import {
+  getActiveAgentVersions,
+  isAgentAvailable,
+  type CodingAgent,
+  type McpServerDocument,
+  type ProfileWithVersion,
+} from "@/types";
 
 interface ProfileCreateFormProps {
   onCreated: (profile: ProfileWithVersion) => void;
@@ -48,6 +55,7 @@ export function ProfileCreateForm({
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
+  const strictAgentCapabilities = useStrictAgentCapabilities();
 
   const { data: agents = [] } = useQuery({
     queryKey: ["agents"],
@@ -60,38 +68,42 @@ export function ProfileCreateForm({
   });
 
   const selectedAgent = agents.find((a: CodingAgent) => a._id === worker);
-  const { capabilitiesMap, activeModelIds } = useModelCapabilities(worker || undefined);
+  const supportsMcpServers = !strictAgentCapabilities || selectedAgent?.capabilities?.supportsMcpServers === true;
+  const supportsSkills = !strictAgentCapabilities || selectedAgent?.capabilities?.supportsSkills === true;
+  const supportsExtensions = !strictAgentCapabilities || selectedAgent?.capabilities?.supportsExtensions === true;
+  const { capabilitiesMap, activeModelIds, capabilitiesLoaded } = useModelCapabilities(worker || undefined);
   const supportedModels = activeModelIds.length > 0
     ? activeModelIds
     : (selectedAgent?.supportedModels ?? []);
-  const isVscodeWorker = worker.includes("vscode");
   const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
   const { supportedEfforts } = useReasoningEffort({
     model,
     capabilitiesMap,
     value: reasoningEffort,
     onChange: onEffortChange,
+    agentSupportsEffort: strictAgentCapabilities
+      ? selectedAgent?.capabilities?.supportsReasoningEffort
+      : true,
+    capabilitiesLoaded,
   });
 
-  const eligibleAgents = agents.filter(
-    (a: CodingAgent) => Array.isArray(a.supportedModels) && a.supportedModels.length > 0,
-  );
+  const eligibleAgents = agents.filter(isAgentAvailable);
 
   useEffect(() => {
-    if (worker && !isVscodeWorker) {
+    if (!supportsMcpServers) {
+      setSelectedMcpServers([]);
+    }
+    if (!supportsSkills) {
+      setSelectedSkills([]);
+    }
+    if (!supportsExtensions) {
       setSelectedExtensions([]);
     }
-  }, [worker, isVscodeWorker]);
+  }, [worker, supportsMcpServers, supportsSkills, supportsExtensions]);
 
-  const { data: agentVersions = [] } = useQuery({
-    queryKey: ["agent-versions", worker],
-    queryFn: () => api.listAgentVersions(worker),
-    enabled: !!worker,
-  });
-
-  const sortedVersions = [...agentVersions].sort(
+  const sortedVersions = selectedAgent ? getActiveAgentVersions(selectedAgent).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
+  ) : [];
 
   useEffect(() => {
     if (sortedVersions.length > 0 && !selectedAgentVersion) {
@@ -223,7 +235,12 @@ export function ProfileCreateForm({
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="worker">Worker *</Label>
-            <Select value={worker} onValueChange={(value) => { setWorker(value); setModel(""); setSelectedAgentVersion(""); }}>
+            <Select value={worker} onValueChange={(value) => {
+              setWorker(value);
+              setModel("");
+              setReasoningEffort("");
+              setSelectedAgentVersion("");
+            }}>
               <SelectTrigger id="worker">
                 <SelectValue placeholder="Select a worker" />
               </SelectTrigger>
@@ -233,9 +250,9 @@ export function ProfileCreateForm({
                 ))}
               </SelectContent>
             </Select>
-            {eligibleAgents.length < agents.length && (
+            {eligibleAgents.length === 0 && (
               <p className="text-xs text-muted-foreground">
-                Agents without selectable models are hidden — a profile requires a model.
+                No available agents have an active worker version.
               </p>
             )}
           </div>
@@ -283,7 +300,7 @@ export function ProfileCreateForm({
         </CardContent>
       </Card>
 
-      {mcpServers.length > 0 && (
+      {supportsMcpServers && mcpServers.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>MCP Servers</CardTitle>
@@ -311,17 +328,19 @@ export function ProfileCreateForm({
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Skills</CardTitle>
-          <CardDescription>Select skills to include — pinned to their current revision</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} />
-        </CardContent>
-      </Card>
+      {supportsSkills && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Skills</CardTitle>
+            <CardDescription>Select skills to include — pinned to their current revision</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} />
+          </CardContent>
+        </Card>
+      )}
 
-      {isVscodeWorker && (
+      {supportsExtensions && (
         <Card>
           <CardHeader>
             <CardTitle>Extensions</CardTitle>

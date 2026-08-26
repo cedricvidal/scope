@@ -13,6 +13,7 @@ interface ProfilePickerProps {
   selectedProfileId: string | null;
   onSelect: (profileId: string | null) => void;
   placeholder?: string;
+  workerNameById?: ReadonlyMap<string, string>;
 }
 
 export function ProfilePicker({
@@ -20,6 +21,7 @@ export function ProfilePicker({
   selectedProfileId,
   onSelect,
   placeholder = "Search existing profiles…",
+  workerNameById,
 }: ProfilePickerProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -34,15 +36,17 @@ export function ProfilePicker({
       const name = profile.name.toLowerCase();
       const id = profile._id.toLowerCase();
       const worker = profile.version.workerType.toLowerCase();
+      const workerName = workerNameById?.get(profile.version.workerType)?.toLowerCase() ?? "";
       const model = profile.version.model.toLowerCase();
       return (
         name.includes(normalized) ||
         id.includes(normalized) ||
         worker.includes(normalized) ||
+        workerName.includes(normalized) ||
         model.includes(normalized)
       );
     });
-  }, [profiles, query]);
+  }, [profiles, query, workerNameById]);
 
   useEffect(() => {
     setHighlightIdx(0);
@@ -138,7 +142,7 @@ export function ProfilePicker({
                     {isSelected && <Check className="h-4 w-4 shrink-0" />}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    v{profile.latestVersion} · {profile.version.workerType} · {profile.version.model}
+                    v{profile.latestVersion} · {workerNameById?.get(profile.version.workerType) ?? profile.version.workerType} · {profile.version.model}
                   </p>
                 </li>
               );
