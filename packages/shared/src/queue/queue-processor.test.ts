@@ -157,7 +157,8 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     } as any;
 
     const findOneAndUpdate = vi.fn().mockResolvedValue(requestDoc);
-    const collection = { findOneAndUpdate } as any;
+    const updateOne = vi.fn().mockResolvedValue({ matchedCount: 1 });
+    const collection = { findOneAndUpdate, updateOne } as any;
 
     const safeDeleteMessage = vi.fn().mockResolvedValue(undefined);
     const safeDeferMessage = vi.fn().mockResolvedValue(undefined);
@@ -181,7 +182,7 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     // would be invoked. Stub it so any accidental call is observable.
     (qp as any).processMultiTurn = vi.fn().mockResolvedValue(undefined);
 
-    return { qp, requestDoc, message, heartbeat, stop, log, findOneAndUpdate, safeDeleteMessage, safeDeferMessage, heartbeatStore, runId, requestId };
+    return { qp, requestDoc, message, heartbeat, stop, log, findOneAndUpdate, updateOne, safeDeleteMessage, safeDeferMessage, heartbeatStore, runId, requestId };
   }
 
   it("defers a shared-queue message for another worker", async () => {
@@ -398,8 +399,101 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     await (h.qp as any).handleRequest(h.requestDoc, h.message, h.heartbeat, h.log, { runId: h.runId });
 
     expect(h.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(h.updateOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: h.requestId,
+        "run._id": h.runId,
+        "run.status": "queued",
+      }),
+      expect.objectContaining({
+        $set: expect.objectContaining({ "run.status": "processing" }),
+      }),
+    );
     expect(h.safeDeleteMessage).not.toHaveBeenCalled();
     expect((h.qp as any).processMultiTurn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CodingAgentQueueProcessor pre-processing failures", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("claims the exact run before extension resolution and terminalizes a resolver error", async () => {
+    const requestId = "req-extension-failure";
+    const runId = "run-extension-failure";
+    const requestDoc = {
+      _id: requestId,
+      projectId: "project with spaces",
+      workerType: "test-worker",
+      agentVersion: "test-1.0.0",
+      extensions: ["ms-python.python"],
+      scenario: { criteria: [], task: "x" },
+      run: { _id: runId, status: "queued", attemptNumber: 1 },
+    } as any;
+
+    const updateOne = vi
+      .fn()
+      .mockResolvedValueOnce({ matchedCount: 1 })
+      .mockResolvedValueOnce({ matchedCount: 1 });
+    const deleteMessage = vi.fn().mockResolvedValue(undefined);
+    const qp = new CodingAgentQueueProcessor(
+      { ...testConfig, apiBaseUrl: "http://api:80" },
+      stubProcessor,
+    );
+    (qp as any).collection = {
+      findOne: vi.fn().mockResolvedValue(requestDoc),
+      updateOne,
+    };
+    (qp as any).queueClient = {
+      updateMessage: vi.fn().mockResolvedValue({ popReceipt: "next-receipt" }),
+      deleteMessage,
+    };
+    (qp as any).logPublisher = {
+      publish: vi.fn().mockResolvedValue(undefined),
+      evictRun: vi.fn(),
+    };
+    (qp as any).heartbeatStore = new InMemoryHeartbeatStore();
+    (qp as any).processMultiTurn = vi.fn().mockResolvedValue(undefined);
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const message = {
+      messageId: "message-1",
+      popReceipt: "receipt-1",
+      messageText: Buffer.from(JSON.stringify({ requestId, runId })).toString("base64"),
+    } as any;
+
+    await (qp as any).processMessage(message);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://api:80/api/v1/extensions/ms-python.python?projectId=project%20with%20spaces",
+    );
+    expect(updateOne).toHaveBeenCalledTimes(2);
+    expect(updateOne.mock.calls[0][0]).toEqual({
+      _id: requestId,
+      "run._id": runId,
+      "run.status": "queued",
+    });
+    expect(updateOne.mock.calls[1][0]).toEqual({
+      _id: requestId,
+      "run._id": runId,
+      "run.status": "processing",
+      "run.worker.instanceId": (qp as any).instanceId,
+    });
+    expect(updateOne.mock.calls[1][1].$set).toMatchObject({
+      "run.status": "done",
+      "run.outcome": "failed",
+      "run.error": expect.stringMatching(/400 Bad Request/),
+      "run.durationMs": expect.any(Number),
+    });
+    expect((qp as any).processMultiTurn).not.toHaveBeenCalled();
+    expect(deleteMessage).toHaveBeenCalledWith("message-1", "receipt-1");
   });
 });
 

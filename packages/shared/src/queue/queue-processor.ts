@@ -315,8 +315,21 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
+
+    const startedAt = await this.claimRunForProcessing(requestDoc);
+    if (!startedAt) {
+      console.log(
+        `[${this.workerName}] Request ${requestDoc._id} could not be claimed — run state changed concurrently; discarding`,
+      );
+      await log("warn", "Run could not be claimed for processing because its state changed concurrently", {
+        runId: requestDoc.run?._id,
+      });
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+
     // Fail fast on a missing project scope. Every downstream resolver below
-    // (MCP servers, skills, secrets, and the report-generator) builds
+    // (MCP servers, skills, extensions, secrets, and the report-generator) builds
     // `?projectId=${encodeURIComponent(projectId)}` URLs, so an absent value
     // would `encodeURIComponent(undefined)` into the literal string
     // "undefined" and silently query a project named "undefined" — a confusing
@@ -396,11 +409,64 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
       const extensionClient = new ExtensionClient(apiBaseUrl);
       await log("info", `Resolving ${requestDoc.extensions.length} extension(s)`, { extensions: requestDoc.extensions });
-      extensionConfigs = await extensionClient.resolveExtensions(requestDoc.extensions);
+      extensionConfigs = await extensionClient.resolveExtensions(requestDoc.projectId, requestDoc.extensions);
       await log("info", `Resolved extensions: ${extensionConfigs.map(e => e.version ? `${e.id}@${e.version}` : e.id).join(", ")}`);
     }
 
-    await this.processMultiTurn(requestDoc, message, heartbeat, log, mcpServerConfigs, skillConfigs, extensionConfigs);
+    await this.processMultiTurn(requestDoc, message, heartbeat, log, startedAt, mcpServerConfigs, skillConfigs, extensionConfigs);
+  }
+
+  /**
+   * Atomically claim the exact queued run before resolving any fallible runtime
+   * resources. This both excludes duplicate execution and guarantees the base
+   * error path can terminalize setup failures against an owned processing run.
+   */
+  private async claimRunForProcessing(requestDoc: RequestDocument): Promise<Date | undefined> {
+    const runId = requestDoc.run?._id;
+    if (!runId) {
+      throw new Error(`Request ${requestDoc._id} has no current run id`);
+    }
+
+    const versionFields = this.getVersionFields();
+    const startedAt = new Date();
+    const result = await withRetry(() => this.collection.updateOne(
+      {
+        _id: requestDoc._id,
+        "run._id": runId,
+        "run.status": "queued",
+      } as any,
+      {
+        $set: {
+          "run.status": "processing",
+          "run.startedAt": startedAt,
+          "run.updatedAt": startedAt,
+          "run.worker": {
+            instanceId: this.instanceId,
+            ...(this.podName ? { podName: this.podName } : {}),
+          },
+          "run.turns": [],
+          gateSummaries: [],
+          "run.workerVersion": versionFields.workerVersion,
+          "run.os": versionFields.os,
+          updatedAt: startedAt,
+        },
+      } as any,
+    ));
+
+    if ((result.matchedCount ?? 0) === 0) {
+      return undefined;
+    }
+
+    requestDoc.run!.status = "processing";
+    requestDoc.run!.startedAt = startedAt;
+    requestDoc.run!.worker = {
+      instanceId: this.instanceId,
+      ...(this.podName ? { podName: this.podName } : {}),
+    };
+
+    // Seed liveness immediately so a fast redelivery observes this claim.
+    await this.heartbeatStore.set(runId, startedAt);
+    return startedAt;
   }
 
   /**
@@ -534,6 +600,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     message: DequeuedMessageItem,
     heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
+    startedAt: Date,
     mcpServerConfigs?: McpServerConfig[],
     skillConfigs?: SkillConfig[],
     extensionConfigs?: ExtensionConfig[]
@@ -562,37 +629,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       throw new Error("JUDGE_SERVICE_URL is not configured but request has criteria to evaluate");
     }
 
-    // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution).
-    // Write to run.* (run-retry-attempts) plus a top-level updatedAt for index freshness.
-    // Stamp run.worker (instance identity) atomically with the status change
-    // so the redelivery handler in another worker can immediately see this
-    // pickup. The accompanying liveness heartbeat is written to Redis (not
-    // Mongo) immediately after to avoid recurring CosmosDB RU cost.
-    const versionFields = this.getVersionFields();
-    const now = new Date();
-    await withRetry(() => this.collection.updateOne(
-      { _id: requestId },
-      {
-        $set: {
-          "run.status": "processing",
-          "run.startedAt": now,
-          "run.updatedAt": now,
-          "run.worker": {
-            instanceId: this.instanceId,
-            ...(this.podName ? { podName: this.podName } : {}),
-          },
-          "run.turns": [],
-          gateSummaries: [],
-          "run.workerVersion": versionFields.workerVersion,
-          "run.os": versionFields.os,
-          updatedAt: now,
-        },
-      }
-    ));
-    // Seed the Redis liveness heartbeat right after pickup so a redelivery
-    // arriving immediately afterwards sees a fresh beat instead of falling
-    // through to the missing-heartbeat guard.
-    await this.heartbeatStore.set(requestDoc.run!._id, now);
+    const now = startedAt;
 
     // Subscribe to instant cancel notifications via Redis Pub/Sub.
     // If a cancel signal arrives, exit immediately — the run is already

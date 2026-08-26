@@ -528,7 +528,15 @@ const queueProcessor = new CodingAgentQueueProcessor(config, processor);
 queueProcessor.start();
 ```
 
-The `CodingAgentQueueProcessor` handles all queue polling, message visibility, MongoDB persistence, blob storage uploads, HAR sanitization, video uploads, MCP/skill resolution, multi-turn orchestration, and report triggering. The worker only implements the `WorkerProcessor` interface.
+The `CodingAgentQueueProcessor` handles all queue polling, message visibility, MongoDB persistence, blob storage uploads, HAR sanitization, video uploads, project-scoped MCP/skill/extension resolution, multi-turn orchestration, and report triggering. The worker only implements the `WorkerProcessor` interface.
+
+Before resolving runtime resources, the queue processor atomically claims the exact
+queued run (`requestId` + `runId`) and records its worker instance. MCP servers,
+skills, secrets, and extensions are then resolved using the request's `projectId`.
+If setup fails, the base error path can terminalize only that owned processing run,
+so a resolver error cannot leave a dequeued run queued or overwrite a concurrent
+retry/cancellation. Prompt bodies and codebase revisions remain point reads by
+their immutable IDs and do not require project query parameters.
 
 ## Existing Workers
 
