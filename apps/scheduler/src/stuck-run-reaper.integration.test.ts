@@ -70,6 +70,7 @@ function makeStubAgent(): { processor: WorkerProcessor; called: () => boolean } 
   return {
     processor: {
       workerName: "itest-worker",
+      getAgentVersion: () => "itest-v1",
       async processMessage(): Promise<WorkerResult> {
         invoked = true;
         throw new Error("agent must NOT run for a reaped run");

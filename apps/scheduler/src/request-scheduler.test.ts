@@ -1,211 +1,504 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { RequestScheduler, WorkerTypeConfig } from "./request-scheduler.js";
-import type { RequestDocument } from "shared";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { CodingAgentDocument, RequestDocument } from "shared";
+import { RequestScheduler } from "./request-scheduler.js";
 
-// ── Mocks ────────────────────────────────────────────────────────────
-
-function makeMockQueueClient(approximateMessagesCount = 0) {
+function makeQueueClient(depth = 0) {
   return {
-    getProperties: vi.fn().mockResolvedValue({ approximateMessagesCount }),
+    createIfNotExists: vi.fn().mockResolvedValue({}),
+    getProperties: vi.fn().mockResolvedValue({
+      approximateMessagesCount: depth,
+    }),
     sendMessage: vi.fn().mockResolvedValue({}),
   } as any;
 }
 
-function makeMockCollection(docs: RequestDocument[] = []) {
-  // Return docs one at a time in order, then null
-  let index = 0;
+function makeAgent(
+  id: string,
+  versions: Array<{
+    agentVersion: string;
+    queueName: string;
+    status?: "active" | "retired";
+  }>,
+  overrides: Partial<CodingAgentDocument> = {},
+): CodingAgentDocument {
   return {
-    findOneAndUpdate: vi.fn().mockImplementation(async () => {
-      if (index < docs.length) return docs[index++];
-      return null;
-    }),
-  } as any;
+    _id: id,
+    name: id,
+    available: true,
+    supportedModels: [],
+    versions: versions.map((version, index) => ({
+      agentVersion: version.agentVersion,
+      workerVersion: `${version.agentVersion}-build`,
+      components: {},
+      gitCommit: "abcdef0",
+      buildTime: "20260101T000000Z",
+      imageTag: `${version.agentVersion}-build`,
+      queueName: version.queueName,
+      status: version.status ?? "active",
+      createdAt: new Date(index),
+    })),
+    createdAt: new Date(),
+    ...overrides,
+  };
 }
 
-function makeDoc(overrides: Partial<RequestDocument> & { _id: string; priority: number }): RequestDocument {
+function makeRequest(
+  id: string,
+  workerType: string,
+  agentVersion: string | undefined,
+  priority = 0,
+): RequestDocument {
   return {
-    scenario: { task: "test", criteria: ["c1"] },
-    workerType: "coder-acp-copilot",
+    _id: id,
+    projectId: "project",
+    scenario: { task: "test", criteria: ["criterion"] },
+    workerType,
+    ...(agentVersion ? { agentVersion } : {}),
     createdAt: new Date(),
-    run: { _id: `run-${overrides._id}`, attemptNumber: 1, status: "pending" },
-    ...overrides,
+    priority,
+    run: {
+      _id: `run-${id}`,
+      attemptNumber: 1,
+      status: "pending",
+    },
   } as RequestDocument;
 }
 
-// ── Tests ────────────────────────────────────────────────────────────
+function makeCollections(
+  requests: RequestDocument[],
+  agents: CodingAgentDocument[],
+) {
+  const mutableAgents = [...agents];
+  const requestCollection = {
+    aggregate: vi.fn().mockImplementation(() => ({
+      toArray: async () => {
+        const grouped = new Map<
+          string,
+          {
+            _id: { workerType?: string; agentVersion?: string };
+            count: number;
+          }
+        >();
+        for (const request of requests.filter(
+          (candidate) =>
+            candidate.run?.status === "pending" && !candidate.deletedAt,
+        )) {
+          const key = `${request.workerType}\0${request.agentVersion ?? ""}`;
+          const current = grouped.get(key);
+          if (current) current.count++;
+          else {
+            grouped.set(key, {
+              _id: {
+                workerType: request.workerType,
+                ...(request.agentVersion
+                  ? { agentVersion: request.agentVersion }
+                  : {}),
+              },
+              count: 1,
+            });
+          }
+        }
+        return [...grouped.values()];
+      },
+    })),
+    findOneAndUpdate: vi.fn().mockImplementation(
+      async (
+        filter: {
+          workerType: string;
+          agentVersion: string;
+        },
+      ) => {
+        const request = requests
+          .filter((candidate) => candidate.run?.status === "pending")
+          .filter(
+            (candidate) =>
+              filter.workerType === candidate.workerType &&
+              filter.agentVersion === candidate.agentVersion,
+          )
+          .sort(
+            (left, right) =>
+              (right.priority ?? 0) - (left.priority ?? 0) ||
+              left.createdAt.getTime() - right.createdAt.getTime(),
+          )[0];
+        if (!request?.run) return null;
+        request.run.status = "queued";
+        return request;
+      },
+    ),
+    updateOne: vi.fn().mockImplementation(
+      async (
+        filter: { _id: string },
+        update: { $set: { "run.status": string } },
+      ) => {
+        const request = requests.find((candidate) => candidate._id === filter._id);
+        if (request?.run) {
+          request.run.status = update.$set["run.status"] as "pending";
+        }
+        return { matchedCount: request ? 1 : 0 };
+      },
+    ),
+  } as any;
+  const agentCollection = {
+    find: vi.fn().mockImplementation(() => ({
+      toArray: async () => [...mutableAgents],
+    })),
+  } as any;
+
+  return { requestCollection, agentCollection, mutableAgents };
+}
 
 describe("RequestScheduler", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("dispatches up to targetQueueDepth messages when queue is empty", async () => {
-    const doc1 = makeDoc({ _id: "r1", priority: 50 });
-    const doc2 = makeDoc({ _id: "r2", priority: 0 });
-    const collection = makeMockCollection([doc1, doc2]);
-    const queueClient = makeMockQueueClient(0); // empty queue
-
+  it("routes a synthetic dynamically named worker to its advertised queue", async () => {
+    const request = makeRequest(
+      "request-1",
+      "synthetic-worker-7f3",
+      "synthetic-v9",
+      50,
+    );
+    const { requestCollection, agentCollection } = makeCollections(
+      [request],
+      [
+        makeAgent("synthetic-worker-7f3", [
+          {
+            agentVersion: "synthetic-v9",
+            queueName: "custom-synthetic-queue",
+          },
+        ]),
+      ],
+    );
+    const queue = makeQueueClient();
+    const factory = vi.fn(() => queue);
     const scheduler = new RequestScheduler(
-      collection,
-      [{ workerType: "coder-acp-copilot", queueClient, targetQueueDepth: 3 }],
+      requestCollection,
+      agentCollection,
+      factory,
+      { targetQueueDepth: 3 },
     );
 
-    // Manually trigger one dispatch cycle (not using start/interval)
     await (scheduler as any).dispatch();
 
-    // Should have called findOneAndUpdate twice (got 2 docs, then null)
-    expect(collection.findOneAndUpdate).toHaveBeenCalledTimes(3); // 2 found + 1 null
-    expect(queueClient.sendMessage).toHaveBeenCalledTimes(2);
-
-    // Verify message payloads
-    const msg1 = JSON.parse(Buffer.from(queueClient.sendMessage.mock.calls[0][0], "base64").toString());
-    expect(msg1).toEqual({ requestId: "r1", runId: "run-r1" });
-
-    const msg2 = JSON.parse(Buffer.from(queueClient.sendMessage.mock.calls[1][0], "base64").toString());
-    expect(msg2).toEqual({ requestId: "r2", runId: "run-r2" });
+    expect(factory).toHaveBeenCalledWith("custom-synthetic-queue");
+    expect(queue.sendMessage).toHaveBeenCalledTimes(1);
+    const message = JSON.parse(
+      Buffer.from(queue.sendMessage.mock.calls[0][0], "base64").toString(),
+    );
+    expect(message).toEqual({
+      requestId: "request-1",
+      runId: "run-request-1",
+      workerType: "synthetic-worker-7f3",
+      agentVersion: "synthetic-v9",
+    });
   });
 
-  it("respects current queue depth and dispatches only remaining slots", async () => {
-    const doc1 = makeDoc({ _id: "r1", priority: 0 });
-    const collection = makeMockCollection([doc1]);
-    const queueClient = makeMockQueueClient(4); // 4 of 5 slots taken
-
+  it("refreshes registry targets without restart", async () => {
+    const request = makeRequest("request-1", "late-worker", "v1");
+    const { requestCollection, agentCollection, mutableAgents } =
+      makeCollections([request], []);
+    const queue = makeQueueClient();
+    const factory = vi.fn(() => queue);
     const scheduler = new RequestScheduler(
-      collection,
-      [{ workerType: "coder-acp-copilot", queueClient, targetQueueDepth: 5 }],
+      requestCollection,
+      agentCollection,
+      factory,
     );
 
     await (scheduler as any).dispatch();
+    expect(factory).not.toHaveBeenCalled();
+    expect(request.run?.status).toBe("pending");
 
-    // Only 1 slot available (5 - 4 = 1)
-    expect(collection.findOneAndUpdate).toHaveBeenCalledTimes(1);
-    expect(queueClient.sendMessage).toHaveBeenCalledTimes(1);
+    mutableAgents.push(
+      makeAgent("late-worker", [
+        { agentVersion: "v1", queueName: "late-queue" },
+      ]),
+    );
+    await (scheduler as any).dispatch();
+
+    expect(factory).toHaveBeenCalledWith("late-queue");
+    expect(queue.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("does nothing when queue is at or above target depth", async () => {
-    const collection = makeMockCollection([]);
-    const queueClient = makeMockQueueClient(5);
-
+  it("deduplicates a shared queue across workers and versions", async () => {
+    const requests = [
+      makeRequest("one", "worker-a", "v1", 10),
+      makeRequest("two", "worker-a", "v2", 5),
+      makeRequest("three", "worker-b", "v7", 1),
+    ];
+    const { requestCollection, agentCollection } = makeCollections(requests, [
+      makeAgent("worker-a", [
+        { agentVersion: "v1", queueName: "shared-queue" },
+        { agentVersion: "v2", queueName: "shared-queue" },
+      ]),
+      makeAgent("worker-b", [
+        { agentVersion: "v7", queueName: "shared-queue" },
+      ]),
+    ]);
+    const queue = makeQueueClient();
+    const factory = vi.fn(() => queue);
     const scheduler = new RequestScheduler(
-      collection,
-      [{ workerType: "coder-acp-copilot", queueClient, targetQueueDepth: 5 }],
+      requestCollection,
+      agentCollection,
+      factory,
+      { targetQueueDepth: 5 },
     );
 
     await (scheduler as any).dispatch();
 
-    expect(collection.findOneAndUpdate).not.toHaveBeenCalled();
-    expect(queueClient.sendMessage).not.toHaveBeenCalled();
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(queue.getProperties).toHaveBeenCalledTimes(1);
+    expect(queue.sendMessage).toHaveBeenCalledTimes(3);
+    const claimCalls = requestCollection.findOneAndUpdate.mock.calls as Array<
+      [
+        { workerType?: string; agentVersion?: string },
+        unknown,
+        { returnDocument?: string },
+      ]
+    >;
+    expect(
+      claimCalls
+        .filter((call) => call[2]?.returnDocument === "after")
+        .slice(0, 3)
+        .map((call) => ({
+          workerType: call[0].workerType,
+          agentVersion: call[0].agentVersion,
+        })),
+    ).toEqual([
+      { workerType: "worker-a", agentVersion: "v1" },
+      { workerType: "worker-a", agentVersion: "v2" },
+      { workerType: "worker-b", agentVersion: "v7" },
+    ]);
   });
 
-  it("queries with correct filter and sort order", async () => {
-    const collection = makeMockCollection([]);
-    const queueClient = makeMockQueueClient(0);
-
+  it("rotates a shared queue budget across active targets", async () => {
+    const requests = [
+      makeRequest("a-1", "worker-a", "v1", 100),
+      makeRequest("a-2", "worker-a", "v1", 90),
+      makeRequest("b-1", "worker-b", "v2", 1),
+    ];
+    const { requestCollection, agentCollection } = makeCollections(requests, [
+      makeAgent("worker-a", [{ agentVersion: "v1", queueName: "shared" }]),
+      makeAgent("worker-b", [{ agentVersion: "v2", queueName: "shared" }]),
+    ]);
+    const queue = makeQueueClient();
     const scheduler = new RequestScheduler(
-      collection,
-      [{ workerType: "coder-acp-copilot", queueClient, targetQueueDepth: 2 }],
+      requestCollection,
+      agentCollection,
+      () => queue,
+      { targetQueueDepth: 1 },
+    );
+
+    await (scheduler as any).dispatch();
+    requestCollection.updateOne.mockClear();
+    requests[0].run!.status = "done";
+    queue.getProperties.mockResolvedValueOnce({ approximateMessagesCount: 0 });
+    await (scheduler as any).dispatch();
+
+    expect(requests[0].run?.status).toBe("done");
+    expect(requests[1].run?.status).toBe("pending");
+    expect(requests[2].run?.status).toBe("queued");
+  });
+
+  it("leaves a target pending when duplicate version records advertise conflicting queues", async () => {
+    const request = makeRequest("conflict", "worker", "v1");
+    const { requestCollection, agentCollection } = makeCollections(
+      [request],
+      [
+        makeAgent("worker", [
+          { agentVersion: "v1", queueName: "queue-a" },
+          { agentVersion: "v1", queueName: "queue-b" },
+        ]),
+      ],
+    );
+    const factory = vi.fn(() => makeQueueClient());
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const scheduler = new RequestScheduler(
+      requestCollection,
+      agentCollection,
+      factory,
     );
 
     await (scheduler as any).dispatch();
 
-    expect(collection.findOneAndUpdate).toHaveBeenCalledWith(
-      {
-        "run.status": "pending",
-        workerType: "coder-acp-copilot",
-        deletedAt: { $exists: false },
-      },
-      {
-        $set: {
-          "run.status": "queued",
-          "run.updatedAt": expect.any(Date),
+    expect(factory).not.toHaveBeenCalled();
+    expect(request.run?.status).toBe("pending");
+    expect(warn.mock.calls.flat().join("\n")).toContain(
+      "agent_queue_conflict",
+    );
+  });
+
+  it("leaves invalid targets pending and emits actionable telemetry", async () => {
+    const requests = [
+      makeRequest("unknown", "missing-worker", "v1"),
+      makeRequest("versionless", "known-worker", undefined),
+      makeRequest("inactive", "known-worker", "retired"),
+    ];
+    const { requestCollection, agentCollection } = makeCollections(requests, [
+      makeAgent("known-worker", [
+        { agentVersion: "active", queueName: "known-queue" },
+        {
+          agentVersion: "retired",
+          queueName: "known-queue",
+          status: "retired",
         },
-      },
-      {
-        sort: { priority: -1, createdAt: 1 },
-        returnDocument: "after",
-      },
-    );
-  });
-
-  it("handles multiple worker types independently", async () => {
-    const doc1 = makeDoc({ _id: "r1", priority: 0, workerType: "coder-acp-copilot" });
-    const doc2 = makeDoc({ _id: "r2", priority: 0, workerType: "coder-acp-claude-code" });
-
-    // Each collection mock returns one doc then null
-    const collection = {
-      findOneAndUpdate: vi.fn()
-        .mockResolvedValueOnce(doc1)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(doc2)
-        .mockResolvedValueOnce(null),
-    } as any;
-
-    const queue1 = makeMockQueueClient(0);
-    const queue2 = makeMockQueueClient(0);
-
+      ]),
+    ]);
+    const queue = makeQueueClient();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const scheduler = new RequestScheduler(
-      collection,
-      [
-        { workerType: "coder-acp-copilot", queueClient: queue1, targetQueueDepth: 3 },
-        { workerType: "coder-acp-claude-code", queueClient: queue2, targetQueueDepth: 3 },
-      ],
+      requestCollection,
+      agentCollection,
+      () => queue,
     );
 
     await (scheduler as any).dispatch();
 
-    expect(queue1.sendMessage).toHaveBeenCalledTimes(1);
-    expect(queue2.sendMessage).toHaveBeenCalledTimes(1);
+    expect(queue.sendMessage).not.toHaveBeenCalled();
+    expect(requests.every((request) => request.run?.status === "pending")).toBe(
+      true,
+    );
+    expect(warn.mock.calls.flat().join("\n")).toContain("agent_not_found");
+    expect(warn.mock.calls.flat().join("\n")).toContain(
+      "agent_version_missing",
+    );
+    expect(warn.mock.calls.flat().join("\n")).toContain(
+      "agent_version_unavailable",
+    );
   });
 
-  it("skips a worker type if dispatch throws and continues to next", async () => {
-    const doc2 = makeDoc({ _id: "r2", priority: 0 });
-    const collection = {
-      findOneAndUpdate: vi.fn()
-        .mockRejectedValueOnce(new Error("DB error"))
-        .mockResolvedValueOnce(doc2)
-        .mockResolvedValueOnce(null),
-    } as any;
-
-    const queue1 = makeMockQueueClient(0);
-    const queue2 = makeMockQueueClient(0);
-
+  it("does not route unavailable, deleted, or queue-less registry targets", async () => {
+    const requests = [
+      makeRequest("unavailable", "worker-unavailable", "v1"),
+      makeRequest("deleted", "worker-deleted", "v1"),
+      makeRequest("queue-less", "worker-queue-less", "v1"),
+    ];
+    const { requestCollection, agentCollection } = makeCollections(requests, [
+      makeAgent(
+        "worker-unavailable",
+        [{ agentVersion: "v1", queueName: "queue-a" }],
+        { available: false },
+      ),
+      makeAgent(
+        "worker-deleted",
+        [{ agentVersion: "v1", queueName: "queue-b" }],
+        { deletedAt: new Date() },
+      ),
+      makeAgent("worker-queue-less", [
+        { agentVersion: "v1", queueName: "" },
+      ]),
+    ]);
+    const factory = vi.fn(() => makeQueueClient());
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     const scheduler = new RequestScheduler(
-      collection,
-      [
-        { workerType: "coder-acp-copilot", queueClient: queue1, targetQueueDepth: 3 },
-        { workerType: "coder-acp-claude-code", queueClient: queue2, targetQueueDepth: 3 },
-      ],
+      requestCollection,
+      agentCollection,
+      factory,
     );
 
-    // Should not throw
     await (scheduler as any).dispatch();
 
-    // First worker type failed, second succeeded
-    expect(queue1.sendMessage).not.toHaveBeenCalled();
-    expect(queue2.sendMessage).toHaveBeenCalledTimes(1);
+    expect(factory).not.toHaveBeenCalled();
+    expect(requests.every((request) => request.run?.status === "pending")).toBe(
+      true,
+    );
   });
 
-  it("start and stop lifecycle", async () => {
-    const collection = makeMockCollection([]);
-    const queueClient = makeMockQueueClient(0);
-
+  it("returns a claim to pending when queue send fails", async () => {
+    const request = makeRequest("request-1", "worker", "v1");
+    const { requestCollection, agentCollection } = makeCollections(
+      [request],
+      [makeAgent("worker", [{ agentVersion: "v1", queueName: "queue" }])],
+    );
+    const queue = makeQueueClient();
+    queue.sendMessage.mockRejectedValueOnce(new Error("queue unavailable"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const scheduler = new RequestScheduler(
-      collection,
-      [{ workerType: "coder-acp-copilot", queueClient, targetQueueDepth: 3 }],
-      100, // fast interval for test
+      requestCollection,
+      agentCollection,
+      () => queue,
     );
 
-    scheduler.start();
+    await (scheduler as any).dispatch();
 
-    // Wait for a couple of ticks
-    await new Promise((r) => setTimeout(r, 350));
+    expect(requestCollection.updateOne).toHaveBeenCalled();
+    expect(request.run?.status).toBe("pending");
+  });
 
-    await scheduler.stop();
+  it("retries a transient claim rollback after queue send fails", async () => {
+    const request = makeRequest("request-1", "worker", "v1");
+    const { requestCollection, agentCollection } = makeCollections(
+      [request],
+      [makeAgent("worker", [{ agentVersion: "v1", queueName: "queue" }])],
+    );
+    const rollbackImplementation =
+      requestCollection.updateOne.getMockImplementation();
+    requestCollection.updateOne
+      .mockRejectedValueOnce(new Error("transient rollback failure"))
+      .mockRejectedValueOnce(new Error("transient rollback failure"))
+      .mockImplementation(rollbackImplementation);
+    const queue = makeQueueClient();
+    queue.sendMessage.mockRejectedValueOnce(new Error("queue unavailable"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const scheduler = new RequestScheduler(
+      requestCollection,
+      agentCollection,
+      () => queue,
+    );
 
-    // Should have called getProperties multiple times (at least 2-3 ticks)
-    expect(queueClient.getProperties.mock.calls.length).toBeGreaterThanOrEqual(2);
+    await (scheduler as any).dispatch();
+
+    expect(requestCollection.updateOne).toHaveBeenCalledTimes(3);
+    expect(request.run?.status).toBe("pending");
+  });
+
+  it("dispatches valid work when invalid-target diagnostics fail", async () => {
+    const request = makeRequest("request-1", "worker", "v1");
+    const { requestCollection, agentCollection } = makeCollections(
+      [request],
+      [makeAgent("worker", [{ agentVersion: "v1", queueName: "queue" }])],
+    );
+    requestCollection.aggregate.mockImplementationOnce(() => ({
+      toArray: vi.fn().mockRejectedValue(new Error("diagnostics unavailable")),
+    }));
+    const queue = makeQueueClient();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const scheduler = new RequestScheduler(
+      requestCollection,
+      agentCollection,
+      () => queue,
+    );
+
+    await (scheduler as any).dispatch();
+
+    expect(queue.sendMessage).toHaveBeenCalledTimes(1);
+    expect(request.run?.status).toBe("queued");
+  });
+
+  it("respects queue depth for all targets sharing a queue", async () => {
+    const requests = [
+      makeRequest("one", "worker", "v1"),
+      makeRequest("two", "worker", "v1"),
+    ];
+    const { requestCollection, agentCollection } = makeCollections(
+      requests,
+      [makeAgent("worker", [{ agentVersion: "v1", queueName: "queue" }])],
+    );
+    const queue = makeQueueClient(4);
+    const scheduler = new RequestScheduler(
+      requestCollection,
+      agentCollection,
+      () => queue,
+      { targetQueueDepth: 5 },
+    );
+
+    await (scheduler as any).dispatch();
+
+    expect(queue.sendMessage).toHaveBeenCalledTimes(1);
   });
 });

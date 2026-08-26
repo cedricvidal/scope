@@ -46,11 +46,21 @@ import { seedCodebaseToWorkspace } from "../codebases/codebase-seeder.js";
  */
 export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocument> {
   private processor: WorkerProcessor;
+  private readonly runtimeAgentVersion: string;
   private postProcessorQueueClient: QueueClient | null = null;
 
   constructor(config: QueueProcessorConfig, processor: WorkerProcessor) {
     super(config, processor.workerName);
     this.processor = processor;
+    this.runtimeAgentVersion =
+      process.env.SCOPE_AGENT_VERSION?.trim() ||
+      processor.getAgentVersion?.()?.trim() ||
+      "";
+    if (!this.runtimeAgentVersion) {
+      throw new Error(
+        `Worker ${processor.workerName} must provide SCOPE_AGENT_VERSION or getAgentVersion()`,
+      );
+    }
 
     // Create post-processor queue client if configured (event-driven dispatch)
     if (config.postProcessorQueueName) {
@@ -103,12 +113,9 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         arch: os.arch(),
       },
     };
-    const agentVersion = this.processor.getAgentVersion?.();
-    if (agentVersion) {
-      const gitCommit = process.env.GIT_COMMIT || "unknown";
-      const buildTime = process.env.BUILD_TIME || "unknown";
-      fields.workerVersion = `${agentVersion}-${buildTime}-${gitCommit}`;
-    }
+    const gitCommit = process.env.GIT_COMMIT || "unknown";
+    const buildTime = process.env.BUILD_TIME || "unknown";
+    fields.workerVersion = `${this.runtimeAgentVersion}-${buildTime}-${gitCommit}`;
     return fields;
   }
 
@@ -119,6 +126,30 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     payload?: Record<string, unknown>,
   ): Promise<void> {
+    const runtimeAgentVersion = this.runtimeAgentVersion;
+    if (
+      requestDoc.workerType !== this.workerName ||
+      requestDoc.agentVersion !== runtimeAgentVersion
+    ) {
+      const popReceipt = heartbeat.stop();
+      console.warn(
+        `[${this.workerName}] Deferring request ${requestDoc._id} for a different target ` +
+          `(requested=${requestDoc.workerType}@${requestDoc.agentVersion ?? "(missing)"}, ` +
+          `runtime=${this.workerName}@${runtimeAgentVersion ?? "(missing)"})`,
+      );
+      await log("warn", "Queue message belongs to a different worker target", {
+        requestedWorkerType: requestDoc.workerType,
+        requestedAgentVersion: requestDoc.agentVersion,
+        runtimeWorkerType: this.workerName,
+        runtimeAgentVersion,
+      });
+      // Release immediately. The base poll loop sleeps after this batch, giving
+      // the matching consumer a polling window instead of letting a faster
+      // wrong-target consumer repeatedly hold the message.
+      await this.safeDeferMessage(message.messageId, popReceipt, 0);
+      return;
+    }
+
     // Run-retry-attempts: verify the message targets the request's CURRENT run.
     // If a retry has since started a new attempt, this message is stale and
     // must be discarded so we don't clobber the new run's state.
@@ -414,9 +445,6 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     if (!apiBaseUrl) return;
 
     const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
-    const agentType = requestDoc.workerType.includes("claude") ? "claude-code"
-      : requestDoc.workerType.includes("copilot") ? "copilot"
-      : undefined;
     const skillClient = new SkillClient(apiBaseUrl);
     const installedPaths = await extractSkillsToWorkspace({
       refs: requestDoc.skillRevisions,
@@ -424,7 +452,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       skillClient,
       projectId: requestDoc.projectId,
       workspacePath,
-      agentType,
+      agentType: this.processor.skillAgentType,
       log: async (msg) => { await log("info", msg); },
     });
     await log("info", `Installed ${installedPaths.length} skill path(s) to workspace`, { installedPaths });

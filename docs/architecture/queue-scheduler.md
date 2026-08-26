@@ -22,8 +22,13 @@ The scheduling system decouples request ordering from message delivery. MongoDB 
                │     (apps/scheduler/)          │
                │     1 replica, polls every 2s  │
                │                                │
+               │  Refresh agent registry        │
+               │  Group active targets by       │
+               │    advertised queueName        │
+               │                                │
                │  findOneAndUpdate              │
                │    filter: status=pending      │
+               │            exact worker+ver    │
                │    sort: priority DESC,        │
                │          createdAt ASC         │
                │    set: status → queued        │
@@ -35,9 +40,8 @@ The scheduling system decouples request ordering from message delivery. MongoDB 
                ┌───────────────▼───────────────┐
                │   Azure Storage Queues         │
                │   (shallow buffer, ≤5 msgs)    │
-               │   queue-coder-acp-copilot      │
-               │   queue-coder-acp-claude-code  │
-               │   queue-coder-vscode-electron… │
+               │   names advertised by active   │
+               │   AgentVersion records         │
                └───────────────┬───────────────┘
                                │
                ┌───────────────▼───────────────┐
@@ -97,13 +101,31 @@ stateDiagram-v2
 
 Every 2 seconds (configurable via `SCHEDULER_POLL_INTERVAL_MS`):
 
-1. For each worker type, read Azure queue depth via `getProperties().approximateMessagesCount`
-2. Compute available slots: `targetQueueDepth − currentDepth`
-3. For each slot, `findOneAndUpdate` the highest-priority pending request:
-   - Filter: `run.status: "pending"`, matching `workerType`, no `deletedAt`
-   - Sort: `priority: -1, createdAt: 1`
+1. Read the agent registry and keep only non-deleted agents with `available: true` and active versions whose `queueName` is non-empty.
+2. Group exact worker/version targets by advertised queue name, deduplicating shared queues and repeated versions.
+3. For each discovered queue, read Azure queue depth via `getProperties().approximateMessagesCount`
+4. Compute available slots: `targetQueueDepth − currentDepth`
+5. For each slot, round-robin across the exact registered worker/version targets,
+   retaining the cursor across cycles, then `findOneAndUpdate` the
+   highest-priority pending request within that target:
+   - Filter: `run.status: "pending"`, exact `workerType` + `agentVersion`, no `deletedAt`
+   - Sort within the target: `priority: -1, createdAt: 1`
    - Update: set `run.status: "queued"`
-4. Send `{ requestId, runId }` message to Azure Storage Queue (base64-encoded JSON)
+6. Send `{ requestId, runId, workerType, agentVersion }` to that advertised Azure Storage Queue. If the send fails, retry the idempotent queued-to-pending rollback. Exhausted rollback failures emit `scheduler.claim_rollback_failed`.
+
+Round-robin target selection prevents a high-volume target from starving another
+active version that shares the physical queue, while the single queue-depth
+budget still prevents overfilling that queue.
+
+The registry is refreshed on every cycle, so registrations, retirements,
+availability changes, and queue changes take effect without restarting the
+scheduler. Pending requests whose target is missing, deleted, unavailable,
+inactive, versionless, or missing a queue are not claimed. The scheduler emits
+`scheduler.invalid_pending_target` and `scheduler.invalid_pending_requests`
+telemetry with an actionable reason whenever that invalid-target set changes.
+The diagnostic scan is rate-limited and isolated from dispatch; a failed
+inspection emits `scheduler.invalid_target_inspection_failed` but does not stop
+valid queues from being filled.
 
 ### Configuration
 
@@ -111,14 +133,16 @@ Scheduler environment variables (set on the scheduler Deployment):
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
-| `SCHEDULER_QUEUE_DEPTH_<TYPE>` | 3–5 | Target queue depth per worker type |
+| `SCHEDULER_TARGET_QUEUE_DEPTH` | 5 | Target depth for every discovered queue |
 | `SCHEDULER_POLL_INTERVAL_MS` | 2000 | Polling interval in ms |
 
-Queue names follow the convention `queue-<workerType>` (e.g. `queue-coder-acp-copilot`).
+There is no scheduler worker inventory and no queue naming convention.
+`AgentVersion.queueName` is authoritative. In particular,
+`SCHEDULER_WORKER_TYPES` and per-worker queue-depth variables are not supported.
 
 ### Why Keep the Queue Shallow?
 
-Once a message is in Azure Storage Queue, it cannot be reordered or removed. By capping queue depth at 3–5 messages per worker type:
+Once a message is in Azure Storage Queue, it cannot be reordered or removed. By capping each discovered queue at a shallow target depth:
 
 - **Priority takes effect immediately**: high-priority requests get dispatched on the next tick
 - **Pause takes effect immediately**: paused requests are never dispatched
@@ -130,7 +154,9 @@ The scheduler provides natural back pressure. When workers are busy, messages si
 
 When workers finish and drain messages, slots open up and the scheduler fills them on the next tick (≤2s). This creates a pull-based flow: workers pull work at their own pace, and the scheduler never overwhelms them regardless of how many requests are pending in MongoDB.
 
-If worker replicas scale up, increase `SCHEDULER_QUEUE_DEPTH_<TYPE>` to match. The target depth should roughly equal the number of worker replicas so each has a message ready when it finishes its current job.
+If worker replicas scale up, increase `SCHEDULER_TARGET_QUEUE_DEPTH`. The target
+depth is shared by all discovered queues and should be high enough to keep the
+largest worker pool supplied.
 
 ## Worker Behavior
 
@@ -246,10 +272,12 @@ Each row in the runs table has inline icon buttons for Pause (pending/queued), R
 
 ### Queue Inventory
 
-| Queue | Worker Type |
-|-------|-------------|
-| `queue-coder-acp-copilot` | GitHub Copilot CLI |
-| `queue-coder-acp-claude-code` | Claude Code |
+The scheduler has no static queue inventory. Inspect active
+`AgentVersion.queueName` values in the agent registry to see the current queues.
+When a queue is intentionally shared, each consumer compares the request's
+exact worker and version with its own runtime identity. It immediately releases
+non-matching messages instead of executing or deleting them, then observes its
+normal poll delay so the matching consumer gets a polling window.
 
 ## Key Files
 

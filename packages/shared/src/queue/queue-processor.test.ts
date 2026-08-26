@@ -34,6 +34,10 @@ const stubProcessor: WorkerProcessor = {
 };
 
 describe("CodingAgentQueueProcessor.getVersionFields", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("includes os info with platform, release, and arch", () => {
     const qp = new CodingAgentQueueProcessor(testConfig, stubProcessor);
     const fields = (qp as any).getVersionFields();
@@ -52,7 +56,8 @@ describe("CodingAgentQueueProcessor.getVersionFields", () => {
     expect(fields.workerVersion).toMatch(/^test-1\.0\.0-/);
   });
 
-  it("omits workerVersion when agentVersion is not available", () => {
+  it("uses SCOPE_AGENT_VERSION when the processor does not expose a version", () => {
+    vi.stubEnv("SCOPE_AGENT_VERSION", "registered-v2");
     const noVersionProcessor: WorkerProcessor = {
       workerName: "test-worker",
       async processMessage(): Promise<WorkerResult> {
@@ -62,23 +67,21 @@ describe("CodingAgentQueueProcessor.getVersionFields", () => {
     const qp = new CodingAgentQueueProcessor(testConfig, noVersionProcessor);
     const fields = (qp as any).getVersionFields();
 
-    expect(fields.workerVersion).toBeUndefined();
+    expect(fields.workerVersion).toMatch(/^registered-v2-/);
     expect(fields.os).toBeDefined();
   });
 
-  it("always captures os even without agentVersion", () => {
+  it("fails at startup when no registry runtime identity is available", () => {
+    vi.stubEnv("SCOPE_AGENT_VERSION", "");
     const noVersionProcessor: WorkerProcessor = {
       workerName: "test-worker",
       async processMessage(): Promise<WorkerResult> {
         return { response: "ok" };
       },
     };
-    const qp = new CodingAgentQueueProcessor(testConfig, noVersionProcessor);
-    const fields = (qp as any).getVersionFields();
-
-    expect(fields.os.platform).toBe(os.platform());
-    expect(fields.os.release).toBe(os.release());
-    expect(fields.os.arch).toBe(os.arch());
+    expect(
+      () => new CodingAgentQueueProcessor(testConfig, noVersionProcessor),
+    ).toThrow(/SCOPE_AGENT_VERSION or getAgentVersion/);
   });
 });
 
@@ -147,7 +150,8 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     const requestDoc = {
       _id: requestId,
       projectId: "proj-1",
-      workerType: "coder-acp-copilot",
+      workerType: "test-worker",
+      agentVersion: "test-1.0.0",
       scenario: { criteria: [], task: "x" },
       run: { _id: runId, status: runStatus, attemptNumber: 1, ...runOverrides },
     } as any;
@@ -179,6 +183,48 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
 
     return { qp, requestDoc, message, heartbeat, stop, log, findOneAndUpdate, safeDeleteMessage, safeDeferMessage, heartbeatStore, runId, requestId };
   }
+
+  it("defers a shared-queue message for another worker", async () => {
+    const h = makeHarness("queued");
+    h.requestDoc.workerType = "other-worker";
+
+    await (h.qp as any).handleRequest(
+      h.requestDoc,
+      h.message,
+      h.heartbeat,
+      h.log,
+      { runId: h.runId },
+    );
+
+    expect(h.stop).toHaveBeenCalledTimes(1);
+    expect(h.safeDeferMessage).toHaveBeenCalledWith(
+      "msg-1",
+      "frozen-pop-1",
+      0,
+    );
+    expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
+  });
+
+  it("defers a shared-queue message for another agent version", async () => {
+    const h = makeHarness("queued");
+    h.requestDoc.agentVersion = "test-2.0.0";
+
+    await (h.qp as any).handleRequest(
+      h.requestDoc,
+      h.message,
+      h.heartbeat,
+      h.log,
+      { runId: h.runId },
+    );
+
+    expect(h.stop).toHaveBeenCalledTimes(1);
+    expect(h.safeDeferMessage).toHaveBeenCalledWith(
+      "msg-1",
+      "frozen-pop-1",
+      0,
+    );
+    expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
+  });
 
   it("marks run failed when no heartbeat AND startedAt is older than the staleness threshold", async () => {
     // No Redis heartbeat AND startedAt is way back — this is the legitimate
@@ -414,7 +460,8 @@ describe("CodingAgentQueueProcessor.enqueuePostProcessing", () => {
     const runId = "run-stale";
     const requestDoc = {
       _id: requestId,
-      workerType: "coder-acp-copilot",
+      workerType: "test-worker",
+      agentVersion: "test-1.0.0",
       scenario: { criteria: [], task: "x" },
       run: {
         _id: runId,

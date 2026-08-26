@@ -49,6 +49,7 @@ if (!dockerAvailable && process.env.CI) {
 
 const stubProcessor: WorkerProcessor = {
   workerName: "itest-worker",
+  getAgentVersion: () => "itest-v1",
   async processMessage(): Promise<WorkerResult> {
     // The duplicate-redelivery path returns BEFORE ever invoking the agent.
     // If this is reached, the fresh-heartbeat branch fell through — a bug.
