@@ -218,7 +218,7 @@ export interface AgentVersion {
   gitCommit: string;                     // Short SHA of the build
   buildTime: string;                     // Build timestamp (e.g. "20260318T163740Z")
   imageTag: string;                      // Full image tag (same as workerVersion)
-  queueName: string;                     // Queue this version listens on
+  queueName?: string;                    // Queue this version listens on; absent only on legacy registry rows
   status: "active" | "retired";
   createdAt: Date;
 }
@@ -337,6 +337,10 @@ export interface LogEvent {
 // Queue message payload
 export interface QueueMessagePayload {
   requestId: string;
+  /** Exact registered worker target for shared-queue-safe delivery. */
+  workerType?: string;
+  /** Exact registered runtime version for shared-queue-safe delivery. */
+  agentVersion?: string;
   /**
    * Optional run ID that identifies a specific attempt within the request.
    *

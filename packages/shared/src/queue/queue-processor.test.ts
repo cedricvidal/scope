@@ -45,6 +45,181 @@ describe("CodingAgentQueueProcessor.getVersionFields", () => {
     });
   });
 
+    describe("CodingAgentQueueProcessor queue target affinity", () => {
+      afterEach(() => {
+        delete process.env.SCOPE_AGENT_VERSION;
+        delete process.env.SCOPE_TARGET_MISMATCH_DEFER_SECONDS;
+        vi.restoreAllMocks();
+      });
+
+      function matches(
+        payload: Record<string, unknown>,
+        request: Record<string, unknown>,
+        processor: WorkerProcessor = stubProcessor,
+      ): Promise<boolean> {
+        const qp = new CodingAgentQueueProcessor(testConfig, processor);
+        return (
+          qp as unknown as {
+            isMessageTargetMatch(
+              message: Record<string, unknown>,
+              document: Record<string, unknown>,
+            ): Promise<boolean>;
+          }
+        ).isMessageTargetMatch(payload, request);
+      }
+
+      it("accepts an exact message, persisted request, and runtime match", async () => {
+        await expect(matches(
+          {
+            workerType: "test-worker",
+            agentVersion: "test-1.0.0",
+          },
+          {
+            workerType: "test-worker",
+            agentVersion: "test-1.0.0",
+          },
+        )).resolves.toBe(true);
+      });
+
+      it.each([
+        [
+          "message worker",
+          { workerType: "other", agentVersion: "test-1.0.0" },
+          { workerType: "test-worker", agentVersion: "test-1.0.0" },
+        ],
+        [
+          "message version",
+          { workerType: "test-worker", agentVersion: "test-2.0.0" },
+          { workerType: "test-worker", agentVersion: "test-1.0.0" },
+        ],
+        [
+          "persisted worker",
+          { workerType: "test-worker", agentVersion: "test-1.0.0" },
+          { workerType: "other", agentVersion: "test-1.0.0" },
+        ],
+        [
+          "persisted version",
+          { workerType: "test-worker", agentVersion: "test-1.0.0" },
+          { workerType: "test-worker", agentVersion: "test-2.0.0" },
+        ],
+        [
+          "partial affinity",
+          { workerType: "test-worker" },
+          { workerType: "test-worker", agentVersion: "test-1.0.0" },
+        ],
+      ])("rejects a mismatched %s", async (_name, payload, request) => {
+        await expect(matches(payload, request)).resolves.toBe(false);
+      });
+
+      it("accepts a legacy message only when its persisted target is exact", async () => {
+        await expect(matches(
+          {},
+          {
+            workerType: "test-worker",
+            agentVersion: "test-1.0.0",
+          },
+        )).resolves.toBe(true);
+        await expect(matches(
+          {},
+          {
+            workerType: "test-worker",
+            agentVersion: "test-2.0.0",
+          },
+        )).resolves.toBe(false);
+      });
+
+      it("honors the explicit runtime version override", async () => {
+        process.env.SCOPE_AGENT_VERSION = "override-2.0.0";
+        await expect(matches(
+          {
+            workerType: "test-worker",
+            agentVersion: "override-2.0.0",
+          },
+          {
+            workerType: "test-worker",
+            agentVersion: "override-2.0.0",
+          },
+        )).resolves.toBe(true);
+      });
+
+      it("quickly hands a mismatched message back for the intended worker", async () => {
+        process.env.SCOPE_TARGET_MISMATCH_DEFER_SECONDS = "3";
+        vi.spyOn(Math, "random").mockReturnValue(0);
+        const wrongProcessor: WorkerProcessor = {
+          workerName: "other-worker",
+          async processMessage(): Promise<WorkerResult> {
+            return { response: "wrong" };
+          },
+          getAgentVersion: () => "test-1.0.0",
+        };
+        const wrongWorker = new CodingAgentQueueProcessor(
+          testConfig,
+          wrongProcessor,
+        );
+        const request = {
+          _id: "req-1",
+          workerType: "test-worker",
+          agentVersion: "test-1.0.0",
+          run: { _id: "run-1", status: "queued" },
+        };
+        const updateMessage = vi.fn().mockResolvedValue({});
+        Object.assign(wrongWorker as unknown as Record<string, unknown>, {
+          collection: { findOne: vi.fn().mockResolvedValue(request) },
+          queueClient: { updateMessage },
+          logPublisher: { evictRun: vi.fn() },
+        });
+        const wrongHandleRequest = vi.spyOn(
+          wrongWorker as unknown as { handleRequest: () => Promise<void> },
+          "handleRequest",
+        );
+        const message = {
+          messageId: "message-1",
+          popReceipt: "receipt-1",
+          messageText: Buffer.from(JSON.stringify({
+            requestId: "req-1",
+            runId: "run-1",
+            workerType: "test-worker",
+            agentVersion: "test-1.0.0",
+          })).toString("base64"),
+        };
+
+        await (
+          wrongWorker as unknown as {
+            processMessage(value: typeof message): Promise<void>;
+          }
+        ).processMessage(message);
+
+        expect(wrongHandleRequest).not.toHaveBeenCalled();
+        expect(updateMessage).toHaveBeenCalledWith(
+          "message-1",
+          "receipt-1",
+          undefined,
+          1,
+        );
+
+        const intendedWorker = new CodingAgentQueueProcessor(
+          testConfig,
+          stubProcessor,
+        );
+        Object.assign(intendedWorker as unknown as Record<string, unknown>, {
+          collection: { findOne: vi.fn().mockResolvedValue(request) },
+          queueClient: { updateMessage: vi.fn() },
+          logPublisher: { evictRun: vi.fn() },
+        });
+        const intendedHandleRequest = vi.spyOn(
+          intendedWorker as unknown as { handleRequest: () => Promise<void> },
+          "handleRequest",
+        ).mockResolvedValue(undefined);
+        await (
+          intendedWorker as unknown as {
+            processMessage(value: typeof message): Promise<void>;
+          }
+        ).processMessage({ ...message, popReceipt: "receipt-2" });
+
+        expect(intendedHandleRequest).toHaveBeenCalledOnce();
+    });
+  });
+
   it("includes workerVersion when agentVersion is available", () => {
     const qp = new CodingAgentQueueProcessor(testConfig, stubProcessor);
     const fields = (qp as any).getVersionFields();
@@ -351,9 +526,119 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
 
     await (h.qp as any).handleRequest(h.requestDoc, h.message, h.heartbeat, h.log, { runId: h.runId });
 
-    expect(h.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(h.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: h.requestId,
+        "run._id": h.runId,
+        "run.status": "queued",
+      }),
+      expect.objectContaining({
+        $set: expect.objectContaining({ "run.status": "processing" }),
+      }),
+      { returnDocument: "after" },
+    );
     expect(h.safeDeleteMessage).not.toHaveBeenCalled();
     expect((h.qp as any).processMultiTurn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CodingAgentQueueProcessor atomic queued claim", () => {
+  it("allows only one worker to execute duplicate deliveries", async () => {
+    const state = {
+      _id: "req-duplicate",
+      projectId: "project",
+      workerType: "test-worker",
+      agentVersion: "test-1.0.0",
+      scenario: { criteria: [], task: "x" },
+      run: {
+        _id: "run-duplicate",
+        status: "queued",
+        attemptNumber: 1,
+      },
+    } as any;
+    const queuedSnapshot = structuredClone(state);
+    const collection = {
+      findOneAndUpdate: vi.fn().mockImplementation(async (
+        filter: Record<string, unknown>,
+        update: { $set: Record<string, unknown> },
+      ) => {
+        if (
+          state.run.status !== "queued" ||
+          filter["run.status"] !== "queued"
+        ) {
+          return null;
+        }
+        state.run.status = update.$set["run.status"];
+        state.run.startedAt = update.$set["run.startedAt"];
+        state.run.worker = update.$set["run.worker"];
+        return structuredClone(state);
+      }),
+      findOne: vi.fn().mockImplementation(async (
+        filter: Record<string, unknown>,
+      ) => (
+        state.run.status === filter["run.status"] &&
+          state.run.worker?.instanceId === filter["run.worker.instanceId"]
+          ? structuredClone(state)
+          : null
+      )),
+    };
+
+    const first = new CodingAgentQueueProcessor(testConfig, stubProcessor);
+    const second = new CodingAgentQueueProcessor(testConfig, stubProcessor);
+    const firstDelete = vi.fn().mockResolvedValue(undefined);
+    const secondDelete = vi.fn().mockResolvedValue(undefined);
+    let releaseFirst!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstExecution = vi.fn().mockImplementation(() => firstBlocked);
+    const secondExecution = vi.fn().mockResolvedValue(undefined);
+    for (const [processor, safeDelete, execution] of [
+      [first, firstDelete, firstExecution],
+      [second, secondDelete, secondExecution],
+    ] as const) {
+      Object.assign(processor as unknown as Record<string, unknown>, {
+        collection,
+        heartbeatStore: new InMemoryHeartbeatStore(),
+        safeDeleteMessage: safeDelete,
+        processMultiTurn: execution,
+      });
+    }
+    const heartbeat: VisibilityHeartbeat = {
+      stop: () => "pop",
+      get popReceipt() { return "pop"; },
+    };
+    const message = {
+      messageId: "message",
+      popReceipt: "pop",
+      messageText: "",
+    } as any;
+    const log = vi.fn().mockResolvedValue(undefined);
+
+    const firstRun = (first as any).handleRequest(
+      structuredClone(queuedSnapshot),
+      message,
+      heartbeat,
+      log,
+      { runId: "run-duplicate" },
+    );
+    while (firstExecution.mock.calls.length === 0) {
+      await Promise.resolve();
+    }
+    await (second as any).handleRequest(
+      structuredClone(queuedSnapshot),
+      message,
+      heartbeat,
+      log,
+      { runId: "run-duplicate" },
+    );
+    releaseFirst();
+    await firstRun;
+
+    expect(firstExecution).toHaveBeenCalledOnce();
+    expect(secondExecution).not.toHaveBeenCalled();
+    expect(secondDelete).toHaveBeenCalledOnce();
+    expect(state.run.status).toBe("processing");
   });
 });
 

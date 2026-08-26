@@ -79,6 +79,22 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/configuration",
+  tags: ["System"],
+  summary: "Runtime API configuration",
+  response: z.object({
+    strictAgentCapabilities: z.boolean(),
+  }),
+  handler: async (_req, res) => {
+    res.json({
+      strictAgentCapabilities:
+        process.env.SCOPE_STRICT_AGENT_CAPABILITIES === "true",
+    });
+  },
+});
+
 // Version endpoint
 apiRoute(ctx.app, ctx.registry, {
   method: "get",

@@ -668,7 +668,7 @@ export interface AgentVersion {
   gitCommit: string;
   buildTime: string;
   imageTag: string;
-  queueName: string;
+  queueName?: string;
   status: "active" | "retired";
   createdAt: string;
 }
@@ -679,6 +679,10 @@ export interface AgentCapabilities {
   supportsMcpServers?: boolean;
   supportsSkills?: boolean;
   supportsExtensions?: boolean;
+}
+
+export interface ApiConfiguration {
+  strictAgentCapabilities: boolean;
 }
 
 // Coding Agent types
@@ -703,7 +707,8 @@ export function isRoutableAgent(agent: CodingAgent): boolean {
     agent.available === true &&
     (agent.versions ?? []).some(
       (version) =>
-        version.status === "active" && version.queueName.trim().length > 0,
+        version.status === "active" &&
+        Boolean(version.queueName?.trim()),
     )
   );
 }

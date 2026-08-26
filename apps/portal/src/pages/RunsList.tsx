@@ -8,6 +8,8 @@ import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Appl
 import { FaLinux } from "react-icons/fa";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { isAgentCapabilityEnabled } from "@/lib/agent-capabilities";
+import { useStrictAgentCapabilities } from "@/hooks/useApiConfiguration";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -446,6 +448,7 @@ function NumericComparatorRow({
 }
 
 export function RunsList() {
+  const strictAgentCapabilities = useStrictAgentCapabilities();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const detailOutlet = useOutlet();
@@ -1130,6 +1133,10 @@ export function RunsList() {
     () => availableAgents.find((a) => a._id === effectiveWorker),
     [availableAgents, effectiveWorker],
   );
+  const resubmitSupportsReasoningEffort = isAgentCapabilityEnabled(
+    effectiveAgent?.capabilities?.supportsReasoningEffort,
+    strictAgentCapabilities,
+  );
   const { capabilitiesMap: resubmitCapabilitiesMap, activeModelIds: resubmitActiveModelIds } = useModelCapabilities(effectiveWorker || undefined);
   const availableModels = resubmitActiveModelIds.length > 0
     ? resubmitActiveModelIds
@@ -1137,7 +1144,8 @@ export function RunsList() {
   const effectiveModel = activeProfile
     ? activeProfile.version.model
     : (resubmitOverrides.model ?? selectedRunsSummary.model);
-  const resubmitSupportedEfforts = effectiveModel
+  const resubmitSupportedEfforts = effectiveModel &&
+      resubmitSupportsReasoningEffort
     ? (resubmitCapabilitiesMap.get(effectiveModel)?.reasoningEffort ?? [])
     : [];
 
@@ -2730,12 +2738,18 @@ export function RunsList() {
                     const next = { ...prev };
                     if (v === "__keep__") { delete next.workerType; } else { next.workerType = v; }
                     delete next.model;
-                    const targetAgent = v === "__keep__"
-                      ? undefined
-                      : availableAgents.find((agent) => agent._id === v);
+                    const effectiveWorkerType = v === "__keep__"
+                      ? selectedRunsSummary.worker
+                      : v;
+                    const supportsExtensions = isAgentCapabilityEnabled(
+                      availableAgents.find(
+                        (agent) => agent._id === effectiveWorkerType,
+                      )?.capabilities?.supportsExtensions,
+                      strictAgentCapabilities,
+                    );
                     if (v === "__keep__") {
                       delete next.extensions;
-                    } else if (targetAgent?.capabilities?.supportsExtensions !== true) {
+                    } else if (!supportsExtensions) {
                       next.extensions = null;
                     } else {
                       delete next.extensions;
@@ -2866,7 +2880,10 @@ export function RunsList() {
               </div>
 
               {/* MCP servers */}
-              {effectiveAgent?.capabilities?.supportsMcpServers === true && (activeProfile ? (
+              {isAgentCapabilityEnabled(
+                effectiveAgent?.capabilities?.supportsMcpServers,
+                strictAgentCapabilities,
+              ) && (activeProfile ? (
               <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
                 <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
                   <Lock className="h-3 w-3 text-muted-foreground" />MCP Servers
@@ -2942,7 +2959,10 @@ export function RunsList() {
               ))}
 
               {/* Skills */}
-              {effectiveAgent?.capabilities?.supportsSkills === true && (activeProfile ? (
+              {isAgentCapabilityEnabled(
+                effectiveAgent?.capabilities?.supportsSkills,
+                strictAgentCapabilities,
+              ) && (activeProfile ? (
               <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
                 <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
                   <Lock className="h-3 w-3 text-muted-foreground" />Skills
@@ -3026,7 +3046,10 @@ export function RunsList() {
 
               {/* Extensions */}
               {activeProfile ? (
-                effectiveAgent?.capabilities?.supportsExtensions === true && (
+                isAgentCapabilityEnabled(
+                  effectiveAgent?.capabilities?.supportsExtensions,
+                  strictAgentCapabilities,
+                ) && (
                 <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
                   <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
                     <Lock className="h-3 w-3 text-muted-foreground" />Extensions
@@ -3037,7 +3060,10 @@ export function RunsList() {
                 </div>
                 )
               ) : (
-              effectiveAgent?.capabilities?.supportsExtensions === true && (
+              isAgentCapabilityEnabled(
+                effectiveAgent?.capabilities?.supportsExtensions,
+                strictAgentCapabilities,
+              ) && (
               <div className="flex items-start gap-4">
                 <Label className="text-sm w-32 shrink-0 pt-2">Extensions</Label>
                 <div className="flex-1 space-y-1.5">

@@ -351,9 +351,9 @@ registry target and dispatches to its registered `queueName`.
 AgentVersion.queueName  →  Azure Storage Queue  →  Worker pods (0→N via KEDA)
 ```
 
-Queue names are not derived from agent IDs. Versions may share a queue, and
-agents sharing the same `(queueName, agentVersion)` are deduplicated by the
-scheduler.
+Queue names are not derived from agent IDs. Versions may share a queue. The
+scheduler budgets each physical queue once, then chooses exact worker/version
+routes in global priority order with round-robin fairness at equal priority.
 
 ### Run submission flow
 
@@ -367,13 +367,19 @@ scheduler.
    mismatches warn by default or fail when
    `SCOPE_STRICT_AGENT_CAPABILITIES=true`
 5. Scheduler dynamically discovers the persisted worker/version pair and
-   dispatches it to `AgentVersion.queueName`
+   dispatches `{ requestId, runId, workerType, agentVersion }` to
+   `AgentVersion.queueName`
 6. `agentVersion` and `model` are persisted on the `RequestDocument`
 
 Create, profile fan-out, resubmit, retry, and resume all use the shared target
 resolver. There is no platform worker allowlist. Portal and CLI discovery use
 registry names and capabilities; historical run filters union registry entries
 with stored run facets so removed workers remain discoverable.
+
+The Portal reads `GET /api/v1/configuration` to determine whether capability
+metadata is strict. In the default compatibility mode, missing/false capability
+flags remain advisory and do not hide controls or clear selections. Strict mode
+aligns those controls with API rejection behavior.
 
 When a codebase is selected, the API resolves the submitted spec (`codebaseRevisionId`, `{slug}@r{N}`, or bare `{slug}`) before enqueueing. Bare archive slugs resolve to the latest existing revision; bare Git slugs resolve the default branch at submit time and create a new immutable revision. The resolved revision UUID is stored as `RequestDocument.codebaseRevisionId`, and workers seed the workspace from that revision after setup and before skills extraction.
 

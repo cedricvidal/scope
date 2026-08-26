@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QueueClient } from "@azure/storage-queue";
 import type { Collection } from "mongodb";
 import type { CodingAgentDocument, RequestDocument } from "shared";
+import { AgentTargetRegistry } from "./agent-target-registry.js";
 import { RequestScheduler } from "./request-scheduler.js";
 
 function makeQueueClient(approximateMessagesCount = 0) {
@@ -39,9 +40,7 @@ function makeAgent(
       buildTime: "20260825T000000Z",
       imageTag: `${version}-build`,
       queueName:
-        options.queueName === undefined
-          ? `custom-${id}-queue`
-          : options.queueName,
+        options.queueName === undefined ? "shared-queue" : options.queueName,
       status: options.status ?? "active",
       createdAt: new Date(),
     }],
@@ -52,8 +51,10 @@ function makeAgent(
 
 function makeRequest(
   id: string,
-  workerType = "agent-a",
-  agentVersion = "agent-a-1.0.0",
+  workerType: string,
+  agentVersion: string,
+  priority = 0,
+  createdAt = new Date(),
 ): RequestDocument {
   return {
     _id: id,
@@ -61,40 +62,120 @@ function makeRequest(
     scenario: { task: "test", criteria: ["c1"] },
     workerType,
     agentVersion,
-    createdAt: new Date(),
-    priority: 0,
+    createdAt,
+    priority,
     run: { _id: `run-${id}`, attemptNumber: 1, status: "pending" },
   };
 }
 
-function makeRequestCollection(
-  pending: RequestDocument[],
-  claimed: RequestDocument[] = pending,
-) {
-  const remaining = [...claimed];
-  const cursor = {
+function matchesRoute(
+  request: RequestDocument,
+  route: Record<string, unknown>,
+): boolean {
+  return request.workerType === route.workerType &&
+    request.agentVersion === route.agentVersion;
+}
+
+function applyUpdate(
+  request: RequestDocument,
+  update: {
+    $set?: Record<string, unknown>;
+    $unset?: Record<string, unknown>;
+  },
+): void {
+  for (const [path, value] of Object.entries(update.$set ?? {})) {
+    if (path.startsWith("run.")) {
+      (request.run as unknown as Record<string, unknown>)[path.slice(4)] = value;
+    } else {
+      (request as unknown as Record<string, unknown>)[path] = value;
+    }
+  }
+  for (const path of Object.keys(update.$unset ?? {})) {
+    if (path.startsWith("run.")) {
+      delete (request.run as unknown as Record<string, unknown>)[path.slice(4)];
+    } else {
+      delete (request as unknown as Record<string, unknown>)[path];
+    }
+  }
+}
+
+function makeRequestCollection(requests: RequestDocument[]) {
+  const findCursor = {
     limit: vi.fn().mockReturnThis(),
-    toArray: vi.fn().mockResolvedValue(pending),
+    toArray: vi.fn().mockImplementation(async () =>
+      requests.filter((request) => request.run?.status === "pending")
+    ),
   };
-  return {
-    find: vi.fn().mockReturnValue(cursor),
-    findOneAndUpdate: vi.fn().mockImplementation(async (filter: {
-      workerType: string | { $in: string[] };
-      agentVersion: string;
-    }) => {
-      const workerTypes =
-        typeof filter.workerType === "string"
-          ? [filter.workerType]
-          : filter.workerType.$in;
-      const index = remaining.findIndex(
-        (request) =>
-          workerTypes.includes(request.workerType) &&
-          request.agentVersion === filter.agentVersion,
+  const collection = {
+    find: vi.fn().mockReturnValue(findCursor),
+    findOne: vi.fn().mockImplementation(async (
+      filter: Record<string, unknown>,
+      options?: { sort?: Record<string, number> },
+    ) => {
+      if (typeof filter._id === "string") {
+        return requests.find((request) =>
+          request._id === filter._id &&
+          request.run?.status === filter["run.status"] &&
+          (request.run as unknown as Record<string, unknown>)?.dispatchToken ===
+            filter["run.dispatchToken"]
+        ) ?? null;
+      }
+      const routes = (filter.$or as Record<string, unknown>[] | undefined) ?? [];
+      const candidates = requests.filter((request) =>
+        request.run?.status === "pending" &&
+        routes.some((route) => matchesRoute(request, route))
       );
-      if (index === -1) return null;
-      return remaining.splice(index, 1)[0];
+      if (options?.sort?.priority === -1) {
+        candidates.sort((a, b) =>
+          (b.priority ?? 0) - (a.priority ?? 0) ||
+          a.createdAt.getTime() - b.createdAt.getTime()
+        );
+      }
+      return candidates[0] ?? null;
     }),
-  } as unknown as Collection<RequestDocument>;
+    findOneAndUpdate: vi.fn().mockImplementation(async (
+      filter: Record<string, unknown>,
+      update: { $set?: Record<string, unknown>; $unset?: Record<string, unknown> },
+    ) => {
+      const request = requests
+        .filter((candidate) =>
+          candidate.run?.status === "pending" &&
+          matchesRoute(candidate, filter) &&
+          (
+            typeof filter.priority === "number"
+              ? candidate.priority === filter.priority
+              : candidate.priority === undefined
+          )
+        )
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
+      if (!request) return null;
+      const before = structuredClone(request);
+      applyUpdate(request, update);
+      return before;
+    }),
+    updateOne: vi.fn().mockImplementation(async (
+      filter: Record<string, unknown>,
+      update: { $set?: Record<string, unknown>; $unset?: Record<string, unknown> },
+    ) => {
+      const request = requests.find((candidate) =>
+        candidate._id === filter._id &&
+        candidate.run?._id === filter["run._id"] &&
+        (
+          filter["run.status"] === undefined ||
+          candidate.run?.status === filter["run.status"]
+        ) &&
+        (
+          filter["run.dispatchToken"] === undefined ||
+          (candidate.run as unknown as Record<string, unknown>)?.dispatchToken ===
+            filter["run.dispatchToken"]
+        )
+      );
+      if (!request) return { matchedCount: 0, modifiedCount: 0 };
+      applyUpdate(request, update);
+      return { matchedCount: 1, modifiedCount: 1 };
+    }),
+  };
+  return collection as unknown as Collection<RequestDocument>;
 }
 
 function makeAgentCollection(getAgents: () => CodingAgentDocument[]) {
@@ -109,6 +190,7 @@ function schedulerHarness(
   requests: RequestDocument[],
   getAgents: () => CodingAgentDocument[],
   queueDepth = 0,
+  targetDepth = 3,
 ) {
   const collection = makeRequestCollection(requests);
   const queues = new Map<string, ReturnType<typeof makeQueueClient>>();
@@ -117,16 +199,14 @@ function schedulerHarness(
     queues.set(queueName, queue);
     return queue as unknown as QueueClient;
   });
-  const scheduler = new RequestScheduler(
-    collection,
+  const registry = new AgentTargetRegistry(
     makeAgentCollection(getAgents),
     factory,
-    {
-      registryRefreshIntervalMs: 1_000,
-      targetQueueDepth: 3,
-    },
+    targetDepth,
+    0,
   );
-  return { scheduler, collection, queues, factory };
+  const scheduler = new RequestScheduler(collection, registry);
+  return { scheduler, collection, queues, factory, registry };
 }
 
 async function dispatch(scheduler: RequestScheduler): Promise<void> {
@@ -135,175 +215,206 @@ async function dispatch(scheduler: RequestScheduler): Promise<void> {
   ).dispatch();
 }
 
-describe("RequestScheduler registry discovery", () => {
+function decodeMessages(queue: ReturnType<typeof makeQueueClient>) {
+  return queue.sendMessage.mock.calls.map(([message]) =>
+    JSON.parse(Buffer.from(message, "base64").toString("utf8")) as {
+      requestId: string;
+      runId: string;
+      workerType: string;
+      agentVersion: string;
+    }
+  );
+}
+
+describe("RequestScheduler dynamic routing", () => {
   afterEach(() => {
+    delete process.env.SCOPE_DISPATCH_ROLLBACK_DELAY_MS;
     vi.restoreAllMocks();
   });
 
-  it("routes by the registered queue name and exact agent version", async () => {
-    const request = makeRequest("r1");
-    const { scheduler, collection, queues, factory } = schedulerHarness(
+  it("uses the authoritative queue and emits exact target affinity", async () => {
+    const request = makeRequest("r1", "agent-a", "agent-a-1.0.0");
+    const { scheduler, queues, factory } = schedulerHarness(
       [request],
-      () => [makeAgent("agent-a", { queueName: "not-derived-from-id" })],
+      () => [makeAgent("agent-a", { queueName: "not-derived" })],
     );
 
     await dispatch(scheduler);
 
-    expect(factory).toHaveBeenCalledWith("not-derived-from-id");
-    expect(queues.get("not-derived-from-id")?.sendMessage).toHaveBeenCalledOnce();
-    expect(collection.findOneAndUpdate).toHaveBeenCalledWith(
-      {
-        "run.status": "pending",
-        workerType: "agent-a",
-        agentVersion: "agent-a-1.0.0",
-        deletedAt: { $exists: false },
-      },
-      expect.any(Object),
-      expect.any(Object),
-    );
+    expect(factory).toHaveBeenCalledWith("not-derived");
+    expect(decodeMessages(queues.get("not-derived")!)).toEqual([{
+      requestId: "r1",
+      runId: "run-r1",
+      workerType: "agent-a",
+      agentVersion: "agent-a-1.0.0",
+    }]);
   });
 
-  it("discovers newly registered targets without restart", async () => {
-    let agents = [makeAgent("agent-a")];
+  it("budgets and fills a shared physical queue only once", async () => {
     const requests = [
-      makeRequest("r1"),
+      makeRequest("r1", "agent-a", "v1"),
+      makeRequest("r2", "agent-b", "v2"),
+    ];
+    const { scheduler, queues, factory } = schedulerHarness(
+      requests,
+      () => [
+        makeAgent("agent-a", { version: "v1" }),
+        makeAgent("agent-b", { version: "v2" }),
+      ],
+      2,
+      3,
+    );
+
+    await dispatch(scheduler);
+
+    const queue = queues.get("shared-queue")!;
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(queue.getProperties).toHaveBeenCalledTimes(1);
+    expect(queue.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("claims the highest priority globally across routes", async () => {
+    const requests = [
+      makeRequest("low", "agent-a", "v1", 1, new Date("2026-01-01")),
+      makeRequest("high", "agent-b", "v2", 10, new Date("2026-01-02")),
+    ];
+    const { scheduler, queues } = schedulerHarness(
+      requests,
+      () => [
+        makeAgent("agent-a", { version: "v1" }),
+        makeAgent("agent-b", { version: "v2" }),
+      ],
+      0,
+      1,
+    );
+
+    await dispatch(scheduler);
+
+    expect(decodeMessages(queues.get("shared-queue")!)[0].requestId).toBe("high");
+  });
+
+  it("round-robins routes within equal priority", async () => {
+    const requests = [
+      makeRequest("a1", "agent-a", "v1", 5),
+      makeRequest("a2", "agent-a", "v1", 5),
+      makeRequest("b1", "agent-b", "v2", 5),
+      makeRequest("b2", "agent-b", "v2", 5),
+    ];
+    const { scheduler, queues } = schedulerHarness(
+      requests,
+      () => [
+        makeAgent("agent-a", { version: "v1" }),
+        makeAgent("agent-b", { version: "v2" }),
+      ],
+      0,
+      4,
+    );
+
+    await dispatch(scheduler);
+
+    expect(
+      decodeMessages(queues.get("shared-queue")!).map(
+        (message) => message.workerType,
+      ),
+    ).toEqual(["agent-a", "agent-b", "agent-a", "agent-b"]);
+  });
+
+  it("discovers new registry routes without restarting", async () => {
+    let agents = [makeAgent("agent-a", { queueName: "queue-a" })];
+    const requests = [
+      makeRequest("r1", "agent-a", "agent-a-1.0.0"),
       makeRequest("r2", "agent-b", "agent-b-1.0.0"),
     ];
     const { scheduler, factory } = schedulerHarness(requests, () => agents);
 
     await dispatch(scheduler);
     agents = [...agents, makeAgent("agent-b", { queueName: "queue-b" })];
-    await new Promise((resolve) => setTimeout(resolve, 1_010));
     await dispatch(scheduler);
 
     expect(factory).toHaveBeenCalledWith("queue-b");
   });
 
-  it("fails closed when a registry refresh fails", async () => {
+  it("fails closed when registry refresh fails", async () => {
     let failRefresh = false;
     const getAgents = () => {
       if (failRefresh) throw new Error("registry unavailable");
       return [makeAgent("agent-a")];
     };
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { scheduler, queues } = schedulerHarness(
-      [makeRequest("r1")],
-      getAgents,
-    );
+    const requests = [makeRequest("r1", "agent-a", "agent-a-1.0.0")];
+    const { scheduler, queues } = schedulerHarness(requests, getAgents);
 
-    await (
-      scheduler as unknown as { refreshRegistry(): Promise<void> }
-    ).refreshRegistry();
+    await dispatch(scheduler);
+    requests.push(makeRequest("r2", "agent-a", "agent-a-1.0.0"));
     failRefresh = true;
-    (
-      scheduler as unknown as { lastRegistryRefreshAt: number }
-    ).lastRegistryRefreshAt = 0;
     await dispatch(scheduler);
 
-    expect(queues.get("custom-agent-a-queue")?.sendMessage).not.toHaveBeenCalled();
+    expect(queues.get("shared-queue")?.sendMessage).toHaveBeenCalledTimes(1);
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining("dispatch is paused"),
       expect.any(Error),
     );
   });
 
-  it("deduplicates agents sharing the same queue and version", async () => {
-    const agents = [
-      makeAgent("agent-a", { version: "shared-1", queueName: "shared-queue" }),
-      makeAgent("agent-b", { version: "shared-1", queueName: "shared-queue" }),
-    ];
-    const request = makeRequest("r1", "agent-a", "shared-1");
-    const { scheduler, collection, factory } = schedulerHarness(
+  it("keeps an unversioned request pending with an actionable warning", async () => {
+    const request = makeRequest("r1", "agent-a", "agent-a-1.0.0");
+    delete request.agentVersion;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { scheduler, queues } = schedulerHarness(
       [request],
-      () => agents,
+      () => [makeAgent("agent-a")],
     );
 
     await dispatch(scheduler);
 
-    expect(factory).toHaveBeenCalledTimes(1);
-    expect(collection.findOneAndUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workerType: { $in: ["agent-a", "agent-b"] },
-        agentVersion: "shared-1",
-      }),
-      expect.any(Object),
-      expect.any(Object),
+    expect(queues.get("shared-queue")?.sendMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("does not specify agentVersion"),
     );
   });
 
   it.each([
-    ["missing agent", [], makeRequest("r1")],
-    [
-      "unavailable agent",
-      [makeAgent("agent-a", { available: false })],
-      makeRequest("r1"),
-    ],
-    [
-      "deleted agent",
-      [makeAgent("agent-a", { deletedAt: new Date() })],
-      makeRequest("r1"),
-    ],
-    [
-      "retired version",
-      [makeAgent("agent-a", { status: "retired" })],
-      makeRequest("r1"),
-    ],
-    [
-      "empty queue",
-      [makeAgent("agent-a", { queueName: " " })],
-      makeRequest("r1"),
-    ],
-  ])("keeps pending requests with %s and logs why", async (
-    _name,
-    agents,
-    request,
-  ) => {
+    ["unavailable", makeAgent("agent-a", { available: false })],
+    ["deleted", makeAgent("agent-a", { deletedAt: new Date() })],
+    ["retired", makeAgent("agent-a", { status: "retired" })],
+    ["blank queue", makeAgent("agent-a", { queueName: " " })],
+  ])("does not route an %s registry target", async (_name, agent) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { scheduler, collection, factory } = schedulerHarness(
-      [request],
-      () => agents as CodingAgentDocument[],
+    const { scheduler, factory } = schedulerHarness(
+      [makeRequest("r1", "agent-a", "agent-a-1.0.0")],
+      () => [agent],
     );
 
     await dispatch(scheduler);
 
-    expect(collection.findOneAndUpdate).not.toHaveBeenCalled();
     expect(factory).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("cannot be routed"),
     );
   });
 
-  it("does not claim a pending request without agentVersion", async () => {
-    const request = makeRequest("r1", "agent-a");
-    delete request.agentVersion;
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { scheduler, collection, queues } = schedulerHarness(
+  it("does not retry send failure and conditionally rolls the claim back", async () => {
+    process.env.SCOPE_DISPATCH_ROLLBACK_DELAY_MS = "0";
+    const request = makeRequest("r1", "agent-a", "agent-a-1.0.0");
+    const { scheduler, queues } = schedulerHarness(
       [request],
       () => [makeAgent("agent-a")],
+      0,
+      1,
     );
+    const registryTargets = await (
+      scheduler as unknown as { targets: AgentTargetRegistry }
+    ).targets.getTargets();
+    const sendMessage = queues.get("shared-queue")!.sendMessage;
+    sendMessage.mockRejectedValue(new Error("queue unavailable"));
 
     await dispatch(scheduler);
 
-    expect(collection.findOneAndUpdate).toHaveBeenCalled();
+    expect(registryTargets).toHaveLength(1);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(request.run?.status).toBe("pending");
     expect(
-      [...queues.values()].some(
-        (queue) => queue.sendMessage.mock.calls.length > 0,
-      ),
-    ).toBe(false);
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("does not specify agentVersion"),
-    );
-  });
-
-  it("respects the configured target queue depth", async () => {
-    const { scheduler, collection } = schedulerHarness(
-      [makeRequest("r1")],
-      () => [makeAgent("agent-a")],
-      3,
-    );
-
-    await dispatch(scheduler);
-
-    expect(collection.findOneAndUpdate).not.toHaveBeenCalled();
+      (request.run as unknown as Record<string, unknown>).dispatchToken,
+    ).toBeUndefined();
   });
 });

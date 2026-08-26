@@ -22,6 +22,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { isAgentCapabilityEnabled } from "@/lib/agent-capabilities";
+import { useStrictAgentCapabilities } from "@/hooks/useApiConfiguration";
 import {
   isRoutableAgent,
   type CodingAgent,
@@ -53,6 +55,7 @@ export function ProfileCreateForm({
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
+  const strictAgentCapabilities = useStrictAgentCapabilities();
 
   const { data: agents = [] } = useQuery({
     queryKey: ["agents"],
@@ -69,19 +72,29 @@ export function ProfileCreateForm({
   const supportedModels = activeModelIds.length > 0
     ? activeModelIds
     : (selectedAgent?.supportedModels ?? []);
-  const supportsMcpServers =
-    selectedAgent?.capabilities?.supportsMcpServers === true;
-  const supportsSkills = selectedAgent?.capabilities?.supportsSkills === true;
-  const supportsExtensions =
-    selectedAgent?.capabilities?.supportsExtensions === true;
+  const supportsMcpServers = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsMcpServers,
+    strictAgentCapabilities,
+  );
+  const supportsSkills = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsSkills,
+    strictAgentCapabilities,
+  );
+  const supportsExtensions = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsExtensions,
+    strictAgentCapabilities,
+  );
+  const supportsReasoningEffort = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsReasoningEffort,
+    strictAgentCapabilities,
+  );
   const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
   const { supportedEfforts } = useReasoningEffort({
     model,
     capabilitiesMap,
     value: reasoningEffort,
     onChange: onEffortChange,
-    agentSupportsEffort:
-      selectedAgent?.capabilities?.supportsReasoningEffort === true,
+    agentSupportsEffort: supportsReasoningEffort,
   });
 
   const eligibleAgents = agents.filter(

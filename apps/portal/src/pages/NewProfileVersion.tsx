@@ -17,6 +17,8 @@ import { useModelCapabilities, useReasoningEffort, ReasoningEffortSelect, ModelS
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
+import { isAgentCapabilityEnabled } from "@/lib/agent-capabilities";
+import { useStrictAgentCapabilities } from "@/hooks/useApiConfiguration";
 
 export function NewProfileVersion() {
   const { profileId } = useParams<{ profileId: string }>();
@@ -30,6 +32,7 @@ export function NewProfileVersion() {
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
+  const strictAgentCapabilities = useStrictAgentCapabilities();
 
   // Fetch profile to pre-fill from latest version
   const { data: profile, isLoading: profileLoading } = useQuery({
@@ -66,11 +69,22 @@ export function NewProfileVersion() {
   // Find selected agent for model/version lists
   const availableAgents = agents.filter(isRoutableAgent);
   const selectedAgent = availableAgents.find((a: CodingAgent) => a._id === worker);
-  const supportsMcpServers =
-    selectedAgent?.capabilities?.supportsMcpServers === true;
-  const supportsSkills = selectedAgent?.capabilities?.supportsSkills === true;
-  const supportsExtensions =
-    selectedAgent?.capabilities?.supportsExtensions === true;
+  const supportsMcpServers = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsMcpServers,
+    strictAgentCapabilities,
+  );
+  const supportsSkills = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsSkills,
+    strictAgentCapabilities,
+  );
+  const supportsExtensions = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsExtensions,
+    strictAgentCapabilities,
+  );
+  const supportsReasoningEffort = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsReasoningEffort,
+    strictAgentCapabilities,
+  );
 
   // Model capabilities and effort management
   const { capabilitiesMap, activeModelIds } = useModelCapabilities(worker || undefined);
@@ -83,7 +97,7 @@ export function NewProfileVersion() {
     capabilitiesMap,
     value: reasoningEffort,
     onChange: onEffortChange,
-    agentSupportsEffort: selectedAgent?.capabilities?.supportsReasoningEffort,
+    agentSupportsEffort: supportsReasoningEffort,
   });
 
   // Clear optional features that the selected worker does not support.

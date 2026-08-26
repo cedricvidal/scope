@@ -100,16 +100,21 @@ The scheduler refreshes the agent registry while running, then dispatches every
 1. Load non-deleted agents and resolve every active version through the shared
    agent target resolver. The agent must have `available === true`, and the
    version must have a non-empty `queueName`.
-2. Group targets by the exact `(queueName, agentVersion)` pair. Multiple agent
-   IDs may share a target and are queried together; no worker allowlist is used.
-3. For each target, read Azure queue depth via `getProperties().approximateMessagesCount`
+2. Group exact `(workerType, agentVersion)` routes once per physical
+   `queueName`; no worker allowlist is used.
+3. For each physical queue, read Azure queue depth once via
+   `getProperties().approximateMessagesCount`
 4. Compute available slots: `targetQueueDepth − currentDepth`
-5. For each slot, `findOneAndUpdate` the highest-priority pending request:
-   - Filter: `run.status: "pending"`, matching `workerType` and exact
-     `agentVersion`, no `deletedAt`
-   - Sort: `priority: -1, createdAt: 1`
-   - Update: set `run.status: "queued"`
-6. Send `{ requestId, runId }` to the registered queue (base64-encoded JSON).
+5. For each slot, find the highest priority across all routes on that queue,
+   round-robin routes at that priority, and atomically claim the oldest match.
+   The claim sets `run.status: "queued"` plus a unique dispatch token.
+6. Send `{ requestId, runId, workerType, agentVersion }` to the registered
+   queue (base64-encoded JSON).
+7. Clear the dispatch token after successful delivery. Queue sends are attempted
+   exactly once because ambiguous `sendMessage` failures are not idempotent. On
+   failure, wait briefly for a possibly delivered message to claim the run,
+   then conditionally roll it back to `pending` using the token, retry the
+   rollback, and verify that no matching queued claim remains.
 
 Registry refreshes do not require a scheduler restart. A refresh failure pauses
 dispatch until a successful refresh so stale targets cannot receive work.
@@ -123,9 +128,10 @@ Scheduler environment variables (set on the scheduler Deployment):
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
-| `SCHEDULER_TARGET_QUEUE_DEPTH` | 5 | Target depth for every discovered queue/version target |
+| `SCHEDULER_TARGET_QUEUE_DEPTH` | 5 | Target depth for every discovered physical queue |
 | `SCHEDULER_REGISTRY_REFRESH_INTERVAL_MS` | 30000 | How often to refresh agents and versions without restart |
 | `SCHEDULER_POLL_INTERVAL_MS` | 2000 | Polling interval in ms |
+| `SCOPE_DISPATCH_ROLLBACK_DELAY_MS` | 500 | Reconciliation delay before rolling back an ambiguous failed send |
 
 `AgentVersion.queueName` is authoritative. The scheduler never derives
 `queue-<workerType>` and has no platform worker allowlist.
@@ -150,7 +156,24 @@ a message ready when it finishes its current job.
 
 ## Worker Behavior
 
-Workers are unchanged except for one guard: after fetching a document from MongoDB, if `run.status === "paused"`, the worker deletes the queue message and moves on. This handles the race where a request was paused after being queued but before the worker picked it up.
+Before starting a visibility heartbeat or mutating a request, coding workers
+validate the queue message target, persisted `workerType`/`agentVersion`,
+`WORKER_NAME`, and exact runtime agent version. The runtime version comes from
+`SCOPE_AGENT_VERSION` when set, otherwise `WorkerProcessor.getAgentVersion()`.
+Messages with mismatched or partial affinity are deferred for a short randomized
+1–5 second handoff, not deleted, so a wrong shared-queue consumer cannot hide
+the work for minutes.
+Legacy messages without affinity fields are accepted only when the persisted
+request exactly matches the runtime. The mismatch defer interval is controlled
+by `SCOPE_TARGET_MISMATCH_DEFER_SECONDS`.
+
+After affinity validation, workers atomically claim the exact request/run from
+`queued` to `processing`. The claim is conditional on status, worker, and
+version and records a unique process owner. Duplicate deliveries therefore
+cannot execute concurrently, including after an ambiguous queue-send response.
+
+After affinity validation, a worker also checks whether `run.status ===
+"paused"`; paused work is discarded from the queue and remains held in MongoDB.
 
 ### Liveness Heartbeat & Redelivery
 

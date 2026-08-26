@@ -222,8 +222,15 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
 
     try {
       const decodedContent = Buffer.from(message.messageText, "base64").toString("utf-8");
-      payload = JSON.parse(decodedContent);
-      documentId = this.extractDocumentId(payload!);
+      const parsed: unknown = JSON.parse(decodedContent);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Queue message payload must be a JSON object");
+      }
+      payload = parsed as Record<string, unknown>;
+      documentId = this.extractDocumentId(payload);
+      if (!documentId || typeof documentId !== "string") {
+        throw new Error("Queue message payload does not contain a valid document ID");
+      }
 
       console.log(`[${this.workerName}] Processing document ${documentId}`);
 
@@ -232,6 +239,29 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
       if (!doc) {
         console.error(`[${this.workerName}] Document ${documentId} not found`);
         await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+        return;
+      }
+
+      if (!(await this.isMessageTargetMatch(payload, doc as TDocument))) {
+        const configuredMaxDeferSeconds = Number(
+          process.env.SCOPE_TARGET_MISMATCH_DEFER_SECONDS,
+        );
+        const maxDeferSeconds =
+          Number.isInteger(configuredMaxDeferSeconds) &&
+          configuredMaxDeferSeconds >= 1 &&
+          configuredMaxDeferSeconds <= 30
+            ? configuredMaxDeferSeconds
+            : 5;
+        const deferSeconds =
+          1 + Math.floor(Math.random() * maxDeferSeconds);
+        console.warn(
+          `[${this.workerName}] Queue target mismatch for document ${documentId}; deferring for ${deferSeconds}s`,
+        );
+        await this.safeDeferMessage(
+          message.messageId,
+          currentPopReceipt,
+          deferSeconds,
+        );
         return;
       }
 
@@ -400,6 +430,17 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
    */
   protected extractDocumentId(payload: Record<string, unknown>): string {
     return payload.requestId as string;
+  }
+
+  /**
+   * Validate that a message and persisted document belong to this runtime
+   * before starting a heartbeat or mutating the document.
+   */
+  protected async isMessageTargetMatch(
+    _payload: Record<string, unknown>,
+    _doc: TDocument,
+  ): Promise<boolean> {
+    return true;
   }
 
   /**

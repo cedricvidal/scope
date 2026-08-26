@@ -17,7 +17,16 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       },
       "AgentCapabilities": {
         "properties": {
+          "supportsExtensions": {
+            "type": "boolean",
+          },
+          "supportsMcpServers": {
+            "type": "boolean",
+          },
           "supportsReasoningEffort": {
+            "type": "boolean",
+          },
+          "supportsSkills": {
             "type": "boolean",
           },
         },
@@ -136,7 +145,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "gitCommit",
           "buildTime",
           "imageTag",
-          "queueName",
           "status",
           "createdAt",
         ],
@@ -2195,6 +2203,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "queueName": {
+            "minLength": 1,
             "type": "string",
           },
           "workerVersion": {
@@ -4412,6 +4421,34 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "summary": "Upload a codebase archive as a new revision",
         "tags": [
           "Codebases",
+        ],
+      },
+    },
+    "/api/v1/configuration": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "strictAgentCapabilities": {
+                      "type": "boolean",
+                    },
+                  },
+                  "required": [
+                    "strictAgentCapabilities",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Runtime API configuration",
+        "tags": [
+          "System",
         ],
       },
     },

@@ -50,6 +50,8 @@ import {
   type GateId,
 } from "@/lib/gates";
 import { toast } from "sonner";
+import { isAgentCapabilityEnabled } from "@/lib/agent-capabilities";
+import { useStrictAgentCapabilities } from "@/hooks/useApiConfiguration";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
@@ -184,6 +186,7 @@ function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disab
 export function SubmitRun() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const strictAgentCapabilities = useStrictAgentCapabilities();
 
   // Non-select gates visible in the authoring UI. Run/Deploy are hidden behind
   // feature flags until ready; gateDrafts still holds all gates so its shape is
@@ -283,11 +286,22 @@ export function SubmitRun() {
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
   const availableAgents = activeAgents.filter(isRoutableAgent);
   const selectedAgent = availableAgents.find((a: CodingAgent) => a._id === worker);
-  const supportsMcpServers =
-    selectedAgent?.capabilities?.supportsMcpServers === true;
-  const supportsSkills = selectedAgent?.capabilities?.supportsSkills === true;
-  const supportsExtensions =
-    selectedAgent?.capabilities?.supportsExtensions === true;
+  const supportsMcpServers = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsMcpServers,
+    strictAgentCapabilities,
+  );
+  const supportsSkills = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsSkills,
+    strictAgentCapabilities,
+  );
+  const supportsExtensions = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsExtensions,
+    strictAgentCapabilities,
+  );
+  const supportsReasoningEffort = isAgentCapabilityEnabled(
+    selectedAgent?.capabilities?.supportsReasoningEffort,
+    strictAgentCapabilities,
+  );
   const profileList = profiles as ProfileWithVersion[];
   const selectedBaseProfile = profileList.find((profile) => profile._id === selectedProfileId);
   const topProfiles = profileList.slice(0, 3);
@@ -346,7 +360,7 @@ export function SubmitRun() {
     capabilitiesMap: modelCapabilitiesMap,
     value: reasoningEffort,
     onChange: onEffortChange,
-    agentSupportsEffort: selectedAgent?.capabilities?.supportsReasoningEffort,
+    agentSupportsEffort: supportsReasoningEffort,
   });
 
   useEffect(() => {

@@ -43,6 +43,7 @@ describe("API Endpoints", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.SCOPE_STRICT_AGENT_CAPABILITIES;
     // Re-inject after clearAllMocks so the mock implementations are fresh
     mocks = createAllMockDependencies();
     _injectTestDependencies(mocks);
@@ -126,6 +127,18 @@ describe("API Endpoints", () => {
       expect(res.body).toHaveProperty("commit");
       expect(res.body).toHaveProperty("buildTime");
       expect(res.body).toHaveProperty("environment");
+    });
+
+    describe("GET /api/v1/configuration", () => {
+      it("exposes strict capability enforcement as a typed runtime flag", async () => {
+        let res = await request(app).get("/api/v1/configuration");
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ strictAgentCapabilities: false });
+
+        process.env.SCOPE_STRICT_AGENT_CAPABILITIES = "true";
+        res = await request(app).get("/api/v1/configuration");
+        expect(res.body).toEqual({ strictAgentCapabilities: true });
+      });
     });
   });
 

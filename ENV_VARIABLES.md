@@ -569,6 +569,27 @@ warnings by default and fail validation when this variable is exactly `true`.
 Agent existence, deletion, `available === true`, active-version, and non-empty
 `AgentVersion.queueName` checks are always enforced.
 
+The Portal reads this policy from `GET /api/v1/configuration`. In compatibility
+mode, capability metadata remains advisory in the UI; strict mode disables
+unsupported controls and clears incompatible selections.
+
+### SCOPE_AGENT_VERSION
+**Default:** unset (uses `WorkerProcessor.getAgentVersion()`)
+**Type:** string
+
+Overrides the coding worker runtime version used to validate queue-message
+affinity. It must exactly match the request and message `agentVersion`.
+
+### SCOPE_TARGET_MISMATCH_DEFER_SECONDS
+**Default:** `5`
+**Type:** integer (seconds, range 1–30)
+
+Maximum randomized visibility delay applied when a coding worker receives a
+queue message whose worker or version does not match the message, persisted
+request, and runtime. The actual delay is uniformly selected from one second
+through this value. The short handoff avoids globally hiding shared-queue work
+while giving the intended worker a prompt chance to consume it.
+
 ### SCHEDULER_POLL_INTERVAL_MS
 **Default:** `2000`
 **Type:** integer (milliseconds)
@@ -587,8 +608,18 @@ scheduler. A failed refresh pauses dispatch until the next successful refresh.
 **Default:** `5`
 **Type:** positive integer
 
-Maximum approximate Azure Queue depth maintained for each discovered
-`(AgentVersion.queueName, agentVersion)` target.
+Maximum approximate Azure Queue depth maintained for each discovered physical
+`AgentVersion.queueName`. All versions sharing that queue use one depth budget.
+
+### SCOPE_DISPATCH_ROLLBACK_DELAY_MS
+**Default:** `500`
+**Type:** integer (milliseconds, range 0–10000)
+
+Delay before the scheduler conditionally rolls a failed queue send back from
+`queued` to `pending`. Azure Queue sends are attempted once, never blindly
+retried. The delay lets a message that was delivered despite a response-loss
+claim the run first; the worker's atomic queued-to-processing transition
+prevents duplicate deliveries from executing concurrently.
 
 ### SCHEDULER_PP_POLL_INTERVAL_MS
 **Default:** `30000`

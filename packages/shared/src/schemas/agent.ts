@@ -23,7 +23,7 @@ export const AgentVersionSchema = z
     gitCommit: z.string(),
     buildTime: z.string(),
     imageTag: z.string(),
-    queueName: z.string().trim().min(1),
+    queueName: z.string().optional(),
     status: z.enum(["active", "retired"]),
     createdAt: z.coerce.date(),
   })

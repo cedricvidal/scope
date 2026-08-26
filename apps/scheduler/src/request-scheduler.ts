@@ -1,63 +1,36 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { QueueClient } from "@azure/storage-queue";
+import { randomUUID } from "node:crypto";
 import type { Collection } from "mongodb";
 import {
-  resolveAgentTarget,
-  type CodingAgentDocument,
+  withRetry,
+  type QueueMessagePayload,
   type RequestDocument,
 } from "shared";
 import { trackMetric } from "telemetry";
-
-export interface RegistryTarget {
-  agentVersion: string;
-  queueName: string;
-  workerTypes: string[];
-  queueClient: QueueClient;
-  targetQueueDepth: number;
-}
-
-export interface RequestSchedulerOptions {
-  pollIntervalMs?: number;
-  registryRefreshIntervalMs?: number;
-  targetQueueDepth?: number;
-  invalidTargetScanLimit?: number;
-}
-
-export type QueueClientFactory = (queueName: string) => QueueClient;
+import type {
+  WorkerRoute,
+  WorkerTarget,
+  WorkerTargetProvider,
+} from "./agent-target-registry.js";
 
 /**
- * Dispatches pending requests to queues discovered from the agent registry.
- *
- * AgentVersion.queueName is the sole queue-routing source. Active targets are
- * refreshed while the process is running and deduplicated by queue/version.
+ * Dispatches pending requests in global priority order while enforcing one
+ * depth budget per physical queue.
  */
 export class RequestScheduler {
   private interval: ReturnType<typeof setInterval> | null = null;
   private dispatching = false;
-  private lastRegistryRefreshAt = 0;
-  private targets: RegistryTarget[] = [];
-  private agents = new Map<string, CodingAgentDocument>();
-  private readonly queueClients = new Map<string, QueueClient>();
+  private readonly nextRouteIndex = new Map<string, number>();
   private readonly invalidTargetReasons = new Map<string, string>();
-  private readonly pollIntervalMs: number;
-  private readonly registryRefreshIntervalMs: number;
-  private readonly targetQueueDepth: number;
-  private readonly invalidTargetScanLimit: number;
 
   constructor(
     private readonly collection: Collection<RequestDocument>,
-    private readonly agentCollection: Collection<CodingAgentDocument>,
-    private readonly createQueueClient: QueueClientFactory,
-    options: RequestSchedulerOptions = {},
-  ) {
-    this.pollIntervalMs = options.pollIntervalMs ?? 2_000;
-    this.registryRefreshIntervalMs =
-      options.registryRefreshIntervalMs ?? 30_000;
-    this.targetQueueDepth = options.targetQueueDepth ?? 5;
-    this.invalidTargetScanLimit = options.invalidTargetScanLimit ?? 200;
-  }
+    private readonly targets: WorkerTargetProvider,
+    private readonly pollIntervalMs: number = 2_000,
+    private readonly invalidTargetScanLimit: number = 200,
+  ) {}
 
   start(): void {
     if (this.interval) return;
@@ -83,32 +56,24 @@ export class RequestScheduler {
     let totalDispatched = 0;
 
     try {
-      if (
-        this.targets.length === 0 ||
-        Date.now() - this.lastRegistryRefreshAt >=
-          this.registryRefreshIntervalMs
-      ) {
-        try {
-          await this.refreshRegistry();
-        } catch (error) {
-          this.agents = new Map();
-          this.targets = [];
-          console.error(
-            "[Scheduler] Failed to refresh agent registry; dispatch is paused until a successful refresh:",
-            error,
-          );
-          return;
-        }
+      let targets: readonly WorkerTarget[];
+      try {
+        targets = await this.targets.getTargets();
+      } catch (error) {
+        console.error(
+          "[Scheduler] Failed to refresh agent registry; dispatch is paused until a successful refresh:",
+          error,
+        );
+        return;
       }
 
-      await this.logInvalidPendingTargets();
-
-      for (const target of this.targets) {
+      await this.logInvalidPendingTargets(targets);
+      for (const target of targets) {
         try {
-          totalDispatched += await this.dispatchForTarget(target);
+          totalDispatched += await this.dispatchForQueue(target);
         } catch (error) {
           console.error(
-            `[Scheduler] Error dispatching queue=${target.queueName} version=${target.agentVersion}:`,
+            `[Scheduler] Error dispatching queue=${target.queueName}:`,
             error,
           );
         }
@@ -130,75 +95,9 @@ export class RequestScheduler {
     }
   }
 
-  private async refreshRegistry(): Promise<void> {
-    const agents = await this.agentCollection.find({}).toArray();
-    const nextAgents = new Map(agents.map((agent) => [agent._id, agent]));
-    const grouped = new Map<
-      string,
-      { agentVersion: string; queueName: string; workerTypes: Set<string> }
-    >();
-
-    for (const agent of agents) {
-      for (const version of agent.versions ?? []) {
-        if (version.status !== "active") continue;
-        const resolved = resolveAgentTarget(agent, agent._id, {
-          requestedVersion: version.agentVersion,
-        });
-        if ("error" in resolved) continue;
-
-        const key = `${resolved.queueName}\u0000${resolved.agentVersion}`;
-        const existing = grouped.get(key);
-        if (existing) {
-          existing.workerTypes.add(agent._id);
-        } else {
-          grouped.set(key, {
-            agentVersion: resolved.agentVersion,
-            queueName: resolved.queueName,
-            workerTypes: new Set([agent._id]),
-          });
-        }
-      }
-    }
-
-    const nextTargets: RegistryTarget[] = [];
-    for (const target of grouped.values()) {
-      try {
-        let queueClient = this.queueClients.get(target.queueName);
-        if (!queueClient) {
-          queueClient = this.createQueueClient(target.queueName);
-          await queueClient.createIfNotExists();
-          this.queueClients.set(target.queueName, queueClient);
-          console.log(`[Scheduler] Ensured discovered queue exists: ${target.queueName}`);
-        }
-        nextTargets.push({
-          agentVersion: target.agentVersion,
-          queueName: target.queueName,
-          workerTypes: [...target.workerTypes].sort(),
-          queueClient,
-          targetQueueDepth: this.targetQueueDepth,
-        });
-      } catch (error) {
-        console.error(
-          `[Scheduler] Cannot initialize queue=${target.queueName} version=${target.agentVersion}; matching requests will remain pending:`,
-          error,
-        );
-      }
-    }
-
-    nextTargets.sort((a, b) =>
-      `${a.queueName}\u0000${a.agentVersion}`.localeCompare(
-        `${b.queueName}\u0000${b.agentVersion}`,
-      ),
-    );
-    this.agents = nextAgents;
-    this.targets = nextTargets;
-    this.lastRegistryRefreshAt = Date.now();
-    console.log(
-      `[Scheduler] Refreshed agent registry: ${agents.length} agents, ${nextTargets.length} routable queue/version targets`,
-    );
-  }
-
-  private async logInvalidPendingTargets(): Promise<void> {
+  private async logInvalidPendingTargets(
+    targets: readonly WorkerTarget[],
+  ): Promise<void> {
     const pending = await this.collection
       .find(
         {
@@ -209,6 +108,13 @@ export class RequestScheduler {
       )
       .limit(this.invalidTargetScanLimit)
       .toArray();
+    const validRoutes = new Set(
+      targets.flatMap((target) =>
+        target.routes.map(
+          (route) => `${route.workerType}\u0000${route.agentVersion}`,
+        ),
+      ),
+    );
 
     const seen = new Set<string>();
     for (const request of pending) {
@@ -217,28 +123,18 @@ export class RequestScheduler {
       if (seen.has(key)) continue;
       seen.add(key);
 
-      let reason: string | undefined;
-      if (!version) {
-        reason =
-          "request does not specify agentVersion; re-submit it against an active registered version";
-      } else {
-        const resolved = resolveAgentTarget(
-          this.agents.get(request.workerType),
-          request.workerType,
-          { requestedVersion: version },
-        );
-        if ("error" in resolved) {
-          reason = resolved.error;
-        }
-      }
-
+      const reason = !version
+        ? "request does not specify agentVersion; re-submit it against an active registered version"
+        : validRoutes.has(key)
+          ? undefined
+          : "no available, non-deleted agent exposes that active version with an explicit queueName";
       if (!reason) {
         this.invalidTargetReasons.delete(key);
         continue;
       }
       if (this.invalidTargetReasons.get(key) !== reason) {
         console.warn(
-          `[Scheduler] Pending requests for worker="${request.workerType}" agentVersion="${version ?? "<missing>"}" cannot be routed: ${reason}. Register an available, non-deleted agent with an active version and explicit queueName.`,
+          `[Scheduler] Pending requests for worker="${request.workerType}" agentVersion="${version ?? "<missing>"}" cannot be routed: ${reason}.`,
         );
         this.invalidTargetReasons.set(key, reason);
       }
@@ -249,7 +145,7 @@ export class RequestScheduler {
     }
   }
 
-  private async dispatchForTarget(target: RegistryTarget): Promise<number> {
+  private async dispatchForQueue(target: WorkerTarget): Promise<number> {
     const properties = await target.queueClient.getProperties();
     const currentDepth = properties.approximateMessagesCount ?? 0;
     const slots = target.targetQueueDepth - currentDepth;
@@ -257,43 +153,188 @@ export class RequestScheduler {
 
     let dispatched = 0;
     for (let i = 0; i < slots; i++) {
-      const workerFilter =
-        target.workerTypes.length === 1
-          ? target.workerTypes[0]
-          : { $in: target.workerTypes };
+      const claimed = await this.claimNext(target);
+      if (!claimed) break;
+
+      const payload: QueueMessagePayload = {
+        requestId: claimed.document._id,
+        runId: claimed.document.run?._id,
+        workerType: claimed.route.workerType,
+        agentVersion: claimed.route.agentVersion,
+      };
+      const message = Buffer.from(JSON.stringify(payload)).toString("base64");
+
+      try {
+        // Azure Queue sends are not idempotent. Never retry an ambiguous send:
+        // the worker's atomic queued→processing claim protects against a
+        // response-loss duplicate, while the short delay gives a delivered
+        // message a chance to claim before token-guarded rollback.
+        await target.queueClient.sendMessage(message);
+      } catch (error) {
+        const configuredDelayMs = Number(
+          process.env.SCOPE_DISPATCH_ROLLBACK_DELAY_MS,
+        );
+        const rollbackDelayMs =
+          Number.isInteger(configuredDelayMs) &&
+          configuredDelayMs >= 0 &&
+          configuredDelayMs <= 10_000
+            ? configuredDelayMs
+            : 500;
+        await new Promise((resolve) => setTimeout(resolve, rollbackDelayMs));
+        await this.rollbackClaim(claimed.document, claimed.dispatchToken);
+        throw error;
+      }
+
+      try {
+        await withRetry(
+          () => this.collection.updateOne(
+            {
+              _id: claimed.document._id,
+              "run._id": claimed.document.run?._id,
+              "run.dispatchToken": claimed.dispatchToken,
+            },
+            {
+              $unset: {
+                "run.dispatchState": "",
+                "run.dispatchToken": "",
+                "run.dispatchClaimedAt": "",
+              },
+            },
+          ),
+          { isRetryable: () => true },
+        );
+      } catch (error) {
+        console.error(
+          `[Scheduler] Sent ${claimed.document._id} but failed to clear its dispatch marker; the queued request remains processable:`,
+          error,
+        );
+      }
+
+      dispatched++;
+      console.log(
+        `[Scheduler] queue=${target.queueName} worker=${claimed.route.workerType} version=${claimed.route.agentVersion}: dispatched ${claimed.document._id} (priority=${claimed.document.priority}, depth=${currentDepth + dispatched}/${target.targetQueueDepth})`,
+      );
+    }
+    return dispatched;
+  }
+
+  private routeFilter(route: WorkerRoute): Record<string, unknown> {
+    return {
+      workerType: route.workerType,
+      agentVersion: route.agentVersion,
+    };
+  }
+
+  private pendingFilter(target: WorkerTarget): Record<string, unknown> {
+    return {
+      "run.status": "pending",
+      $or: target.routes.map((route) => this.routeFilter(route)),
+      deletedAt: { $exists: false },
+    };
+  }
+
+  /**
+   * Select the highest priority globally, then round-robin exact routes within
+   * that priority so one busy version cannot starve another.
+   */
+  private async claimNext(
+    target: WorkerTarget,
+  ): Promise<{
+    document: RequestDocument;
+    route: WorkerRoute;
+    dispatchToken: string;
+  } | null> {
+    const next = await this.collection.findOne(
+      this.pendingFilter(target),
+      { sort: { priority: -1, createdAt: 1 }, projection: { priority: 1 } },
+    );
+    if (!next) return null;
+
+    const priorityFilter = next.priority === undefined
+      ? { priority: { $exists: false } }
+      : { priority: next.priority };
+    const start = this.nextRouteIndex.get(target.queueName) ?? 0;
+
+    for (let offset = 0; offset < target.routes.length; offset++) {
+      const routeIndex = (start + offset) % target.routes.length;
+      const route = target.routes[routeIndex];
+      const dispatchToken = randomUUID();
+      const now = new Date();
       const claimed = await this.collection.findOneAndUpdate(
         {
           "run.status": "pending",
-          workerType: workerFilter,
-          agentVersion: target.agentVersion,
           deletedAt: { $exists: false },
+          ...priorityFilter,
+          ...this.routeFilter(route),
         },
         {
           $set: {
             "run.status": "queued",
-            "run.updatedAt": new Date(),
+            "run.updatedAt": now,
+            "run.dispatchState": "sending",
+            "run.dispatchToken": dispatchToken,
+            "run.dispatchClaimedAt": now,
           },
         },
         {
-          sort: { priority: -1, createdAt: 1 },
-          returnDocument: "after",
+          sort: { createdAt: 1 },
+          returnDocument: "before",
         },
       );
-
-      if (!claimed) break;
-      dispatched++;
-      console.log(
-        `[Scheduler] queue=${target.queueName} version=${target.agentVersion}: dispatched ${claimed._id} (priority=${claimed.priority}, depth=${currentDepth + i + 1}/${target.targetQueueDepth})`,
-      );
-
-      const message = Buffer.from(
-        JSON.stringify({
-          requestId: claimed._id,
-          runId: claimed.run?._id,
-        }),
-      ).toString("base64");
-      await target.queueClient.sendMessage(message);
+      if (claimed) {
+        this.nextRouteIndex.set(
+          target.queueName,
+          (routeIndex + 1) % target.routes.length,
+        );
+        return { document: claimed, route, dispatchToken };
+      }
     }
-    return dispatched;
+    return null;
+  }
+
+  private async rollbackClaim(
+    document: RequestDocument,
+    dispatchToken: string,
+  ): Promise<void> {
+    await withRetry(
+      async () => {
+        await this.collection.updateOne(
+          {
+            _id: document._id,
+            "run._id": document.run?._id,
+            "run.status": "queued",
+            "run.dispatchToken": dispatchToken,
+          },
+          {
+            $set: {
+              "run.status": "pending",
+              "run.updatedAt": new Date(),
+            },
+            $unset: {
+              "run.dispatchState": "",
+              "run.dispatchToken": "",
+              "run.dispatchClaimedAt": "",
+            },
+          },
+        );
+        const stranded = await this.collection.findOne({
+          _id: document._id,
+          "run._id": document.run?._id,
+          "run.status": "queued",
+          "run.dispatchToken": dispatchToken,
+        });
+        if (stranded) {
+          throw new Error(
+            `Dispatch rollback verification failed for ${document._id}`,
+          );
+        }
+      },
+      {
+        maxRetries: 5,
+        baseDelayMs: 100,
+        maxDelayMs: 2_000,
+        isRetryable: () => true,
+      },
+    );
   }
 }

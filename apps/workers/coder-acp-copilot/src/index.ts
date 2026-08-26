@@ -392,7 +392,9 @@ async function main(): Promise<void> {
   await queueProcessor.start();
 }
 
-main().catch((error) => {
-  console.error("coder-acp-copilot failed to start:", error);
-  process.exit(1);
-});
+if (process.env.NODE_ENV !== "test") {
+  main().catch((error) => {
+    console.error("coder-acp-copilot failed to start:", error);
+    process.exit(1);
+  });
+}

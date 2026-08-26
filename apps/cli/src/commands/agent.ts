@@ -11,7 +11,7 @@ import { apiFetch } from "../utils/api-client.js";
 
 interface AgentVersionSummary {
   agentVersion: string;
-  queueName: string;
+  queueName?: string;
   status: "active" | "deprecated" | "disabled";
 }
 

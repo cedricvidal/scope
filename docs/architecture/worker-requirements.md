@@ -435,6 +435,18 @@ and must be non-empty. Workers must consume the exact same queue through
 `QUEUE_NAME`. Use shared `requireQueueName()` at startup rather than deriving a
 name from the worker ID or silently falling back.
 
+Coding queue messages contain `{ requestId, runId, workerType, agentVersion }`.
+Before processing, the shared queue processor requires the message target and
+persisted request target to match `WORKER_NAME` and the exact runtime agent
+version. Workers should implement `getAgentVersion()`; deployments may set
+`SCOPE_AGENT_VERSION` as an explicit override. A mismatched message is safely
+deferred with short randomized backoff so the correct worker can consume it
+promptly. Legacy messages without the two affinity fields are accepted only
+when the persisted request exactly matches the current runtime. After target
+validation, the shared processor atomically claims the exact queued run; only
+the winning worker may execute the agent, so duplicate queue deliveries are
+non-executable.
+
 Local Compose registers the Linux Copilot, Claude Code, and Windows Copilot OSS
 manifests and their exact queue names before the dynamic scheduler starts.
 

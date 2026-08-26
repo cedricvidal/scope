@@ -70,6 +70,55 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     }
   }
 
+  protected override async isMessageTargetMatch(
+    payload: Record<string, unknown>,
+    requestDoc: RequestDocument,
+  ): Promise<boolean> {
+    const runtimeWorker =
+      process.env.WORKER_NAME?.trim() || this.processor.workerName;
+    const runtimeVersion =
+      process.env.SCOPE_AGENT_VERSION?.trim() ||
+      this.processor.getAgentVersion?.()?.trim();
+    if (!runtimeVersion) {
+      console.error(
+        `[${this.workerName}] Cannot validate queue target: runtime agent version is unavailable`,
+      );
+      return false;
+    }
+
+    const requestWorker = requestDoc.workerType;
+    const requestVersion = requestDoc.agentVersion;
+    if (
+      typeof requestWorker !== "string" ||
+      typeof requestVersion !== "string" ||
+      requestVersion.trim().length === 0
+    ) {
+      return false;
+    }
+
+    const messageWorker =
+      typeof payload.workerType === "string" && payload.workerType.trim()
+        ? payload.workerType
+        : undefined;
+    const messageVersion =
+      typeof payload.agentVersion === "string" && payload.agentVersion.trim()
+        ? payload.agentVersion
+        : undefined;
+
+    // Legacy messages omitted both affinity fields. They remain safe only when
+    // the persisted request exactly targets this worker runtime.
+    if (!messageWorker && !messageVersion) {
+      return requestWorker === runtimeWorker &&
+        requestVersion === runtimeVersion;
+    }
+    if (!messageWorker || !messageVersion) return false;
+
+    return messageWorker === requestWorker &&
+      messageVersion === requestVersion &&
+      messageWorker === runtimeWorker &&
+      messageVersion === runtimeVersion;
+  }
+
   /**
    * Enqueue a post-processing message (non-fatal on failure — polling dispatcher
    * will catch up within 2s if this fails).
@@ -284,6 +333,26 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
+    const claimedRequest = await this.claimQueuedRequest(requestDoc);
+    if (!claimedRequest) {
+      console.warn(
+        `[${this.workerName}] Duplicate or stale queued message for ${requestDoc._id}; another worker already claimed it`,
+      );
+      await log(
+        "warn",
+        "Duplicate or stale queue message discarded before agent execution",
+        { runId: requestDoc.run?._id },
+      );
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+    requestDoc = claimedRequest;
+
+    const claimedAt = requestDoc.run?.startedAt instanceof Date
+      ? requestDoc.run.startedAt
+      : new Date(requestDoc.run?.startedAt ?? Date.now());
+    await this.heartbeatStore.set(requestDoc.run!._id, claimedAt);
+
     // Fail fast on a missing project scope. Every downstream resolver below
     // (MCP servers, skills, secrets, and the report-generator) builds
     // `?projectId=${encodeURIComponent(projectId)}` URLs, so an absent value
@@ -370,6 +439,69 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     }
 
     await this.processMultiTurn(requestDoc, message, heartbeat, log, mcpServerConfigs, skillConfigs, extensionConfigs);
+  }
+
+  /**
+   * Idempotently claim one queued run for this process. The queued/status/run
+   * filter is the concurrency gate; owner verification reconciles a Mongo
+   * response-loss before retrying.
+   */
+  private async claimQueuedRequest(
+    requestDoc: RequestDocument,
+  ): Promise<RequestDocument | null> {
+    const runId = requestDoc.run?._id;
+    if (!runId) return null;
+
+    const versionFields = this.getVersionFields();
+    const now = new Date();
+    const ownerFilter = {
+      _id: requestDoc._id,
+      "run._id": runId,
+      "run.status": "processing",
+      "run.worker.instanceId": this.instanceId,
+    };
+
+    return withRetry(async () => {
+      try {
+        const claimed = await this.collection.findOneAndUpdate(
+          {
+            _id: requestDoc._id,
+            "run._id": runId,
+            "run.status": "queued",
+            workerType: requestDoc.workerType,
+            agentVersion: requestDoc.agentVersion,
+          },
+          {
+            $set: {
+              "run.status": "processing",
+              "run.startedAt": now,
+              "run.updatedAt": now,
+              "run.worker": {
+                instanceId: this.instanceId,
+                ...(this.podName ? { podName: this.podName } : {}),
+              },
+              "run.turns": [],
+              gateSummaries: [],
+              "run.workerVersion": versionFields.workerVersion,
+              "run.os": versionFields.os,
+              updatedAt: now,
+            },
+            $unset: {
+              "run.dispatchState": "",
+              "run.dispatchToken": "",
+              "run.dispatchClaimedAt": "",
+            },
+          },
+          { returnDocument: "after" },
+        );
+        if (claimed) return claimed;
+      } catch (error) {
+        const owned = await this.collection.findOne(ownerFilter);
+        if (owned) return owned;
+        throw error;
+      }
+      return this.collection.findOne(ownerFilter);
+    });
   }
 
   /**
@@ -534,37 +666,9 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       throw new Error("JUDGE_SERVICE_URL is not configured but request has criteria to evaluate");
     }
 
-    // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution).
-    // Write to run.* (run-retry-attempts) plus a top-level updatedAt for index freshness.
-    // Stamp run.worker (instance identity) atomically with the status change
-    // so the redelivery handler in another worker can immediately see this
-    // pickup. The accompanying liveness heartbeat is written to Redis (not
-    // Mongo) immediately after to avoid recurring CosmosDB RU cost.
-    const versionFields = this.getVersionFields();
-    const now = new Date();
-    await withRetry(() => this.collection.updateOne(
-      { _id: requestId },
-      {
-        $set: {
-          "run.status": "processing",
-          "run.startedAt": now,
-          "run.updatedAt": now,
-          "run.worker": {
-            instanceId: this.instanceId,
-            ...(this.podName ? { podName: this.podName } : {}),
-          },
-          "run.turns": [],
-          gateSummaries: [],
-          "run.workerVersion": versionFields.workerVersion,
-          "run.os": versionFields.os,
-          updatedAt: now,
-        },
-      }
-    ));
-    // Seed the Redis liveness heartbeat right after pickup so a redelivery
-    // arriving immediately afterwards sees a fresh beat instead of falling
-    // through to the missing-heartbeat guard.
-    await this.heartbeatStore.set(requestDoc.run!._id, now);
+    const now = requestDoc.run?.startedAt instanceof Date
+      ? requestDoc.run.startedAt
+      : new Date(requestDoc.run?.startedAt ?? Date.now());
 
     // Subscribe to instant cancel notifications via Redis Pub/Sub.
     // If a cancel signal arrives, exit immediately — the run is already

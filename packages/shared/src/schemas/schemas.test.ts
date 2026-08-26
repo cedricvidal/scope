@@ -962,6 +962,34 @@ describe("agent schemas", () => {
       expect(result.status).toBe("active");
     });
 
+    it("accepts legacy versions with a missing or blank queue name", () => {
+      const base = {
+        agentVersion: "1.0.0",
+        workerVersion: "2.0.0",
+        components: {},
+        gitCommit: "abc123",
+        buildTime: NOW,
+        imageTag: "v1",
+        status: "active" as const,
+        createdAt: NOW,
+      };
+      expect(AgentVersionSchema.parse(base).queueName).toBeUndefined();
+      expect(AgentVersionSchema.parse({ ...base, queueName: "" }).queueName)
+        .toBe("");
+    });
+
+    it("keeps registration queue names strict", () => {
+      expect(() => RegisterAgentVersionInputSchema.parse({
+        agentVersion: "1.0.0",
+        workerVersion: "2.0.0",
+        components: {},
+        gitCommit: "abc123",
+        buildTime: NOW,
+        imageTag: "v1",
+        queueName: " ",
+      })).toThrow();
+    });
+
     it("rejects invalid status", () => {
       expect(() =>
         AgentVersionSchema.parse({

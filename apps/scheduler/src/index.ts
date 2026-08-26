@@ -7,6 +7,7 @@ import { MongoClient } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { RequestScheduler } from "./request-scheduler.js";
+import { AgentTargetRegistry } from "./agent-target-registry.js";
 import { PostProcessorDispatcher } from "./post-processor-dispatcher.js";
 import { StuckRunReaper } from "./stuck-run-reaper.js";
 import { RedisHeartbeatStore, type HeartbeatStore } from "shared";
@@ -31,18 +32,6 @@ const STORAGE_CONNECTION_STRING =
 const POLL_INTERVAL_MS = parseInt(
   process.env.SCHEDULER_POLL_INTERVAL_MS || "2000",
   10,
-);
-const REGISTRY_REFRESH_INTERVAL_MS = parsePositiveInt(
-  process.env.SCHEDULER_REGISTRY_REFRESH_INTERVAL_MS,
-  30_000,
-  1_000,
-  "SCHEDULER_REGISTRY_REFRESH_INTERVAL_MS",
-);
-const TARGET_QUEUE_DEPTH = parsePositiveInt(
-  process.env.SCHEDULER_TARGET_QUEUE_DEPTH,
-  5,
-  1,
-  "SCHEDULER_TARGET_QUEUE_DEPTH",
 );
 const HEALTH_PORT = parseInt(process.env.PORT || "8080", 10);
 
@@ -138,17 +127,28 @@ async function main(): Promise<void> {
   const collection = db.collection<RequestDocument>(MONGO_COLLECTION);
   const agentCollection =
     db.collection<CodingAgentDocument>(MONGO_AGENT_COLLECTION);
+  const targetRegistry = new AgentTargetRegistry(
+    agentCollection,
+    createQueueClient,
+    parsePositiveInt(
+      process.env.SCHEDULER_TARGET_QUEUE_DEPTH,
+      5,
+      1,
+      "SCHEDULER_TARGET_QUEUE_DEPTH",
+    ),
+    parsePositiveInt(
+      process.env.SCHEDULER_REGISTRY_REFRESH_INTERVAL_MS,
+      30_000,
+      1_000,
+      "SCHEDULER_REGISTRY_REFRESH_INTERVAL_MS",
+    ),
+  );
 
   // Start the scheduler
   const scheduler = new RequestScheduler(
     collection,
-    agentCollection,
-    createQueueClient,
-    {
-      pollIntervalMs: POLL_INTERVAL_MS,
-      registryRefreshIntervalMs: REGISTRY_REFRESH_INTERVAL_MS,
-      targetQueueDepth: TARGET_QUEUE_DEPTH,
-    },
+    targetRegistry,
+    POLL_INTERVAL_MS,
   );
   scheduler.start();
   console.log("[Scheduler] Dispatch loop started");
