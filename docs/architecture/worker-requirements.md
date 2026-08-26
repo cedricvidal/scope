@@ -16,7 +16,7 @@ This document defines the requirements that every coding agent worker must satis
 | 6 | [Capture HAR files](#6-capture-har-files) | Recommended | `DevProxyClient` |
 | 7 | [Capture video recordings](#7-capture-video-recordings) | Conditional | `WorkerResult.videoFilePaths` |
 | 8 | [Implement lifecycle hooks](#8-implement-lifecycle-hooks) | Recommended | `setup()` / `teardown()` |
-| 9 | [Report agent & component versions](#9-report-agent--component-versions) | Recommended | `getAgentVersion()` / `getComponentVersions()` |
+| 9 | [Report agent & component versions](#9-report-agent--component-versions) | ✅ | `getAgentVersion()` / `getComponentVersions()` |
 | 10 | [Support model selection](#10-support-model-selection) | ✅ | `WorkerProcessorOptions.model` |
 | 11 | [Support MCP servers](#11-support-mcp-servers) | Recommended | `WorkerProcessorOptions.mcpServerConfigs` |
 | 12 | [Support Skills](#12-support-skills) | Recommended | `WorkerProcessorOptions.skillConfigs` |
@@ -25,6 +25,7 @@ This document defines the requirements that every coding agent worker must satis
 | 15 | [Auto-approve agent permissions](#15-auto-approve-agent-permissions) | ✅ | Worker-specific |
 | 16 | [Sandbox workspace filesystem access](#16-sandbox-workspace-filesystem-access) | Recommended | ACP `readTextFile()` / `writeTextFile()` |
 | 17 | [Persist auth state across iterations](#17-persist-auth-state-across-iterations) | Conditional | `processMessage()` side-effect |
+| 18 | [Register the worker and version](#18-register-the-worker-and-version) | ✅ | Agent registry manifests |
 
 ## Detailed Requirements
 
@@ -37,11 +38,18 @@ import { WorkerProcessor } from "shared";
 
 class MyAgentProcessor implements WorkerProcessor {
   readonly workerName = "coder-my-agent";
+  readonly skillAgentType = "copilot" as const; // optional
   // ...
 }
 ```
 
-The `workerName` must be unique and match the worker's queue routing configuration.
+The `workerName` must be unique and match the registered agent `_id`. Queue
+routing is independent: the scheduler uses the selected active version's
+explicit `queueName` and never derives a queue from `workerName`.
+
+`skillAgentType` may be `"copilot"` or `"claude-code"` to install skills in an
+additional agent-specific directory. Omit it to use only the universal
+`.agents/skills` path; never infer skill layout from the worker ID.
 
 **Source:** [`packages/shared/src/types/types.ts`](../../packages/shared/src/types/types.ts) — `WorkerProcessor` interface.
 
@@ -408,6 +416,86 @@ this.storageStateJson = readFileSync(AUTH_STATE_PATH, "utf-8");
 This is critical for long multi-turn runs where OAuth tokens may expire between iterations. The saved state includes refreshed cookies and session tokens.
 
 **When required:** Mandatory for browser-based workers with cookie authentication (VS Code Web). Not applicable for workers using stateless API tokens (Copilot CLI, Claude Code) or workers that mint a token once in `setup()` (VS Code Electron).
+
+---
+
+### 18. Register the worker and version
+
+Every deployable worker must register an agent manifest and at least one version
+manifest. These records are the only source for current availability, display
+name, capabilities, versions, and scheduling queues.
+
+Agent payload (`POST /api/v1/agents`):
+
+```yaml
+_id: coder-my-agent
+name: My Agent
+description: My coding agent worker
+modelProvider: my-provider
+available: true
+capabilities:
+  supportsReasoningEffort: true
+  supportsMcpServers: true
+  supportsSkills: true
+  supportsExtensions: false
+```
+
+All four capability properties are optional booleans. Omitted and false both
+mean unsupported. `available` must be exactly `true` for new submissions.
+
+Version payload (`POST /api/v1/agents/{_id}/versions`):
+
+```yaml
+agentVersion: my-agent-1.2.3
+workerVersion: my-agent-1.2.3-build-abc123
+components:
+  MY_AGENT_VERSION: 1.2.3
+gitCommit: abc123
+buildTime: "2026-03-01T12:00:00Z"
+imageTag: 1.2.3
+queueName: my-explicit-worker-queue
+```
+
+Every shown version field is required and must be non-empty.
+`components` is a string-to-string map. Registration activates the version;
+versions can later be retired through the version status endpoint. Queue names
+are opaque deployment-owned values: shared queues and dynamically named
+workers are supported, and no platform service prepends `queue-` or otherwise
+derives them.
+
+At runtime, `SCOPE_AGENT_VERSION` or `WorkerProcessor.getAgentVersion()` must
+provide the exact registered `agentVersion`. The queue processor fails during
+startup if neither provides a non-empty identity. This prevents a worker from
+executing a message for another version when queues are shared. The OSS local
+Compose manifests set `SCOPE_AGENT_VERSION` to their development manifest value;
+production deployments normally derive it from the installed agent components.
+
+For Jobs and Docker Compose, use the reusable helper:
+
+```bash
+scripts/register-agent.sh \
+  http://api:80 \
+  apps/workers/coder-my-agent/agent.yaml \
+  apps/workers/coder-my-agent/agent-version.yaml
+```
+
+The helper is idempotent: both API endpoints upsert by agent ID and version ID.
+It waits for `/health`, retries network failures and HTTP
+408/425/429/5xx responses with bounded exponential backoff, and exits non-zero
+immediately for permanent errors such as invalid manifests, unknown agents, or
+other 4xx responses. Retry bounds can be configured with the positive-integer
+`SCOPE_REGISTRATION_MAX_ATTEMPTS`,
+`SCOPE_REGISTRATION_BASE_DELAY_SECONDS`, and
+`SCOPE_REGISTRATION_MAX_DELAY_SECONDS` variables. Curl calls are bounded by
+`SCOPE_REGISTRATION_CONNECT_TIMEOUT_SECONDS` (default 5) and
+`SCOPE_REGISTRATION_REQUEST_TIMEOUT_SECONDS` (default 30). Only transient DNS,
+connection, timeout, and transfer failures are retried; permanent curl
+configuration and certificate failures exit immediately. Registration Jobs
+must not hide helper failures with `|| true`.
+
+The OSS Compose `register-agents` service uses this contract for Copilot and
+Claude. Cross-repository overlays can mount additional manifests and invoke the
+same helper before running their workers.
 
 
 ---

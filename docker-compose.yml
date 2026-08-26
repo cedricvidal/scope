@@ -38,6 +38,8 @@ x-worker-env: &worker-env
   TOKEN_MANAGER_URL: http://token-manager:80
 
 x-worker-deps: &worker-deps
+  register-agents:
+    condition: service_completed_successfully
   mongodb:
     condition: service_healthy
     required: false
@@ -309,9 +311,8 @@ services:
       <<: *common-env
       PORT: "80"
       TOKEN_MANAGER_URL: http://token-manager:80
-      AZURE_STORAGE_QUEUE_WORKER_1: queue-coder-acp-claude-code
-      AZURE_STORAGE_QUEUE_WORKER_2: queue-coder-acp-copilot
       AZURE_STORAGE_QUEUE_REPORT: report-queue
+      SCOPE_STRICT_AGENT_CAPABILITIES: ${SCOPE_STRICT_AGENT_CAPABILITIES:-false}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_MODELS_API_KEY: ${GITHUB_MODELS_API_KEY:-${GITHUB_TOKEN}}
       GIT_COMMIT: ${GIT_COMMIT:-development}
@@ -334,49 +335,23 @@ services:
         condition: service_started
     volumes:
       - ./apps/workers:/workers:ro
+      - ./scripts/register-agent.sh:/register-agent.sh:ro
     restart: "no"
     entrypoint:
       - /bin/sh
       - -c
       - |
+        set -eu
         apk add --no-cache curl yq > /dev/null 2>&1
 
-        API_URL="http://api:80"
-
-        # Retry wrapper: retries a curl up to 10 times with 3s delay
-        post() {
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -s -f -w "\n" -X POST "$$API_URL$$1" -H "Content-Type: application/json" -d "$$2"; then
-              return 0
-            fi
-            echo "  Attempt $$i failed for $$1, retrying in 3s..."
-            sleep 3
-          done
-          echo "  FAILED after 10 attempts: $$1"
-          return 1
-        }
-
-        # Register agent from its agent.yaml file
-        register_agent() {
-          WORKER_NAME="$$1"
-          AGENT_JSON=$$(yq -o=json /workers/$$WORKER_NAME/agent.yaml)
-          post "/api/v1/agents" "$$AGENT_JSON"
-        }
-
-        echo "Waiting for API to be ready..."
-        until curl -sf "$$API_URL/health" > /dev/null 2>&1; do
-          echo "API not ready, retrying in 3s..."
-          sleep 3
-        done
-        echo "API healthy, registering agents..."
-
-        # Upsert agents from agent.yaml files
-        register_agent "coder-acp-copilot"
-        register_agent "coder-acp-claude-code"
-
-        # Register dev versions
-        post "/api/v1/agents/coder-acp-copilot/versions" '{"agentVersion":"copilot-dev","workerVersion":"copilot-dev-local-dev","components":{"COPILOT_CLI_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-copilot"}'
-        post "/api/v1/agents/coder-acp-claude-code/versions" '{"agentVersion":"claude-agent-acp-dev-sdk-dev","workerVersion":"claude-agent-acp-dev-sdk-dev-local-dev","components":{"CLAUDE_CODE_ACP_VERSION":"dev","CLAUDE_AGENT_SDK_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-claude-code"}'
+        /register-agent.sh \
+          http://api:80 \
+          /workers/coder-acp-copilot/agent.yaml \
+          /workers/coder-acp-copilot/agent-version.dev.yaml
+        /register-agent.sh \
+          http://api:80 \
+          /workers/coder-acp-claude-code/agent.yaml \
+          /workers/coder-acp-claude-code/agent-version.dev.yaml
 
         echo ""
         echo "All agents and dev versions registered."
@@ -392,6 +367,8 @@ services:
     depends_on:
       api:
         condition: service_started
+      register-agents:
+        condition: service_completed_successfully
       token-manager:
         condition: service_started
     restart: "no"
@@ -411,6 +388,8 @@ services:
     depends_on:
       api:
         condition: service_started
+      register-agents:
+        condition: service_completed_successfully
       token-manager:
         condition: service_started
     restart: "no"
@@ -499,9 +478,7 @@ services:
     restart: on-failure:5
     environment:
       <<: *common-env
-      SCHEDULER_WORKER_TYPES: coder-acp-claude-code,coder-acp-copilot
-      SCHEDULER_QUEUE_DEPTH_CODER_ACP_CLAUDE_CODE: "2"
-      SCHEDULER_QUEUE_DEPTH_CODER_ACP_COPILOT: "2"
+      SCHEDULER_TARGET_QUEUE_DEPTH: "2"
       SCHEDULER_POLL_INTERVAL_MS: "2000"
       PORT: "8080"
     depends_on:
@@ -511,6 +488,8 @@ services:
       azurite:
         condition: service_healthy
       db-migrate:
+        condition: service_completed_successfully
+      register-agents:
         condition: service_completed_successfully
 
   # ===========================================================================
@@ -597,6 +576,7 @@ services:
     environment:
       <<: *worker-env
       WORKER_NAME: coder-acp-claude-code
+      SCOPE_AGENT_VERSION: claude-agent-acp-dev-sdk-dev
       QUEUE_NAME: queue-coder-acp-claude-code
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # DevProxy integration (enabled by default when using claude-code profile)
@@ -701,6 +681,7 @@ services:
     environment:
       <<: *worker-env
       WORKER_NAME: coder-acp-copilot
+      SCOPE_AGENT_VERSION: copilot-dev
       QUEUE_NAME: queue-coder-acp-copilot
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       # Gateway: replaces DevProxy — records HTTP + WebSocket (/responses) frames

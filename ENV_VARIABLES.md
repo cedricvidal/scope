@@ -10,6 +10,33 @@ The sophisticated criteria system can be configured via environment variables in
 
 Base URL of the Scope API used by all CLI commands. Override this to point the CLI at a remote or Docker-hosted API instance.
 
+## Agent Target Validation
+
+### SCOPE_STRICT_AGENT_CAPABILITIES
+**Default:** `false`
+**Type:** boolean (`true` to enable)
+
+When enabled on the API, run and profile writes reject requested reasoning
+effort, MCP servers, skills, or extensions unless the selected registry agent
+explicitly advertises the corresponding capability. The exact keys are
+`supportsReasoningEffort`, `supportsMcpServers`, `supportsSkills`, and
+`supportsExtensions`; omitted keys mean unsupported.
+
+This is a temporary rollout switch for capability compatibility only. Unknown,
+deleted, unavailable, versionless, inactive-version, and missing-queue targets
+are rejected regardless of this setting.
+
+### SCOPE_AGENT_VERSION
+**Default:** worker-specific installed agent version
+**Type:** non-empty string
+
+Worker runtime identity override. Either this value or
+`WorkerProcessor.getAgentVersion()` must provide the exact active registry
+`agentVersion` advertised for that deployment; queue processor startup fails if
+neither does. Queue consumers use this identity together with `WORKER_NAME` to
+defer messages for another target when multiple workers or versions share a
+queue. Local Compose sets it to the checked-in development manifest version.
+
 ## LLM Configuration (Portal AI Features)
 
 The portal's AI features — criteria prompt generation, prompt-feature
@@ -563,6 +590,18 @@ Git commit hash embedded in reporter metadata. Automatically set during CI/CD bu
 **Type:** integer (milliseconds)
 
 How often the request scheduler polls MongoDB for pending requests to dispatch to coder workers. Applies to all worker types. Lower values reduce queue latency; higher values save RUs.
+
+The scheduler refreshes agents and versions from the registry on every poll.
+There is no `SCHEDULER_WORKER_TYPES` allowlist.
+
+### SCHEDULER_TARGET_QUEUE_DEPTH
+**Default:** `5`
+**Type:** positive integer
+
+Maximum target depth for each queue discovered from active
+`AgentVersion.queueName` records. The scheduler never derives a queue name from
+the worker ID. Multiple agent/version targets that advertise the same queue
+share one depth calculation.
 
 ### SCHEDULER_PP_POLL_INTERVAL_MS
 **Default:** `30000`

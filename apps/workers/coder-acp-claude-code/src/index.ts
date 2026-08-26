@@ -13,7 +13,9 @@ initTelemetry(process.env.WORKER_NAME || "coder-acp-claude-code");
 
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-claude-code";
 const tokenClient = new TokenManagerClient();
-const AGENT_VERSION = `claude-agent-acp-${process.env.CLAUDE_CODE_ACP_VERSION || "unknown"}-sdk-${process.env.CLAUDE_AGENT_SDK_VERSION || "unknown"}`;
+const AGENT_VERSION =
+  process.env.SCOPE_AGENT_VERSION ||
+  `claude-agent-acp-${process.env.CLAUDE_CODE_ACP_VERSION || "unknown"}-sdk-${process.env.CLAUDE_AGENT_SDK_VERSION || "unknown"}`;
 
 /**
  * Detect the first structured "AI turn" signal from a subprocess log line.
@@ -34,6 +36,7 @@ function isFirstAiCallSignal(msg: string): boolean {
 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
+  readonly skillAgentType = "claude-code" as const;
   workspacePath: string | undefined = undefined;
   private gateway: McpGatewayClient | null = null;
   private mcpConfigs: McpServerConfig[] = [];
