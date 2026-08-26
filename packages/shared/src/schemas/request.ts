@@ -106,13 +106,7 @@ export const RequestOutcomeSchema = z.enum([
   "finished",
 ]);
 
-export const VALID_WORKERS = [
-  "coder-acp-claude-code",
-  "coder-acp-copilot",
-  "coder-acp-copilot-windows"
-] as const;
-
-export const WorkerTypeSchema = z.enum(VALID_WORKERS);
+export const WorkerTypeSchema = z.string().trim().min(1);
 
 export const CreateRequestInputSchema = z
   .object({

@@ -11,12 +11,17 @@ import {
   ProfileWithVersionResponseSchema,
   ExtensionClient,
   parseExtensionSpec,
+  requiredAgentCapabilities,
 } from "shared";
 import type { ProfileDocument, ProfileVersionDocument } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { RouteContext } from "../route-context.js";
 import { resolveSkillSpecs } from "../utils/skill-helpers.js";
-import { validateAgentForModel } from "../utils/agent-helpers.js";
+import {
+  agentTargetErrorStatus,
+  resolveRegisteredAgentTarget,
+  validateAgentForModel,
+} from "../utils/agent-helpers.js";
 import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
 
 export function registerProfilesRoutes(ctx: RouteContext): void {
@@ -53,9 +58,29 @@ apiRoute(ctx.app, ctx.registry, {
       const { name, description, workerType, model, reasoningEffort, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
       const projectId = getQueryProjectId(req);
 
-      // Extensions are only supported by VS Code workers
-      if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
-        res.status(400).json({ error: `Worker type "${workerType}" does not support VS Code extensions` });
+      const target = await resolveRegisteredAgentTarget(
+        ctx.agentCollection,
+        workerType,
+        {
+          requestedVersion: agentVersion,
+          requiredCapabilities: requiredAgentCapabilities({
+            reasoningEffort,
+            mcpServers,
+            skills: skillRevisions,
+            extensions,
+          }),
+        },
+      );
+      if ("error" in target) {
+        res.status(agentTargetErrorStatus(target)).json({
+          error: target.error,
+          ...("activeVersions" in target && target.activeVersions
+            ? { activeVersions: target.activeVersions }
+            : {}),
+          ...("missingCapabilities" in target && target.missingCapabilities
+            ? { missingCapabilities: target.missingCapabilities }
+            : {}),
+        });
         return;
       }
 
@@ -126,7 +151,7 @@ apiRoute(ctx.app, ctx.registry, {
         workerType,
         model,
         ...(reasoningEffort ? { reasoningEffort } : {}),
-        ...(agentVersion ? { agentVersion } : {}),
+        agentVersion: target.agentVersion,
         ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
         ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
         ...(resolvedExtensions && resolvedExtensions.length > 0 ? { extensions: resolvedExtensions } : {}),
@@ -136,7 +161,11 @@ apiRoute(ctx.app, ctx.registry, {
       await ctx.profileCollection.insertOne(profileDoc);
       await ctx.profileVersionCollection.insertOne(versionDoc);
 
-      res.status(201).json({ ...profileDoc, version: versionResponse(versionDoc) });
+      res.status(201).json({
+        ...profileDoc,
+        version: versionResponse(versionDoc),
+        ...(target.warnings.length > 0 ? { warnings: target.warnings } : {}),
+      });
     } catch (error) {
       next(error);
     }
@@ -282,9 +311,29 @@ apiRoute(ctx.app, ctx.registry, {
 
       const { workerType, model, reasoningEffort, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
 
-      // Extensions are only supported by VS Code workers
-      if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
-        res.status(400).json({ error: `Worker type "${workerType}" does not support VS Code extensions` });
+      const target = await resolveRegisteredAgentTarget(
+        ctx.agentCollection,
+        workerType,
+        {
+          requestedVersion: agentVersion,
+          requiredCapabilities: requiredAgentCapabilities({
+            reasoningEffort,
+            mcpServers,
+            skills: skillRevisions,
+            extensions,
+          }),
+        },
+      );
+      if ("error" in target) {
+        res.status(agentTargetErrorStatus(target)).json({
+          error: target.error,
+          ...("activeVersions" in target && target.activeVersions
+            ? { activeVersions: target.activeVersions }
+            : {}),
+          ...("missingCapabilities" in target && target.missingCapabilities
+            ? { missingCapabilities: target.missingCapabilities }
+            : {}),
+        });
         return;
       }
 
@@ -345,7 +394,7 @@ apiRoute(ctx.app, ctx.registry, {
         workerType,
         model,
         ...(reasoningEffort ? { reasoningEffort } : {}),
-        ...(agentVersion ? { agentVersion } : {}),
+        agentVersion: target.agentVersion,
         ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
         ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
         ...(resolvedExtensions && resolvedExtensions.length > 0 ? { extensions: resolvedExtensions } : {}),
@@ -358,7 +407,10 @@ apiRoute(ctx.app, ctx.registry, {
         { $set: { latestVersion: newVersion, updatedAt: now } },
       );
 
-      res.status(201).json(versionResponse(versionDoc));
+      res.status(201).json({
+        ...versionResponse(versionDoc),
+        ...(target.warnings.length > 0 ? { warnings: target.warnings } : {}),
+      });
     } catch (error) {
       next(error);
     }

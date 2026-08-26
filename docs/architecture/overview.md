@@ -82,11 +82,12 @@ flowchart TB
 
 ## Data Flow
 
-1. **Submit** — A user submits a task via CLI or Portal, selecting a worker, model, criteria, and optionally an agent version. The API validates the selection (model must be in `supportedModels`, version must be active, at least one criterion required), resolves the agent version's queue, creates a run record in CosmosDB, and enqueues a message.
-2. **Execute** — KEDA scales the target worker pod from 0→N. The worker dequeues the message, spins up the coding agent, and executes the task. The worker stamps `workerVersion` (exact build identity) on the run.
-3. **Stream** — Workers publish real-time log events to Redis Pub/Sub. The API relays these as SSE streams to the CLI/Portal.
-4. **Judge** — After the agent completes, the worker invokes the Judge to evaluate output against criteria. Results (pass/fail per criterion, scores) are persisted to CosmosDB.
-5. **Snapshot** — Each iteration's workspace is snapshotted to Blob Storage for later inspection.
+1. **Submit** — A user submits a task via CLI or Portal, selecting a registered worker, model, criteria, and optionally an agent version. The API requires an available, non-deleted agent, an active version with an explicit `queueName`, and validates requested capabilities before creating a pending run.
+2. **Schedule** — The scheduler refreshes the agent registry without restart, groups targets by authoritative queue/version, and dispatches matching pending runs while keeping invalid targets pending with actionable logs.
+3. **Execute** — KEDA scales the target worker pod from 0→N. The worker dequeues the message, spins up the coding agent, and executes the task. The worker stamps `workerVersion` (exact build identity) on the run.
+4. **Stream** — Workers publish real-time log events to Redis Pub/Sub. The API relays these as SSE streams to the CLI/Portal.
+5. **Judge** — After the agent completes, the worker invokes the Judge to evaluate output against criteria. Results (pass/fail per criterion, scores) are persisted to CosmosDB.
+6. **Snapshot** — Each iteration's workspace is snapshotted to Blob Storage for later inspection.
 
 > A run may execute as a sequence of **gates** (`Select → Build → Test → Run →
 > Deploy`), each with its own prompt, criteria subset, and iteration budget,

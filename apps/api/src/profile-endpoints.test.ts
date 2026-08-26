@@ -50,6 +50,19 @@ describe("Profile API Endpoints", () => {
       _id: "coder-acp-copilot",
       name: "Copilot",
       supportedModels: ["gpt-4o", "gpt-5"],
+      available: true,
+      capabilities: {
+        supportsReasoningEffort: true,
+        supportsMcpServers: true,
+        supportsSkills: true,
+        supportsExtensions: false,
+      },
+      versions: [{
+        agentVersion: "copilot-test",
+        queueName: "queue-copilot-test",
+        status: "active",
+        createdAt: new Date(),
+      }],
     });
   });
 
@@ -160,7 +173,7 @@ describe("Profile API Endpoints", () => {
       expect(res.status).toBe(400);
     });
 
-    it("rejects extensions on non-vscode worker", async () => {
+    it("warns about extensions when the worker does not advertise support", async () => {
       const res = await request(app)
         .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
@@ -170,13 +183,15 @@ describe("Profile API Endpoints", () => {
           extensions: ["ms-azuretools.vscode-cosmosdb@0.32.1"],
         });
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain("does not support VS Code extensions");
+      expect(res.status).toBe(201);
+      expect(res.body.warnings).toEqual([
+        expect.stringContaining("support for extensions"),
+      ]);
     });
   });
 
   describe("POST /api/v1/profiles/:profileId (new version)", () => {
-    it("rejects extensions on non-vscode worker", async () => {
+    it("warns about extensions when the worker does not advertise support", async () => {
       const profileCol = mocks.profileCollection as any;
       profileCol.findOne = vi.fn().mockResolvedValue({
         _id: "p-1",
@@ -193,8 +208,10 @@ describe("Profile API Endpoints", () => {
           extensions: ["ms-azuretools.vscode-cosmosdb@0.32.1"],
         });
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain("does not support VS Code extensions");
+      expect(res.status).toBe(201);
+      expect(res.body.warnings).toEqual([
+        expect.stringContaining("support for extensions"),
+      ]);
     });
   });
 

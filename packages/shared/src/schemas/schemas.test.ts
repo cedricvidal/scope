@@ -235,15 +235,15 @@ describe("request schemas", () => {
   });
 
   describe("WorkerTypeSchema", () => {
-    it.each(["coder-acp-claude-code", "coder-acp-copilot", "coder-acp-copilot"])(
+    it.each(["coder-acp-claude-code", "custom-registered-worker"])(
       "accepts '%s'",
       (w) => {
         expect(WorkerTypeSchema.parse(w)).toBe(w);
       },
     );
 
-    it("rejects unknown worker", () => {
-      expect(() => WorkerTypeSchema.parse("unknown-worker")).toThrow();
+    it("rejects an empty worker ID", () => {
+      expect(() => WorkerTypeSchema.parse("  ")).toThrow();
     });
   });
 

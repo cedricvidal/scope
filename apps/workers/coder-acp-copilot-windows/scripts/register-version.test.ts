@@ -136,6 +136,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
 
   it("registers agent and version with correct payloads", async () => {
     const env = {
+      QUEUE_NAME: "custom-windows-queue",
       COPILOT_CLI_VERSION: "1.2.3",
       BUILD_TIME: "20260601T120000Z",
       GIT_COMMIT: "abc1234",
@@ -177,13 +178,13 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
     expect(versionBody.components.COPILOT_CLI_VERSION).toBe("1.2.3");
     expect(versionBody.gitCommit).toBe("abc1234");
     expect(versionBody.buildTime).toBe("20260601T120000Z");
-    expect(versionBody.queueName).toBe("queue-coder-acp-copilot-windows");
+    expect(versionBody.queueName).toBe("custom-windows-queue");
   }, 30000);
 
   it("uses 'unknown' fallbacks when env vars are missing", async () => {
     const { code, stdout, stderr } = await runScript(
       `http://127.0.0.1:${port}`,
-      { COPILOT_CLI_VERSION: "", BUILD_TIME: "", GIT_COMMIT: "" },
+      { QUEUE_NAME: "custom-windows-queue", COPILOT_CLI_VERSION: "", BUILD_TIME: "", GIT_COMMIT: "" },
       tmpDir,
       [],
       childProcesses,
@@ -205,6 +206,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
     });
 
     const env = {
+      QUEUE_NAME: "custom-windows-queue",
       COPILOT_CLI_VERSION: "1.0.0",
       BUILD_TIME: "20260101T000000Z",
       GIT_COMMIT: "deadbeef",
@@ -256,6 +258,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
     });
 
     const env = {
+      QUEUE_NAME: "custom-windows-queue",
       COPILOT_CLI_VERSION: "1.0.0",
       BUILD_TIME: "20260101T000000Z",
       GIT_COMMIT: "deadbeef",
@@ -287,6 +290,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
     const unhealthyPort = (unhealthyServer.address() as { port: number }).port;
 
     const env = {
+      QUEUE_NAME: "custom-windows-queue",
       COPILOT_CLI_VERSION: "1.0.0",
       BUILD_TIME: "20260101T000000Z",
       GIT_COMMIT: "deadbeef",
@@ -312,6 +316,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
     });
 
     const env = {
+      QUEUE_NAME: "custom-windows-queue",
       COPILOT_CLI_VERSION: "1.0.0",
       BUILD_TIME: "20260101T000000Z",
       GIT_COMMIT: "deadbeef",
@@ -323,5 +328,24 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
     expect(code, `Script failed.\nstdout: ${stdout}\nstderr: ${stderr}`).toBe(0);
     // Version registration still attempted
     expect(requests.some((r) => r.url?.includes("/versions"))).toBe(true);
+  }, 30000);
+
+  it("fails before registration when QUEUE_NAME is missing", async () => {
+    const { code, stderr } = await runScript(
+      `http://127.0.0.1:${port}`,
+      {
+        QUEUE_NAME: "",
+        COPILOT_CLI_VERSION: "1.0.0",
+        BUILD_TIME: "20260101T000000Z",
+        GIT_COMMIT: "deadbeef",
+      },
+      tmpDir,
+      [],
+      childProcesses,
+    );
+
+    expect(code).not.toBe(0);
+    expect(stderr).toContain("QUEUE_NAME environment variable is required");
+    expect(requests).toHaveLength(0);
   }, 30000);
 });

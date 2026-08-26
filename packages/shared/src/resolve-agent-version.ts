@@ -8,6 +8,22 @@ export interface ResolvedVersion {
   queueName: string;
 }
 
+export interface AgentVersionResolutionError {
+  error: string;
+  activeVersions: string[];
+}
+
+function resolved(version: AgentVersion): ResolvedVersion | AgentVersionResolutionError {
+  const queueName = version.queueName?.trim();
+  if (!queueName) {
+    return {
+      error: `Agent version "${version.agentVersion}" does not declare a non-empty queueName`,
+      activeVersions: [version.agentVersion],
+    };
+  }
+  return { agentVersion: version.agentVersion, queueName };
+}
+
 /**
  * Resolve which agent version to use for a run submission.
  *
@@ -19,7 +35,7 @@ export interface ResolvedVersion {
 export function resolveAgentVersion(
   versions: AgentVersion[] | undefined,
   requestedVersion: string | undefined,
-): ResolvedVersion | { error: string; activeVersions: string[] } {
+): ResolvedVersion | AgentVersionResolutionError {
   const activeVersions = (versions ?? []).filter((v) => v.status === "active");
 
   if (requestedVersion) {
@@ -30,7 +46,7 @@ export function resolveAgentVersion(
         activeVersions: activeVersions.map((v) => v.agentVersion),
       };
     }
-    return { agentVersion: match.agentVersion, queueName: match.queueName };
+    return resolved(match);
   }
 
   if (activeVersions.length === 0) {
@@ -41,5 +57,5 @@ export function resolveAgentVersion(
   const sorted = [...activeVersions].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
-  return { agentVersion: sorted[0].agentVersion, queueName: sorted[0].queueName };
+  return resolved(sorted[0]);
 }

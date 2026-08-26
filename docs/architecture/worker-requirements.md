@@ -414,10 +414,38 @@ This is critical for long multi-turn runs where OAuth tokens may expire between 
 
 ## Worker Bootstrapping
 
+### Register an explicit routing contract
+
+Every worker manifest must define a stable agent ID, an explicit top-level
+`queueName`, and all four capability booleans:
+
+```yaml
+_id: my-agent
+queueName: my-agent-work
+capabilities:
+  supportsReasoningEffort: false
+  supportsMcpServers: true
+  supportsSkills: true
+  supportsExtensions: false
+```
+
+Omitted or false capabilities mean unsupported. Version registration must copy
+the manifest queue into `AgentVersion.queueName`; that value is authoritative
+and must be non-empty. Workers must consume the exact same queue through
+`QUEUE_NAME`. Use shared `requireQueueName()` at startup rather than deriving a
+name from the worker ID or silently falling back.
+
+Local Compose registers the Linux Copilot, Claude Code, and Windows Copilot OSS
+manifests and their exact queue names before the dynamic scheduler starts.
+
 Every worker's entry point follows the same pattern:
 
 ```typescript
-import { CodingAgentQueueProcessor, QueueProcessorConfig } from "shared";
+import {
+  CodingAgentQueueProcessor,
+  QueueProcessorConfig,
+  requireQueueName,
+} from "shared";
 
 const processor = new MyAgentProcessor();
 
@@ -427,7 +455,7 @@ const config: QueueProcessorConfig = {
   mongoCollection: process.env.MONGODB_COLLECTION || "requests",
   storageAccountName: process.env.AZURE_STORAGE_ACCOUNT_NAME!,
   storageConnectionString: process.env.AZURE_STORAGE_CONNECTION_STRING,
-  queueName: process.env.QUEUE_NAME!,
+  queueName: requireQueueName(),
   batchSize: parseInt(process.env.BATCH_SIZE || "1"),
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "5000"),
   redisHost: process.env.REDIS_HOST!,

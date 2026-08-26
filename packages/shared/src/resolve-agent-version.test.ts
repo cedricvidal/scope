@@ -62,6 +62,17 @@ describe("resolveAgentVersion", () => {
         expect(result.error).toContain("copilot-0.0.413");
       }
     });
+
+    it("returns error when the requested active version has no queue name", () => {
+      const result = resolveAgentVersion(
+        [makeVersion({ agentVersion: "copilot-broken", queueName: "  " })],
+        "copilot-broken",
+      );
+      expect(result).toEqual({
+        error: 'Agent version "copilot-broken" does not declare a non-empty queueName',
+        activeVersions: ["copilot-broken"],
+      });
+    });
   });
 
   describe("auto-selection (no version requested)", () => {
@@ -106,6 +117,18 @@ describe("resolveAgentVersion", () => {
         agentVersion: "copilot-0.0.414",
         queueName: "queue-copilot-0.0.414",
       });
+    });
+
+    it("rejects the latest active version when its queue name is empty", () => {
+      const result = resolveAgentVersion(
+        [v1, makeVersion({
+          agentVersion: "copilot-broken",
+          queueName: "",
+          createdAt: new Date("2026-03-19T16:00:00Z"),
+        })],
+        undefined,
+      );
+      expect("error" in result && result.error).toContain("non-empty queueName");
     });
   });
 });

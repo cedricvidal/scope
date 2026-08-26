@@ -33,12 +33,6 @@ export function printFollowUpCommands(id: string): void {
   console.log(`  ${dimTimestamp('List all runs:')} ${cli} run list`);
 }
 
-export const DEFAULT_WORKERS = [
-  "coder-acp-claude-code",
-  "coder-acp-copilot",
-  "coder-acp-copilot-windows"
-];
-
 /**
  * Default API URL. Computed lazily so that dotenv and applyApiPortFallback()
  * have a chance to populate process.env before this is read.

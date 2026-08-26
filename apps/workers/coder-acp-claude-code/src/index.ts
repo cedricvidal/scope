@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, KubedockClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, KubedockClient, createFreshWorkspace, cleanupWorkspaces, requireQueueName } from "shared";
 import { initTelemetry, trackMetric, trackTrace, trackEvent } from "telemetry";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
@@ -299,7 +299,7 @@ async function main(): Promise<void> {
     mongoCollection: process.env.MONGO_COLLECTION || "requests",
     storageAccountName: process.env.AZURE_STORAGE_ACCOUNT_NAME || "",
     storageConnectionString: process.env.STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_CONNECTION_STRING,
-    queueName: process.env.QUEUE_NAME || process.env.AZURE_STORAGE_QUEUE_NAME || "queue-coder-acp-claude-code",
+    queueName: requireQueueName(),
     batchSize: parseInt(process.env.BATCH_SIZE || "1", 10),
     pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "1000", 10),
     redisHost: process.env.REDIS_HOST || "",

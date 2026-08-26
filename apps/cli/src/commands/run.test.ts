@@ -201,6 +201,7 @@ describe("run submit", () => {
         [
           "run", "submit",
           "-m", "do the thing",
+          "--worker", "coder-acp-copilot",
           "--agents-md", "# Be helpful",
           "--no-stream",
           "-u", "http://localhost:3100",
@@ -225,7 +226,7 @@ describe("run submit", () => {
     try {
       const program = makeProgram();
       await program.parseAsync(
-        ["run", "submit", "-m", "plain task", "--no-stream", "-u", "http://localhost:3100", "--project", "proj-test"],
+        ["run", "submit", "-m", "plain task", "--worker", "coder-acp-copilot", "--no-stream", "-u", "http://localhost:3100", "--project", "proj-test"],
         { from: "user" },
       );
     } finally {
@@ -234,6 +235,33 @@ describe("run submit", () => {
 
     const { body } = captureSubmit();
     expect(body).not.toHaveProperty("agentsMd");
+  });
+
+  it("lets the API derive the worker for profile submissions", async () => {
+    mockFetchWith({ id: "req-profile", workerType: "dynamic-agent", status: "pending" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync(
+        [
+          "run", "submit",
+          "-m", "profile task",
+          "--profile", "profile-a@v2",
+          "--no-stream",
+          "-u", "http://localhost:3100",
+          "--project", "proj-test",
+        ],
+        { from: "user" },
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const { url, body } = captureSubmit();
+    expect(url).toContain("/api/v1/requests?projectId=proj-test");
+    expect(url).not.toContain("worker=");
+    expect(body.profileId).toBe("profile-a@v2");
   });
 });
 
@@ -341,6 +369,8 @@ describe("run submit gates", () => {
         "submit",
         "--message",
         "Implement the task",
+        "--worker",
+        "coder-acp-copilot",
         "--max-iterations",
         "3",
         "--gates",
@@ -406,6 +436,8 @@ describe("run submit codebase", () => {
         "submit",
         "--message",
         "Implement the task",
+        "--worker",
+        "coder-acp-copilot",
         "--codebase",
         "scope-core@r3",
         "--no-stream",

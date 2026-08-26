@@ -3,5 +3,9 @@ name: Claude Code CLI
 description: Anthropic Claude Code coding agent via ACP protocol
 modelProvider: anthropic
 available: true
+queueName: queue-coder-acp-claude-code
 capabilities:
   supportsReasoningEffort: true
+  supportsMcpServers: true
+  supportsSkills: true
+  supportsExtensions: false

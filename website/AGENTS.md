@@ -54,7 +54,7 @@ for opening the file.
 
 | Topic | File(s) in scope-core |
 | --- | --- |
-| Workers (allowed IDs, validation) | `packages/shared/src/schemas/request.ts` (`VALID_WORKERS`) |
+| Workers (registry entries, capabilities, routing validation) | `packages/shared/src/resolve-agent-target.ts`, `packages/shared/src/schemas/agent.ts`, and `apps/api/src/utils/agent-helpers.ts` |
 | Worker display names / labels | the `"name"` field in each worker's agent registration (upsert) payload (e.g. "GitHub Copilot CLI", "Claude Code CLI", "VS Code Copilot") |
 | Worker software stacks (pre-installed tools) | `apps/workers/*/src/test-worker.ts` — the `checkTools([...])` array lists every runtime and build tool baked into the container image |
 | Request payload, scenario shape | `packages/shared/src/schemas/request.ts` (`CreateRequestInputSchema`, `ScenarioSchema`) |
@@ -83,8 +83,7 @@ otherwise.
   custom driver extension. **This is the VS Code worker we
   document.**
 
-Copilot Chat) worker is **deprecated** — do not list it in
-user-facing docs even if it still appears in `VALID_WORKERS`.
+Copilot Chat) worker is **deprecated** — do not list it in user-facing docs.
 
 ### Criteria
 

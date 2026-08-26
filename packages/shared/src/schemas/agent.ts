@@ -9,6 +9,9 @@ extendZodWithOpenApi(z);
 export const AgentCapabilitiesSchema = z
   .object({
     supportsReasoningEffort: z.boolean().optional(),
+    supportsMcpServers: z.boolean().optional(),
+    supportsSkills: z.boolean().optional(),
+    supportsExtensions: z.boolean().optional(),
   })
   .openapi("AgentCapabilities");
 
@@ -20,7 +23,7 @@ export const AgentVersionSchema = z
     gitCommit: z.string(),
     buildTime: z.string(),
     imageTag: z.string(),
-    queueName: z.string(),
+    queueName: z.string().trim().min(1),
     status: z.enum(["active", "retired"]),
     createdAt: z.coerce.date(),
   })
@@ -76,7 +79,7 @@ export const RegisterAgentVersionInputSchema = z
     gitCommit: z.string(),
     buildTime: z.string(),
     imageTag: z.string(),
-    queueName: z.string(),
+    queueName: z.string().trim().min(1),
   })
   .openapi("RegisterAgentVersionInput");
 

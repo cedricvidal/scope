@@ -343,21 +343,37 @@ which wraps the per-gate `runMultiTurnLoop`. See the full
 
 ## Queue Pattern
 
-Each worker type has a dedicated Azure Storage Queue. The API resolves the target queue via **version-aware routing**: when a run is submitted, the API looks up the selected (or latest active) agent version and uses its registered `queueName` to route the message.
+Each worker version registers an authoritative Azure Storage Queue name. The API
+resolves and persists the target version; the scheduler discovers the same
+registry target and dispatches to its registered `queueName`.
 
 ```
 AgentVersion.queueName  →  Azure Storage Queue  →  Worker pods (0→N via KEDA)
 ```
 
-Currently all versions of an agent share a single queue (e.g., `queue-coder-acp-copilot`). When multi-version deployments are introduced, each version will have its own queue, and KEDA will scale each version independently.
+Queue names are not derived from agent IDs. Versions may share a queue, and
+agents sharing the same `(queueName, agentVersion)` are deduplicated by the
+scheduler.
 
 ### Run submission flow
 
 1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**, a **codebase** selection, and/or a per-gate **`gates`** configuration (see [Gates](#gates--multi-phase-evaluation-pipeline))
-2. API resolves `agentVersion`: explicit selection → validate active; omitted → latest active by `createdAt`
+2. API requires a non-deleted agent with `available === true`, resolves
+   `agentVersion` (explicit active selection or latest active by `createdAt`),
+   and requires that version to have a non-empty `queueName`
 3. API resolves `model`: explicit → validate against `supportedModels`; omitted → `defaultModel`
-4. API looks up `AgentVersion.queueName` and routes message to that queue
-5. `agentVersion` and `model` are persisted on the `RequestDocument`
+4. API compares requested reasoning effort, MCP servers, skills, and extensions
+   with the agent's explicit capability booleans. Missing/false is unsupported;
+   mismatches warn by default or fail when
+   `SCOPE_STRICT_AGENT_CAPABILITIES=true`
+5. Scheduler dynamically discovers the persisted worker/version pair and
+   dispatches it to `AgentVersion.queueName`
+6. `agentVersion` and `model` are persisted on the `RequestDocument`
+
+Create, profile fan-out, resubmit, retry, and resume all use the shared target
+resolver. There is no platform worker allowlist. Portal and CLI discovery use
+registry names and capabilities; historical run filters union registry entries
+with stored run facets so removed workers remain discoverable.
 
 When a codebase is selected, the API resolves the submitted spec (`codebaseRevisionId`, `{slug}@r{N}`, or bare `{slug}`) before enqueueing. Bare archive slugs resolve to the latest existing revision; bare Git slugs resolve the default branch at submit time and create a new immutable revision. The resolved revision UUID is stored as `RequestDocument.codebaseRevisionId`, and workers seed the workspace from that revision after setup and before skills extraction.
 

@@ -2,7 +2,13 @@
 // Licensed under the MIT License.
 
 import type { Collection } from "mongodb";
-import type { CodingAgentDocument } from "shared";
+import {
+  resolveAgentTarget,
+  type AgentCapability,
+  type AgentTargetResolutionError,
+  type CodingAgentDocument,
+  type ResolvedAgentTarget,
+} from "shared";
 
 export type AgentModelValidationFailure =
   | { ok: false; status: 404; error: string }
@@ -14,6 +20,33 @@ export type AgentModelValidationSuccess = {
 };
 
 export type AgentModelValidationResult = AgentModelValidationSuccess | AgentModelValidationFailure;
+
+function strictAgentCapabilitiesEnabled(): boolean {
+  return process.env.SCOPE_STRICT_AGENT_CAPABILITIES === "true";
+}
+
+export interface ResolveRegisteredAgentOptions {
+  requestedVersion?: string;
+  requiredCapabilities?: AgentCapability[];
+}
+
+export async function resolveRegisteredAgentTarget(
+  agentCollection: Collection<CodingAgentDocument>,
+  workerType: string,
+  options: ResolveRegisteredAgentOptions = {},
+): Promise<ResolvedAgentTarget | AgentTargetResolutionError> {
+  const agent = await agentCollection.findOne({ _id: workerType });
+  return resolveAgentTarget(agent, workerType, {
+    ...options,
+    strictCapabilities: strictAgentCapabilitiesEnabled(),
+  });
+}
+
+export function agentTargetErrorStatus(
+  error: AgentTargetResolutionError,
+): 400 | 404 {
+  return error.code === "agent_not_found" ? 404 : 400;
+}
 
 /**
  * Validates that an agent exists, exposes selectable models, and that the

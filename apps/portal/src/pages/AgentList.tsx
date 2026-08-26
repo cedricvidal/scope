@@ -55,8 +55,8 @@ export function AgentList() {
   );
 
   const availabilityOptions = useMemo(() => {
-    const available = activeAgents.filter((a) => a.available !== false).length;
-    const unavailable = activeAgents.filter((a) => a.available === false).length;
+    const available = activeAgents.filter((a) => a.available === true).length;
+    const unavailable = activeAgents.filter((a) => a.available !== true).length;
     return [
       { value: "available", label: "Available", count: available },
       { value: "unavailable", label: "Unavailable", count: unavailable },
@@ -80,7 +80,7 @@ export function AgentList() {
 
     return activeAgents.filter((a) => {
       if (availability.length > 0) {
-        const status = a.available === false ? "unavailable" : "available";
+        const status = a.available === true ? "available" : "unavailable";
         if (!availability.includes(status)) return false;
       }
       if (providers.length > 0 && (!a.modelProvider || !providers.includes(a.modelProvider))) {
@@ -136,10 +136,10 @@ export function AgentList() {
       header: "Availability",
       width: "120px",
       cell: (a) =>
-        a.available === false ? (
-          <Badge variant="secondary" className="text-xs">Unavailable</Badge>
-        ) : (
+        a.available === true ? (
           <Badge variant="default" className="text-xs">Available</Badge>
+        ) : (
+          <Badge variant="secondary" className="text-xs">Unavailable</Badge>
         ),
     },
     {

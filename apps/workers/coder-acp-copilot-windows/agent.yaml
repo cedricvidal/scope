@@ -3,5 +3,9 @@ name: GitHub Copilot CLI (Windows)
 description: GitHub Copilot coding agent via ACP protocol on Windows
 modelProvider: github-copilot
 available: true
+queueName: queue-coder-acp-copilot-windows
 capabilities:
-  supportsReasoningEffort: true
+  supportsReasoningEffort: false
+  supportsMcpServers: false
+  supportsSkills: true
+  supportsExtensions: false

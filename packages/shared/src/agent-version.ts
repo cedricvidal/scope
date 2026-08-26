@@ -24,9 +24,28 @@ export function detectCliVersion(command: string, packageName: string): string {
     if (match) {
       return `${packageName}@${match[1]}`;
     }
+
     // Fallback: return the raw output if short enough
     return raw.length <= 100 ? `${packageName}@${raw}` : "unknown";
   } catch {
     return "unknown";
   }
+}
+
+export function requireQueueName(
+  env: {
+    QUEUE_NAME?: string;
+    AZURE_STORAGE_QUEUE_NAME?: string;
+  } = {
+    QUEUE_NAME: process.env.QUEUE_NAME,
+    AZURE_STORAGE_QUEUE_NAME: process.env.AZURE_STORAGE_QUEUE_NAME,
+  },
+): string {
+  const queueName = (env.QUEUE_NAME || env.AZURE_STORAGE_QUEUE_NAME)?.trim();
+  if (!queueName) {
+    throw new Error(
+      "QUEUE_NAME (or legacy AZURE_STORAGE_QUEUE_NAME) is required",
+    );
+  }
+  return queueName;
 }

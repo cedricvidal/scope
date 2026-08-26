@@ -6,7 +6,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useOutlet, useParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import type { ProfileWithVersion } from "@/types";
-import { WORKER_TYPES } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2 } from "lucide-react";
@@ -65,6 +64,10 @@ export function ProfileList() {
     queryKey: ["profiles"],
     queryFn: () => api.listProfiles(),
   });
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents"],
+    queryFn: () => api.listAgents(),
+  });
 
   const deleteMutation = useMutation({
     mutationFn: (profileId: string) => api.deleteProfile(profileId),
@@ -100,12 +103,16 @@ export function ProfileList() {
       const wt = p.version?.workerType;
       if (wt) map.set(wt, (map.get(wt) ?? 0) + 1);
     }
-    return WORKER_TYPES.map((wt) => ({
-      value: wt,
-      label: wt,
-      count: map.get(wt) ?? 0,
-    })).filter((o) => o.count > 0);
-  }, [profiles]);
+    for (const agent of agents) {
+      if (!agent.deletedAt && !map.has(agent._id)) map.set(agent._id, 0);
+    }
+    const names = new Map(agents.map((agent) => [agent._id, agent.name]));
+    return [...map].map(([value, count]) => ({
+      value,
+      label: names.get(value) ?? value,
+      count,
+    }));
+  }, [agents, profiles]);
 
   const filteredProfiles = useMemo(() => {
     const workers = state.getFilterList("worker");

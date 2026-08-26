@@ -226,6 +226,9 @@ export interface AgentVersion {
 // Capabilities declared by a coding agent (worker-level features)
 export interface AgentCapabilities {
   supportsReasoningEffort?: boolean;  // Whether the worker can pass reasoning effort to the underlying agent
+  supportsMcpServers?: boolean;       // Whether the worker accepts MCP server configuration
+  supportsSkills?: boolean;           // Whether the worker accepts Agent Skills
+  supportsExtensions?: boolean;       // Whether the worker installs VS Code extensions
 }
 
 // Coding agent definition stored in MongoDB

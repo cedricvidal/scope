@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { CodingAgent, McpServerDocument } from "@/types";
+import { isRoutableAgent, type CodingAgent, type McpServerDocument } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -64,8 +64,13 @@ export function NewProfileVersion() {
   }, [profile]);
 
   // Find selected agent for model/version lists
-  const selectedAgent = agents.find((a: CodingAgent) => a._id === worker);
-  const isVscodeWorker = worker.includes("vscode");
+  const availableAgents = agents.filter(isRoutableAgent);
+  const selectedAgent = availableAgents.find((a: CodingAgent) => a._id === worker);
+  const supportsMcpServers =
+    selectedAgent?.capabilities?.supportsMcpServers === true;
+  const supportsSkills = selectedAgent?.capabilities?.supportsSkills === true;
+  const supportsExtensions =
+    selectedAgent?.capabilities?.supportsExtensions === true;
 
   // Model capabilities and effort management
   const { capabilitiesMap, activeModelIds } = useModelCapabilities(worker || undefined);
@@ -81,12 +86,12 @@ export function NewProfileVersion() {
     agentSupportsEffort: selectedAgent?.capabilities?.supportsReasoningEffort,
   });
 
-  // Clear extensions when the user switches to a non-vscode worker.
+  // Clear optional features that the selected worker does not support.
   useEffect(() => {
-    if (worker && !isVscodeWorker) {
-      setSelectedExtensions([]);
-    }
-  }, [worker, isVscodeWorker]);
+    if (!supportsMcpServers) setSelectedMcpServers([]);
+    if (!supportsSkills) setSelectedSkills([]);
+    if (!supportsExtensions) setSelectedExtensions([]);
+  }, [supportsExtensions, supportsMcpServers, supportsSkills]);
 
   // Fetch agent versions
   const { data: agentVersions = [] } = useQuery({
@@ -180,7 +185,7 @@ export function NewProfileVersion() {
                 <SelectValue placeholder="Select a worker" />
               </SelectTrigger>
               <SelectContent>
-                {agents.map((a: CodingAgent) => (
+                {availableAgents.map((a: CodingAgent) => (
                   <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -232,7 +237,7 @@ export function NewProfileVersion() {
       </Card>
 
       {/* MCP Servers */}
-      {mcpServers.length > 0 && (
+      {supportsMcpServers && mcpServers.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>MCP Servers</CardTitle>
@@ -261,18 +266,20 @@ export function NewProfileVersion() {
       )}
 
       {/* Skills */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Skills</CardTitle>
-          <CardDescription>Select skills to include — pinned to their current revision</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} />
-        </CardContent>
-      </Card>
+      {supportsSkills && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Skills</CardTitle>
+            <CardDescription>Select skills to include — pinned to their current revision</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} />
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Extensions (VS Code workers only) */}
-      {isVscodeWorker && (
+      {/* Extensions */}
+      {supportsExtensions && (
         <Card>
           <CardHeader>
             <CardTitle>Extensions</CardTitle>

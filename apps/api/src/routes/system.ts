@@ -4,7 +4,6 @@
 import { z } from "zod";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { apiRoute } from "../openapi/api-route.js";
-import { VALID_WORKERS } from "../route-context.js";
 import type { RouteContext } from "../route-context.js";
 
 export function registerSystemRoutes(ctx: RouteContext): void {
@@ -70,7 +69,12 @@ apiRoute(ctx.app, ctx.registry, {
       buildTime: (process.env.BUILD_TIME || new Date().toISOString()),
       environment: (process.env.SCOPE_ENVIRONMENT || "production"),
       description: "API that routes requests to multiple workers via separate queues",
-      workers: VALID_WORKERS,
+      workers: (await ctx.agentCollection
+        .find({ deletedAt: { $exists: false } })
+        .project({ _id: 1 })
+        .toArray())
+        .map((agent) => agent._id)
+        .sort(),
     });
   },
 });

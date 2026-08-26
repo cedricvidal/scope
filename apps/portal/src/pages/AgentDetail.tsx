@@ -325,6 +325,9 @@ export function AgentDetail() {
               const caps = agent.capabilities;
               const entries: { label: string; supported: boolean }[] = [
                 { label: "Reasoning Effort", supported: !!caps?.supportsReasoningEffort },
+                { label: "MCP Servers", supported: !!caps?.supportsMcpServers },
+                { label: "Skills", supported: !!caps?.supportsSkills },
+                { label: "Extensions", supported: !!caps?.supportsExtensions },
               ];
               return (
                 <div className="flex flex-wrap gap-2">

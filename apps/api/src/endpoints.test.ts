@@ -46,6 +46,24 @@ describe("API Endpoints", () => {
     // Re-inject after clearAllMocks so the mock implementations are fresh
     mocks = createAllMockDependencies();
     _injectTestDependencies(mocks);
+    (mocks.agentCollection.findOne as any).mockResolvedValue({
+      _id: "coder-acp-copilot",
+      name: "Copilot",
+      available: true,
+      supportedModels: ["gpt-4o"],
+      capabilities: {
+        supportsReasoningEffort: true,
+        supportsMcpServers: true,
+        supportsSkills: true,
+        supportsExtensions: false,
+      },
+      versions: [{
+        agentVersion: "1.0.0",
+        queueName: "queue-coder-acp-copilot",
+        status: "active",
+        createdAt: new Date(),
+      }],
+    });
     // Facets are memoized in a module-level cache; clear it so each test starts cold
     _resetRunFacetsCacheForTests();
   });
@@ -421,6 +439,13 @@ describe("API Endpoints", () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
         name: "Copilot",
+        available: true,
+        versions: [{
+          agentVersion: "1.0.0",
+          queueName: "queue-coder-acp-copilot",
+          status: "active",
+          createdAt: new Date(),
+        }],
         supportedModels: [],
       });
 
@@ -442,6 +467,13 @@ describe("API Endpoints", () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
         name: "Copilot",
+        available: true,
+        versions: [{
+          agentVersion: "1.0.0",
+          queueName: "queue-coder-acp-copilot",
+          status: "active",
+          createdAt: new Date(),
+        }],
         supportedModels: ["gpt-5"],
       });
 
@@ -1468,6 +1500,98 @@ describe("API Endpoints", () => {
   });
 
   // ===================================================================
+  // Dynamic worker registry routing
+  // ===================================================================
+
+  describe("POST /api/v1/requests?worker=... (registry target)", () => {
+    const submit = (worker: string, body: Record<string, unknown> = {}) =>
+      request(app)
+        .post(`/api/v1/requests?worker=${worker}&projectId=${TEST_PROJECT_ID}`)
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          ...body,
+        });
+
+    it("accepts a custom registered worker and pins its active version", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "custom-worker",
+        name: "Custom Worker",
+        available: true,
+        supportedModels: [],
+        capabilities: {},
+        versions: [{
+          agentVersion: "custom-9.1.0",
+          queueName: "authoritative-custom-queue",
+          status: "active",
+          createdAt: new Date(),
+        }],
+      });
+
+      const res = await submit("custom-worker");
+
+      expect(res.status).toBe(201);
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      expect(doc.workerType).toBe("custom-worker");
+      expect(doc.agentVersion).toBe("custom-9.1.0");
+    });
+
+    it("rejects an active version without an explicit queue name", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "custom-worker",
+        name: "Custom Worker",
+        available: true,
+        supportedModels: [],
+        versions: [{
+          agentVersion: "custom-9.1.0",
+          queueName: "  ",
+          status: "active",
+          createdAt: new Date(),
+        }],
+      });
+
+      const res = await submit("custom-worker");
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("non-empty queueName");
+      expect(mocks.collection.insertOne).not.toHaveBeenCalled();
+    });
+
+    it("enforces capability mismatches when SCOPE_STRICT_AGENT_CAPABILITIES=true", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "custom-worker",
+        name: "Custom Worker",
+        available: true,
+        supportedModels: [],
+        capabilities: { supportsExtensions: false },
+        versions: [{
+          agentVersion: "custom-9.1.0",
+          queueName: "authoritative-custom-queue",
+          status: "active",
+          createdAt: new Date(),
+        }],
+      });
+      const previous = process.env.SCOPE_STRICT_AGENT_CAPABILITIES;
+      process.env.SCOPE_STRICT_AGENT_CAPABILITIES = "true";
+
+      try {
+        const res = await submit("custom-worker", {
+          extensions: ["publisher.extension@1.0.0"],
+        });
+
+        expect(res.status).toBe(400);
+        expect(res.body.missingCapabilities).toEqual(["supportsExtensions"]);
+        expect(mocks.collection.insertOne).not.toHaveBeenCalled();
+      } finally {
+        if (previous === undefined) {
+          delete process.env.SCOPE_STRICT_AGENT_CAPABILITIES;
+        } else {
+          process.env.SCOPE_STRICT_AGENT_CAPABILITIES = previous;
+        }
+      }
+    });
+  });
+
+  // ===================================================================
   // Submit with profile — server-side field resolution
   // ===================================================================
 
@@ -1483,6 +1607,7 @@ describe("API Endpoints", () => {
         profileId: "profile-1",
         version: 1,
         workerType: "coder-acp-copilot",
+        agentVersion: "v1",
         model: "claude-sonnet-4",
         mcpServers: ["ms-learn"],
         skillRevisions: ["github/awesome-copilot/cosmosdb@abc123"],
@@ -1490,7 +1615,11 @@ describe("API Endpoints", () => {
       });
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
-        versions: [{ agentVersion: "v1", status: "active", createdAt: new Date() }],
+        available: true,
+        versions: [
+          { agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date("2026-01-01") },
+          { agentVersion: "v2", status: "active", queueName: "queue-coder-acp-copilot-v2", createdAt: new Date("2026-02-01") },
+        ],
         supportedModels: ["claude-sonnet-4"],
       });
       // resolveSkillSpecs will validate the skill slug exists
@@ -1508,7 +1637,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
+        .post(`/api/v1/requests?projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           profileId: "profile-1",
@@ -1520,6 +1649,7 @@ describe("API Endpoints", () => {
       expect(doc).toHaveProperty("model", "claude-sonnet-4");
       expect(doc).toHaveProperty("mcpServers", ["ms-learn"]);
       expect(doc).toHaveProperty("skillRevisions", ["github/awesome-copilot/cosmosdb@abc123"]);
+      expect(doc).toHaveProperty("agentVersion", "v1");
       expect(doc).toHaveProperty("profileId", "profile-1");
       expect(doc).toHaveProperty("profileVersionId", "pv-1");
     });
@@ -1535,6 +1665,7 @@ describe("API Endpoints", () => {
         profileId: "profile-1",
         version: 1,
         workerType: "coder-acp-copilot",
+        agentVersion: "v1",
         model: "claude-sonnet-4",
         mcpServers: [],
         skillRevisions: [],
@@ -1546,13 +1677,17 @@ describe("API Endpoints", () => {
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           profileId: "profile-1",
+          agentVersion: "v2",
           model: "gpt-4o", // conflicts with profile's claude-sonnet-4
         });
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain("controls these fields");
       expect(res.body.conflicts).toEqual(
-        expect.arrayContaining([expect.stringContaining("model")])
+        expect.arrayContaining([
+          expect.stringContaining("agentVersion"),
+          expect.stringContaining("model"),
+        ])
       );
     });
 
@@ -1574,7 +1709,8 @@ describe("API Endpoints", () => {
       });
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
-        versions: [{ agentVersion: "v1", status: "active", createdAt: new Date() }],
+        available: true,
+        versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-sonnet-4"],
       });
       // The project-scoped lookup finds nothing — the slug lives in another project.
@@ -1601,6 +1737,7 @@ describe("API Endpoints", () => {
     it("rejects when effort is incompatible with model capabilities", async () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-opus-4.6"],
       });
@@ -1625,6 +1762,7 @@ describe("API Endpoints", () => {
     it("accepts valid effort and stores it on the run", async () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-opus-4.6"],
       });
@@ -1665,6 +1803,7 @@ describe("API Endpoints", () => {
       });
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-opus-4.6"],
       });
@@ -1689,6 +1828,7 @@ describe("API Endpoints", () => {
     it("returns warnings for models with limited effort support when no effort is specified", async () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-haiku"],
       });
@@ -1718,6 +1858,7 @@ describe("API Endpoints", () => {
     const setupCopilotAgent = () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-haiku-4.5"],
       });
@@ -1799,6 +1940,7 @@ describe("API Endpoints", () => {
     beforeEach(() => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: [],
       });
@@ -1902,6 +2044,7 @@ describe("API Endpoints", () => {
       );
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: [],
       });
@@ -2004,6 +2147,7 @@ describe("API Endpoints", () => {
 
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [
           { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
         ],
@@ -2041,6 +2185,7 @@ describe("API Endpoints", () => {
 
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [
           { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
         ],
@@ -2088,6 +2233,7 @@ describe("API Endpoints", () => {
       // Mock agentCollection.findOne to return an agent with an active version
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [
           { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
         ],
@@ -2147,6 +2293,8 @@ describe("API Endpoints", () => {
 
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-vscode-insiders",
+        available: true,
+        capabilities: { supportsExtensions: true },
         versions: [
           { agentVersion: "insiders-0.1.0", queueName: "queue-vscode-insiders", status: "active", createdAt: new Date() },
         ],
@@ -2213,6 +2361,7 @@ describe("API Endpoints", () => {
 
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [
           { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
         ],
@@ -2604,6 +2753,11 @@ describe("API Endpoints", () => {
 
   describe("POST /api/v1/requests/:id/resume", () => {
     it("resumes a paused request", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "r1",
+        workerType: "coder-acp-copilot",
+        run: { _id: "run1", status: "paused" },
+      });
       (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
 
       const res = await request(app).post("/api/v1/requests/r1/resume");
@@ -2656,7 +2810,21 @@ describe("API Endpoints", () => {
 
   describe("POST /api/v1/requests/bulk-resume", () => {
     it("resumes multiple paused requests", async () => {
-      (mocks.collection.updateMany as any).mockResolvedValue({ matchedCount: 2, modifiedCount: 2 });
+      (mocks.collection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([
+          {
+            _id: "r1",
+            workerType: "coder-acp-copilot",
+            run: { _id: "run1", status: "paused" },
+          },
+          {
+            _id: "r2",
+            workerType: "coder-acp-copilot",
+            run: { _id: "run2", status: "paused" },
+          },
+        ]),
+      });
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
 
       const res = await request(app)
         .post("/api/v1/requests/bulk-resume")

@@ -3,5 +3,9 @@ name: GitHub Copilot CLI
 description: GitHub Copilot coding agent via ACP protocol
 modelProvider: github-copilot
 available: true
+queueName: queue-coder-acp-copilot
 capabilities:
   supportsReasoningEffort: true
+  supportsMcpServers: true
+  supportsSkills: true
+  supportsExtensions: false

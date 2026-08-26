@@ -32,7 +32,7 @@ import {
   runDurationMs,
   parseExtensionSpec,
   parseProfileSpec,
-  resolveAgentVersion,
+  requiredAgentCapabilities,
   validateGateConfigs,
   isCriterionCompatibleWithGate,
   orderGates,
@@ -40,7 +40,6 @@ import {
 } from "shared";
 import type { ProfileDocument, ProfileVersionDocument, GateConfig, GateId } from "shared";
 import { apiRoute } from "../../openapi/api-route.js";
-import { VALID_WORKERS } from "../../route-context.js";
 import type {
   ExtensionDocument,
   McpServerDocument,
@@ -71,11 +70,26 @@ import {
 } from "../../archive-har.js";
 import { insertHistoricalRun, listHistoricalRuns, getHistoricalRun } from "../../runs-repo.js";
 import { ProjectIdQuerySchema, getQueryProjectId } from "../../utils/project-scope.js";
+import {
+  agentTargetErrorStatus,
+  resolveRegisteredAgentTarget,
+} from "../../utils/agent-helpers.js";
 import type { RunState } from "shared";
 
 type RequestCollection = RouteContext["requestCollection"];
 type RunFacetsResponse = z.infer<typeof RunFacetsResponseSchema>;
 type RunFacetKey = (typeof RUN_FACET_DIMS)[number]["key"];
+
+function logAgentTargetWarnings(
+  action: string,
+  workerType: string,
+  warnings: string[],
+): void {
+  if (warnings.length === 0) return;
+  console.warn(
+    `[Requests] ${action} target warnings for ${workerType}: ${warnings.join(" ")}`,
+  );
+}
 
 /**
  * Categorical dimensions exposed by the Runs filter rail. Each has a single-field
@@ -492,11 +506,7 @@ apiRoute(ctx.app, ctx.registry, {
           return;
         }
 
-        const variationWorkerType = variationProfileVersion.workerType as WorkerType;
-        if (!VALID_WORKERS.includes(variationWorkerType)) {
-          res.status(400).json({ error: `Invalid worker in variation profile: ${variationWorkerType}` });
-          return;
-        }
+        const variationWorkerType = variationProfileVersion.workerType;
 
         let model = variationProfileVersion.model;
         const effectiveMcpServers = variationProfileVersion.mcpServers ?? undefined;
@@ -504,8 +514,41 @@ apiRoute(ctx.app, ctx.registry, {
         const effectiveExtensions = variationProfileVersion.extensions ?? undefined;
         const requestedVariationAgentVersion = variationProfileVersion.agentVersion ?? requestedAgentVersion;
 
-        const agentDoc = await ctx.agentCollection.findOne({ _id: variationWorkerType, deletedAt: { $exists: false } });
-        if (agentDoc && agentDoc.supportedModels.length > 0) {
+        const target = await resolveRegisteredAgentTarget(
+          ctx.agentCollection,
+          variationWorkerType,
+          {
+            requestedVersion: requestedVariationAgentVersion,
+            requiredCapabilities: requiredAgentCapabilities({
+              reasoningEffort:
+                variationProfileVersion.reasoningEffort ??
+                requestedReasoningEffort,
+              mcpServers: effectiveMcpServers,
+              skills: effectiveSkills,
+              extensions: effectiveExtensions,
+            }),
+          },
+        );
+        if ("error" in target) {
+          res.status(agentTargetErrorStatus(target)).json({
+            error: target.error,
+            ...(target.activeVersions
+              ? { activeVersions: target.activeVersions }
+              : {}),
+            ...(target.missingCapabilities
+              ? { missingCapabilities: target.missingCapabilities }
+              : {}),
+            variationProfileId: variationEntry.profileId,
+          });
+          return;
+        }
+        logAgentTargetWarnings(
+          `Profile variation ${variationEntry.profileId}`,
+          variationWorkerType,
+          target.warnings,
+        );
+        const agentDoc = target.agent;
+        if (agentDoc.supportedModels.length > 0) {
           if (model && !agentDoc.supportedModels.includes(model)) {
             res.status(400).json({
               error: `Invalid model "${model}" for agent "${variationWorkerType}"`,
@@ -527,19 +570,7 @@ apiRoute(ctx.app, ctx.registry, {
           }
         }
 
-        let resolvedAgentVersion: string | undefined;
-        if (agentDoc) {
-          const versionResult = resolveAgentVersion(agentDoc.versions, requestedVariationAgentVersion);
-          if ("error" in versionResult) {
-            res.status(400).json({
-              error: `${versionResult.error} for agent "${variationWorkerType}"`,
-              activeVersions: versionResult.activeVersions,
-              variationProfileId: variationEntry.profileId,
-            });
-            return;
-          }
-          resolvedAgentVersion = versionResult.agentVersion;
-        }
+        const resolvedAgentVersion = target.agentVersion;
 
         let validatedMcpServers: string[] | undefined;
         if (effectiveMcpServers !== undefined && effectiveMcpServers.length > 0) {
@@ -737,6 +768,15 @@ apiRoute(ctx.app, ctx.registry, {
       if (requestedModel && requestedModel !== profileVersion.model) {
         conflicts.push(`model: sent "${requestedModel}", profile requires "${profileVersion.model}"`);
       }
+      if (
+        profileVersion.agentVersion &&
+        requestedAgentVersion &&
+        requestedAgentVersion !== profileVersion.agentVersion
+      ) {
+        conflicts.push(
+          `agentVersion: sent "${requestedAgentVersion}", profile requires "${profileVersion.agentVersion}"`,
+        );
+      }
       if (mcpServerSlugs !== undefined) {
         const profileMcp = profileVersion.mcpServers ?? [];
         if (JSON.stringify([...mcpServerSlugs].sort()) !== JSON.stringify([...profileMcp].sort())) {
@@ -773,6 +813,7 @@ apiRoute(ctx.app, ctx.registry, {
     const effectiveMcpServers = profileVersion ? (profileVersion.mcpServers ?? undefined) : mcpServerSlugs;
     const effectiveSkills = profileVersion ? (profileVersion.skillRevisions ?? undefined) : skillSlugs;
     const effectiveExtensions = profileVersion ? (profileVersion.extensions ?? undefined) : extensionIds;
+    const effectiveAgentVersion = profileVersion?.agentVersion ?? requestedAgentVersion;
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
       res.status(400).json({ error: "scenario.task is required and must be a string" });
@@ -782,25 +823,7 @@ apiRoute(ctx.app, ctx.registry, {
     if (!worker) {
       res.status(400).json({ 
         error: "Worker query parameter is required",
-        validWorkers: VALID_WORKERS,
-        example: "/api/v1/requests?worker=worker-1"
-      });
-      return;
-    }
-
-    if (!VALID_WORKERS.includes(worker as WorkerType)) {
-      res.status(400).json({ 
-        error: `Invalid worker: ${worker}`,
-        validWorkers: VALID_WORKERS
-      });
-      return;
-    }
-
-    // Check if the worker (agent) is available for new submissions
-    const workerAgent = await ctx.agentCollection.findOne({ _id: worker, deletedAt: { $exists: false } });
-    if (workerAgent && workerAgent.available === false) {
-      res.status(400).json({
-        error: `Worker "${worker}" is not available for new submissions`,
+        example: "/api/v1/requests?worker=<agent-id>"
       });
       return;
     }
@@ -851,12 +874,37 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    const workerType = worker as WorkerType;
+    const workerType = worker;
+    const target = await resolveRegisteredAgentTarget(
+      ctx.agentCollection,
+      workerType,
+      {
+        requestedVersion: effectiveAgentVersion,
+        requiredCapabilities: requiredAgentCapabilities({
+          reasoningEffort: effectiveReasoningEffort,
+          mcpServers: effectiveMcpServers,
+          skills: effectiveSkills,
+          extensions: effectiveExtensions,
+        }),
+      },
+    );
+    if ("error" in target) {
+      res.status(agentTargetErrorStatus(target)).json({
+        error: target.error,
+        ...(target.activeVersions
+          ? { activeVersions: target.activeVersions }
+          : {}),
+        ...(target.missingCapabilities
+          ? { missingCapabilities: target.missingCapabilities }
+          : {}),
+      });
+      return;
+    }
 
-    // Resolve model: validate against agent's supportedModels if available
+    // Resolve model against the registered target.
     let model: string | undefined = effectiveModel;
-    const agentDoc = await ctx.agentCollection.findOne({ _id: workerType, deletedAt: { $exists: false } });
-    if (agentDoc && agentDoc.supportedModels.length > 0) {
+    const agentDoc = target.agent;
+    if (agentDoc.supportedModels.length > 0) {
       if (model && !agentDoc.supportedModels.includes(model)) {
         res.status(400).json({
           error: `Invalid model "${model}" for agent "${workerType}"`,
@@ -876,22 +924,10 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
-    // Resolve agent version: explicit selection or latest active
-    let resolvedAgentVersion: string | undefined;
-    if (agentDoc) {
-      const versionResult = resolveAgentVersion(agentDoc.versions, requestedAgentVersion);
-      if ("error" in versionResult) {
-        res.status(400).json({
-          error: `${versionResult.error} for agent "${workerType}"`,
-          activeVersions: versionResult.activeVersions,
-        });
-        return;
-      }
-      resolvedAgentVersion = versionResult.agentVersion;
-    }
+    const resolvedAgentVersion = target.agentVersion;
 
     // Validate reasoning effort against model capabilities
-    const warnings: string[] = [];
+    const warnings: string[] = [...target.warnings];
     let modelCapabilities: { reasoningEffort?: string[] } | undefined;
     if (model) {
       const compoundModelId = `${workerType}:${model}`;
@@ -944,13 +980,6 @@ apiRoute(ctx.app, ctx.registry, {
           }
         }
       }
-    }
-
-    // Warn if reasoning effort is requested but the worker doesn't support it
-    if (effectiveReasoningEffort && agentDoc && !agentDoc.capabilities?.supportsReasoningEffort) {
-      warnings.push(
-        `Worker "${workerType}" does not declare support for reasoning effort. The effort setting "${effectiveReasoningEffort}" may be ignored.`
-      );
     }
 
     // Validate MCP server slugs if provided
@@ -1267,9 +1296,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Multi-value categorical filters: accept a single value, a repeated param,
     // or a comma list, plus the `__empty__` "(Unknown)" sentinel (issue #1138).
-    const workerValues = parseMulti(req.query.worker).filter(
-      (w) => w === EMPTY_FILTER_VALUE || VALID_WORKERS.includes(w as WorkerType),
-    );
+    const workerValues = parseMulti(req.query.worker);
     const statusValues = parseMulti(req.query.status);
     const outcomeValues = parseMulti(req.query.outcome);
     const profileIdValues = parseMulti(req.query.profileId);
@@ -1775,21 +1802,6 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res) => {
     const { ids, count, overrides } = req.body;
 
-    // Validate workerType override against known workers
-    if (overrides?.workerType && !VALID_WORKERS.includes(overrides.workerType as WorkerType)) {
-      res.status(400).json({ error: `Invalid workerType override: ${overrides.workerType}` });
-      return;
-    }
-
-    // Check if the overridden worker is available for new submissions
-    if (overrides?.workerType) {
-      const overrideAgent = await ctx.agentCollection.findOne({ _id: overrides.workerType, deletedAt: { $exists: false } });
-      if (overrideAgent && overrideAgent.available === false) {
-        res.status(400).json({ error: `Worker "${overrides.workerType}" is not available for new submissions` });
-        return;
-      }
-    }
-
     // Resolve profile override (once for the entire batch)
     let overrideProfileId: string | null | undefined = overrides?.profileId;
     let overrideProfileVersionId: string | undefined;
@@ -1895,9 +1907,9 @@ apiRoute(ctx.app, ctx.registry, {
 
         // When a profile is active, its values take precedence over individual overrides
         // for the fields it controls: workerType, model, mcpServers, skillRevisions, extensions
-        const effectiveWorkerType = (activeProfileVersion
+        const effectiveWorkerType = activeProfileVersion
           ? activeProfileVersion.workerType
-          : (overrides?.workerType ?? original.workerType)) as WorkerType;
+          : (overrides?.workerType ?? original.workerType);
         const effectiveModel = activeProfileVersion
           ? activeProfileVersion.model
           : (overrides?.model !== undefined ? overrides.model : original.model);
@@ -1924,18 +1936,37 @@ apiRoute(ctx.app, ctx.registry, {
         const effectiveExtensions = activeProfileVersion
           ? (activeProfileVersion.extensions ?? null)
           : (overrides?.extensions !== undefined ? overrides.extensions : original.extensions);
-        // Strip extensions for non-vscode workers (they don't support VS Code extensions)
-        const isVscodeWorker = effectiveWorkerType.includes("vscode");
-
-        // Resolve agent version for re-submitted run (latest active for the effective worker)
-        let resolvedAgentVersion: string | undefined;
-        const agentDoc = await ctx.agentCollection.findOne({ _id: effectiveWorkerType, deletedAt: { $exists: false } });
-        if (agentDoc) {
-          const versionResult = resolveAgentVersion(agentDoc.versions, undefined);
-          if (!("error" in versionResult)) {
-            resolvedAgentVersion = versionResult.agentVersion;
-          }
+        const target = await resolveRegisteredAgentTarget(
+          ctx.agentCollection,
+          effectiveWorkerType,
+          {
+            requestedVersion: activeProfileVersion?.agentVersion,
+            requiredCapabilities: requiredAgentCapabilities({
+              reasoningEffort: effectiveReasoningEffort,
+              mcpServers: effectiveMcpServers,
+              skills: effectiveSkillRevisions,
+              extensions: effectiveExtensions,
+            }),
+          },
+        );
+        if ("error" in target) {
+          res.status(agentTargetErrorStatus(target)).json({
+            error: target.error,
+            ...(target.activeVersions
+              ? { activeVersions: target.activeVersions }
+              : {}),
+            ...(target.missingCapabilities
+              ? { missingCapabilities: target.missingCapabilities }
+              : {}),
+          });
+          return;
         }
+        if (target.warnings.length > 0) {
+          console.warn(
+            `[Requests] Re-submit target warnings for ${effectiveWorkerType}: ${target.warnings.join(" ")}`,
+          );
+        }
+        const resolvedAgentVersion = target.agentVersion;
 
         const newDoc: RequestDocument = {
           _id: requestId,
@@ -1951,8 +1982,8 @@ apiRoute(ctx.app, ctx.registry, {
           ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
-          ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),
-          ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+          ...(effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),
+          agentVersion: resolvedAgentVersion,
           ...(original.taskPromptId ? { taskPromptId: original.taskPromptId } : {}),
           ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
           ...(effectiveProfileVersionId ? { profileVersionId: effectiveProfileVersionId } : {}),
@@ -2909,6 +2940,26 @@ apiRoute(ctx.app, ctx.registry, {
         continue;
       }
 
+      const target = await resolveRegisteredAgentTarget(
+        ctx.agentCollection,
+        request.workerType,
+        {
+          requestedVersion: request.agentVersion,
+          requiredCapabilities: requiredAgentCapabilities({
+            reasoningEffort: request.reasoningEffort,
+            mcpServers: request.mcpServers,
+            skills: request.skillRevisions,
+            extensions: request.extensions,
+          }),
+        },
+      );
+      if ("error" in target) {
+        results.push({ requestId: id, error: target.error });
+        skipped++;
+        continue;
+      }
+      logAgentTargetWarnings("Bulk retry", request.workerType, target.warnings);
+
       const runToDemote = currentRun;
       const newAttemptNumber = (runToDemote.attemptNumber ?? 1) + 1;
       const newRunId = uuidv4();
@@ -2933,7 +2984,13 @@ apiRoute(ctx.app, ctx.registry, {
       // 2. Atomically swap
       const updateResult = await ctx.requestCollection.updateOne(
         { _id: id, "run._id": runToDemote._id },
-        { $set: { run: newRun, updatedAt: new Date() } },
+        {
+          $set: {
+            run: newRun,
+            agentVersion: target.agentVersion,
+            updatedAt: new Date(),
+          },
+        },
       );
       if (updateResult.matchedCount === 0) {
         results.push({ requestId: id, error: "Race condition — another retry started first" });
@@ -3001,6 +3058,33 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    const target = await resolveRegisteredAgentTarget(
+      ctx.agentCollection,
+      request.workerType,
+      {
+        requestedVersion: request.agentVersion,
+        requiredCapabilities: requiredAgentCapabilities({
+          reasoningEffort: request.reasoningEffort,
+          mcpServers: request.mcpServers,
+          skills: request.skillRevisions,
+          extensions: request.extensions,
+        }),
+      },
+    );
+    if ("error" in target) {
+      res.status(agentTargetErrorStatus(target)).json({
+        error: target.error,
+        ...(target.activeVersions
+          ? { activeVersions: target.activeVersions }
+          : {}),
+        ...(target.missingCapabilities
+          ? { missingCapabilities: target.missingCapabilities }
+          : {}),
+      });
+      return;
+    }
+    logAgentTargetWarnings("Retry", request.workerType, target.warnings);
+
     const runToDemote = currentRun;
 
     const newAttemptNumber = (runToDemote.attemptNumber ?? 1) + 1;
@@ -3029,6 +3113,7 @@ apiRoute(ctx.app, ctx.registry, {
       {
         $set: {
           run: newRun,
+          agentVersion: target.agentVersion,
           updatedAt: new Date(),
         },
       },
@@ -3154,6 +3239,48 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.object({ id: z.string(), status: z.string() }),
   handler: async (req, res) => {
     const { id } = req.params;
+    const doc = await ctx.requestCollection.findOne({
+      _id: id,
+      deletedAt: { $exists: false },
+    });
+    if (!doc) {
+      res.status(404).json({ error: `Request not found: ${id}` });
+      return;
+    }
+    if (doc.run?.status !== "paused") {
+      res.status(409).json({
+        error: `Cannot resume request in status "${doc.run?.status}". Only paused requests can be resumed.`,
+      });
+      return;
+    }
+
+    const target = await resolveRegisteredAgentTarget(
+      ctx.agentCollection,
+      doc.workerType,
+      {
+        requestedVersion: doc.agentVersion,
+        requiredCapabilities: requiredAgentCapabilities({
+          reasoningEffort: doc.reasoningEffort,
+          mcpServers: doc.mcpServers,
+          skills: doc.skillRevisions,
+          extensions: doc.extensions,
+        }),
+      },
+    );
+    if ("error" in target) {
+      res.status(agentTargetErrorStatus(target)).json({
+        error: target.error,
+        ...("activeVersions" in target && target.activeVersions
+          ? { activeVersions: target.activeVersions }
+          : {}),
+        ...("missingCapabilities" in target && target.missingCapabilities
+          ? { missingCapabilities: target.missingCapabilities }
+          : {}),
+      });
+      return;
+    }
+    logAgentTargetWarnings("Resume", doc.workerType, target.warnings);
+
     const result = await ctx.requestCollection.updateOne(
       {
         _id: id,
@@ -3165,18 +3292,14 @@ apiRoute(ctx.app, ctx.registry, {
           "run.status": "pending",
           "run.resumedAt": new Date(),
           "run.updatedAt": new Date(),
+          agentVersion: target.agentVersion,
           updatedAt: new Date(),
         },
       },
     );
     if (result.matchedCount === 0) {
-      const doc = await ctx.requestCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-      if (!doc) {
-        res.status(404).json({ error: `Request not found: ${id}` });
-        return;
-      }
       res.status(409).json({
-        error: `Cannot resume request in status "${doc.run?.status}". Only paused requests can be resumed.`,
+        error: `Request ${id} changed before it could be resumed`,
       });
       return;
     }
@@ -3224,22 +3347,53 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.object({ updated: z.number(), skipped: z.number() }),
   handler: async (req, res) => {
     const { ids } = req.body;
-    const result = await ctx.requestCollection.updateMany(
-      {
+    const docs = await ctx.requestCollection
+      .find({
         _id: { $in: ids },
         "run.status": "paused",
         deletedAt: { $exists: false },
-      },
-      {
-        $set: {
-          "run.status": "pending",
-          "run.resumedAt": new Date(),
-          "run.updatedAt": new Date(),
-          updatedAt: new Date(),
+      })
+      .toArray();
+    let updated = 0;
+    for (const doc of docs) {
+      const target = await resolveRegisteredAgentTarget(
+        ctx.agentCollection,
+        doc.workerType,
+        {
+          requestedVersion: doc.agentVersion,
+          requiredCapabilities: requiredAgentCapabilities({
+            reasoningEffort: doc.reasoningEffort,
+            mcpServers: doc.mcpServers,
+            skills: doc.skillRevisions,
+            extensions: doc.extensions,
+          }),
         },
-      },
-    );
-    const updated = result.modifiedCount;
+      );
+      if ("error" in target) {
+        console.warn(
+          `[Requests] Cannot resume ${doc._id}: ${target.error}`,
+        );
+        continue;
+      }
+      logAgentTargetWarnings("Bulk resume", doc.workerType, target.warnings);
+      const result = await ctx.requestCollection.updateOne(
+        {
+          _id: doc._id,
+          "run.status": "paused",
+          deletedAt: { $exists: false },
+        },
+        {
+          $set: {
+            "run.status": "pending",
+            "run.resumedAt": new Date(),
+            "run.updatedAt": new Date(),
+            agentVersion: target.agentVersion,
+            updatedAt: new Date(),
+          },
+        },
+      );
+      updated += result.modifiedCount;
+    }
     res.json({ updated, skipped: ids.length - updated });
   },
 });

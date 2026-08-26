@@ -558,11 +558,37 @@ Git commit hash embedded in reporter metadata. Automatically set during CI/CD bu
 
 ## Scheduler Configuration
 
+### SCOPE_STRICT_AGENT_CAPABILITIES
+**Default:** `false`
+**Type:** boolean (`true` to enable)
+
+Controls capability mismatch handling during API target resolution. Agents
+advertise `supportsReasoningEffort`, `supportsMcpServers`, `supportsSkills`, and
+`supportsExtensions`; omitted/false means unsupported. Mismatches produce
+warnings by default and fail validation when this variable is exactly `true`.
+Agent existence, deletion, `available === true`, active-version, and non-empty
+`AgentVersion.queueName` checks are always enforced.
+
 ### SCHEDULER_POLL_INTERVAL_MS
 **Default:** `2000`
 **Type:** integer (milliseconds)
 
 How often the request scheduler polls MongoDB for pending requests to dispatch to coder workers. Applies to all worker types. Lower values reduce queue latency; higher values save RUs.
+
+### SCHEDULER_REGISTRY_REFRESH_INTERVAL_MS
+**Default:** `30000`
+**Type:** integer (milliseconds, minimum 1000)
+
+How often the scheduler refreshes routable agent versions from MongoDB. New or
+updated registry entries become dispatch targets without restarting the
+scheduler. A failed refresh pauses dispatch until the next successful refresh.
+
+### SCHEDULER_TARGET_QUEUE_DEPTH
+**Default:** `5`
+**Type:** positive integer
+
+Maximum approximate Azure Queue depth maintained for each discovered
+`(AgentVersion.queueName, agentVersion)` target.
 
 ### SCHEDULER_PP_POLL_INTERVAL_MS
 **Default:** `30000`

@@ -22,7 +22,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import type { CodingAgent, McpServerDocument, ProfileWithVersion } from "@/types";
+import {
+  isRoutableAgent,
+  type CodingAgent,
+  type McpServerDocument,
+  type ProfileWithVersion,
+} from "@/types";
 
 interface ProfileCreateFormProps {
   onCreated: (profile: ProfileWithVersion) => void;
@@ -64,24 +69,33 @@ export function ProfileCreateForm({
   const supportedModels = activeModelIds.length > 0
     ? activeModelIds
     : (selectedAgent?.supportedModels ?? []);
-  const isVscodeWorker = worker.includes("vscode");
+  const supportsMcpServers =
+    selectedAgent?.capabilities?.supportsMcpServers === true;
+  const supportsSkills = selectedAgent?.capabilities?.supportsSkills === true;
+  const supportsExtensions =
+    selectedAgent?.capabilities?.supportsExtensions === true;
   const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
   const { supportedEfforts } = useReasoningEffort({
     model,
     capabilitiesMap,
     value: reasoningEffort,
     onChange: onEffortChange,
+    agentSupportsEffort:
+      selectedAgent?.capabilities?.supportsReasoningEffort === true,
   });
 
   const eligibleAgents = agents.filter(
-    (a: CodingAgent) => Array.isArray(a.supportedModels) && a.supportedModels.length > 0,
+    (a: CodingAgent) =>
+      isRoutableAgent(a) &&
+      Array.isArray(a.supportedModels) &&
+      a.supportedModels.length > 0,
   );
 
   useEffect(() => {
-    if (worker && !isVscodeWorker) {
-      setSelectedExtensions([]);
-    }
-  }, [worker, isVscodeWorker]);
+    if (!supportsMcpServers) setSelectedMcpServers([]);
+    if (!supportsSkills) setSelectedSkills([]);
+    if (!supportsExtensions) setSelectedExtensions([]);
+  }, [supportsExtensions, supportsMcpServers, supportsSkills]);
 
   const { data: agentVersions = [] } = useQuery({
     queryKey: ["agent-versions", worker],
@@ -283,7 +297,7 @@ export function ProfileCreateForm({
         </CardContent>
       </Card>
 
-      {mcpServers.length > 0 && (
+      {supportsMcpServers && mcpServers.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>MCP Servers</CardTitle>
@@ -311,17 +325,19 @@ export function ProfileCreateForm({
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Skills</CardTitle>
-          <CardDescription>Select skills to include — pinned to their current revision</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} />
-        </CardContent>
-      </Card>
+      {supportsSkills && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Skills</CardTitle>
+            <CardDescription>Select skills to include — pinned to their current revision</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} />
+          </CardContent>
+        </Card>
+      )}
 
-      {isVscodeWorker && (
+      {supportsExtensions && (
         <Card>
           <CardHeader>
             <CardTitle>Extensions</CardTitle>

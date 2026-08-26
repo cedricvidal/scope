@@ -31,7 +31,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 $AgentId = "coder-acp-copilot-windows"
-$QueueName = "queue-coder-acp-copilot-windows"
+$QueueName = if ($env:QUEUE_NAME) { $env:QUEUE_NAME.Trim() } else { "" }
+if (-not $QueueName) {
+  throw "QUEUE_NAME environment variable is required"
+}
 
 # Build version strings from env vars baked into the worker image
 $copilotCliVersion = if ($env:COPILOT_CLI_VERSION) { $env:COPILOT_CLI_VERSION } else { "unknown" }

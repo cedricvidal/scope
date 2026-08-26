@@ -50,7 +50,7 @@ import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useModelCapabilities, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { formatDate, formatId, formatDuration, truncate, cn } from "@/lib/utils";
-import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
+import { isRoutableAgent, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, RunStatus, RunOutcome, IterationOp, BulkResubmitOverrides, RunSortField, RunFacetBucket } from "@/types";
 
 const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "submissionId", "criteria", "model", "profile", "os", "priority", "version", "dateFrom", "dateTo", "groupBy", "turns", "turnsOp", "maxIter", "maxIterOp"] as const;
@@ -701,9 +701,8 @@ export function RunsList() {
   });
   // Lazy queries for the resubmit override dialog.
   const { data: agentsData = [] } = useQuery({
-    queryKey: ["agents", "runs-list-resubmit"],
+    queryKey: ["agents"],
     queryFn: () => api.listAgents(),
-    enabled: resubmitDialogOpen,
     staleTime: 60_000,
   });
   const { data: mcpServersData = [] } = useQuery({
@@ -1119,7 +1118,7 @@ export function RunsList() {
   );
 
   const availableAgents = useMemo(
-    () => agentsData.filter((a) => !a.deletedAt && a.available !== false),
+    () => agentsData.filter(isRoutableAgent),
     [agentsData],
   );
 
@@ -1224,10 +1223,17 @@ export function RunsList() {
   // every selectable value appears with an accurate full-dataset count — not just
   // the values present on the loaded page. Enum dimensions show all known values
   // (even at count 0); open-ended dimensions show only values that exist.
-  const workerOptions = useMemo(
-    () => enumFacetOptions(WORKER_TYPES as readonly string[], facets?.workerType),
-    [facets],
-  );
+  const workerOptions = useMemo(() => {
+    const counts = facetCountMap(facets?.workerType);
+    for (const agent of agentsData) {
+      if (!agent.deletedAt && !counts.has(agent._id)) counts.set(agent._id, 0);
+    }
+    const names = new Map(agentsData.map((agent) => [agent._id, agent.name]));
+    const buckets = [...counts].map(([value, count]) => ({ value, count }));
+    return dynamicFacetOptions(buckets, {
+      labelFor: (value) => names.get(value) ?? value,
+    });
+  }, [agentsData, facets]);
   const statusOptions = useMemo(
     () => enumFacetOptions(STATUS_LIST as readonly string[], facets?.status),
     [facets],
@@ -2724,8 +2730,12 @@ export function RunsList() {
                     const next = { ...prev };
                     if (v === "__keep__") { delete next.workerType; } else { next.workerType = v; }
                     delete next.model;
-                    const effectiveWorkerType = v === "__keep__" ? selectedRunsSummary.worker : v;
-                    if (effectiveWorkerType && !effectiveWorkerType.includes("vscode")) {
+                    const targetAgent = v === "__keep__"
+                      ? undefined
+                      : availableAgents.find((agent) => agent._id === v);
+                    if (v === "__keep__") {
+                      delete next.extensions;
+                    } else if (targetAgent?.capabilities?.supportsExtensions !== true) {
                       next.extensions = null;
                     } else {
                       delete next.extensions;
@@ -2747,9 +2757,6 @@ export function RunsList() {
                       .map((a) => (
                         <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
                       ))}
-                    {availableAgents.length === 0 && WORKER_TYPES.filter((w) => w !== selectedRunsSummary.worker).map((w) => (
-                      <SelectItem key={w} value={w}>{w}</SelectItem>
-                    ))}
                   </SelectContent>
                 </Select>
                 )}
@@ -2859,7 +2866,7 @@ export function RunsList() {
               </div>
 
               {/* MCP servers */}
-              {activeProfile ? (
+              {effectiveAgent?.capabilities?.supportsMcpServers === true && (activeProfile ? (
               <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
                 <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
                   <Lock className="h-3 w-3 text-muted-foreground" />MCP Servers
@@ -2932,10 +2939,10 @@ export function RunsList() {
                   )}
                 </div>
               </div>
-              )}
+              ))}
 
               {/* Skills */}
-              {activeProfile ? (
+              {effectiveAgent?.capabilities?.supportsSkills === true && (activeProfile ? (
               <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
                 <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
                   <Lock className="h-3 w-3 text-muted-foreground" />Skills
@@ -3015,11 +3022,11 @@ export function RunsList() {
                   })()}
                 </div>
               </div>
-              )}
+              ))}
 
-              {/* Extensions (VS Code workers only) */}
+              {/* Extensions */}
               {activeProfile ? (
-                effectiveWorker?.includes("vscode") && (
+                effectiveAgent?.capabilities?.supportsExtensions === true && (
                 <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
                   <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
                     <Lock className="h-3 w-3 text-muted-foreground" />Extensions
@@ -3030,7 +3037,7 @@ export function RunsList() {
                 </div>
                 )
               ) : (
-              effectiveWorker?.includes("vscode") && (
+              effectiveAgent?.capabilities?.supportsExtensions === true && (
               <div className="flex items-start gap-4">
                 <Label className="text-sm w-32 shrink-0 pt-2">Extensions</Label>
                 <div className="flex-1 space-y-1.5">

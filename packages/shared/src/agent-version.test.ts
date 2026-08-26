@@ -2,13 +2,32 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect } from "vitest";
-import { detectCliVersion } from "./agent-version.js";
+import { detectCliVersion, requireQueueName } from "./agent-version.js";
 
 describe("detectCliVersion", () => {
   it("returns a version string for an available command", () => {
     // node --version is available everywhere and outputs e.g. "v22.20.0"
     const result = detectCliVersion("node", "@test/node");
     expect(result).toMatch(/^@test\/node@\d+\.\d+\.\d+/);
+  });
+
+  describe("requireQueueName", () => {
+    it("returns the configured queue name", () => {
+      expect(requireQueueName({ QUEUE_NAME: "queue-custom" })).toBe(
+        "queue-custom",
+      );
+    });
+
+    it("supports the legacy queue environment variable", () => {
+      expect(
+        requireQueueName({ AZURE_STORAGE_QUEUE_NAME: "queue-legacy" }),
+      ).toBe("queue-legacy");
+    });
+
+    it("rejects missing or blank queue configuration", () => {
+      expect(() => requireQueueName({})).toThrow("QUEUE_NAME");
+      expect(() => requireQueueName({ QUEUE_NAME: " " })).toThrow("QUEUE_NAME");
+    });
   });
 
   it("returns 'unknown' for a non-existent command", () => {

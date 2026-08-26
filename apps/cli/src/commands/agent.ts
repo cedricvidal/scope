@@ -9,6 +9,56 @@ import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 import { apiFetch } from "../utils/api-client.js";
 
+interface AgentVersionSummary {
+  agentVersion: string;
+  queueName: string;
+  status: "active" | "deprecated" | "disabled";
+}
+
+interface AgentSummary {
+  _id: string;
+  name: string;
+  description?: string;
+  supportedModels: string[];
+  defaultModel?: string;
+  available?: boolean;
+  deletedAt?: string;
+  capabilities?: {
+    supportsReasoningEffort?: boolean;
+    supportsMcpServers?: boolean;
+    supportsSkills?: boolean;
+    supportsExtensions?: boolean;
+  };
+  versions?: AgentVersionSummary[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+function formatAgentStatus(agent: AgentSummary): string {
+  if (agent.deletedAt) return "deleted";
+  return agent.available === true ? "available" : "unavailable";
+}
+
+function formatCapabilities(agent: AgentSummary): string {
+  const capabilities = [
+    ["reasoning", agent.capabilities?.supportsReasoningEffort],
+    ["mcp", agent.capabilities?.supportsMcpServers],
+    ["skills", agent.capabilities?.supportsSkills],
+    ["extensions", agent.capabilities?.supportsExtensions],
+  ];
+  return capabilities
+    .filter(([, supported]) => supported === true)
+    .map(([name]) => name)
+    .join(", ") || "—";
+}
+
+function formatActiveVersions(agent: AgentSummary): string {
+  return (agent.versions ?? [])
+    .filter((version) => version.status === "active")
+    .map((version) => `${version.agentVersion} -> ${version.queueName || "(no queue)"}`)
+    .join(", ") || "—";
+}
+
 export function registerAgentCommands(program: Command): void {
 // ─── Agent management ────────────────────────────────────────────────────────
 
@@ -36,7 +86,7 @@ agent
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
         process.exit(1);
       }
-      const agents = await response.json() as Array<{ _id: string; name: string; supportedModels: string[]; defaultModel?: string }>;
+      const agents = await response.json() as AgentSummary[];
       if (agents.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No agents found."));
         return;
@@ -47,6 +97,9 @@ agent
       const displayFields: DisplayField[] = [
         { key: '_id', label: 'ID', tableFormatter: (a: any) => value(a._id) },
         { key: 'name', label: 'Name' },
+        { key: 'available', label: 'Status', formatter: formatAgentStatus },
+        { key: 'capabilities', label: 'Capabilities', formatter: formatCapabilities },
+        { key: 'versions', label: 'Active Versions', formatter: formatActiveVersions },
         { key: 'supportedModels', label: 'Models', formatter: (a: any) => (a.supportedModels || []).join(', ') || '—' },
         { key: 'defaultModel', label: 'Default', formatter: (a: any) => a.defaultModel || '—' },
       ];
@@ -73,13 +126,16 @@ agent
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
         process.exit(1);
       }
-      const agentDoc = await response.json();
+      const agentDoc = await response.json() as AgentSummary;
 
       if (isMachineReadable(format)) {
         const fields: DisplayField[] = [
           { key: '_id', label: 'ID' },
           { key: 'name', label: 'Name' },
           { key: 'description', label: 'Description', formatter: (a: any) => a.description || '' },
+          { key: 'available', label: 'Status', formatter: formatAgentStatus },
+          { key: 'capabilities', label: 'Capabilities', formatter: formatCapabilities },
+          { key: 'versions', label: 'Active Versions', formatter: formatActiveVersions },
           { key: 'supportedModels', label: 'Supported Models', formatter: (a: any) => (a.supportedModels || []).join(', ') },
           { key: 'defaultModel', label: 'Default Model', formatter: (a: any) => a.defaultModel || '' },
           { key: 'createdAt', label: 'Created' },
@@ -92,6 +148,9 @@ agent
       console.log(`${label('ID:')} ${value(agentDoc._id)}`);
       console.log(`${label('Name:')} ${value(agentDoc.name)}`);
       if (agentDoc.description) console.log(`${label('Description:')} ${agentDoc.description}`);
+      console.log(`${label('Status:')} ${formatAgentStatus(agentDoc)}`);
+      console.log(`${label('Capabilities:')} ${formatCapabilities(agentDoc)}`);
+      console.log(`${label('Active Versions:')} ${formatActiveVersions(agentDoc)}`);
       console.log(`${label('Supported Models:')} ${(agentDoc.supportedModels || []).join(', ') || '(none)'}`);
       console.log(`${label('Default Model:')} ${agentDoc.defaultModel || '(none)'}`);
       console.log(`${label('Created:')} ${new Date(agentDoc.createdAt).toLocaleString()}`);

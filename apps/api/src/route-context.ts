@@ -65,12 +65,7 @@ export type ReportTemplateDocument = Omit<z.infer<typeof ReportTemplateResponseS
 export type RequestDocument = z.infer<typeof RequestResponseSchema>;
 export type RunHistoryDocument = z.infer<typeof RunHistoryDocumentSchema>;
 
-export const VALID_WORKERS = [
-  "coder-acp-claude-code",
-  "coder-acp-copilot",
-  "coder-acp-copilot-windows"
-] as const;
-export type WorkerType = (typeof VALID_WORKERS)[number];
+export type WorkerType = string;
 
 // ─── RouteContext ────────────────────────────────────────────────────────────
 
@@ -119,9 +114,7 @@ export interface RouteContext {
   mcpSecretClient: McpSecretClient | null;
 
   // Queue
-  queueClients: Map<WorkerType, QueueClient>;
   reportQueueClient: QueueClient;
-  getOrCreateQueueClient: (queueName: string) => QueueClient;
 
   // Blob storage (log persistence + snapshots)
   blobStorage: BlobStorage;
@@ -131,7 +124,6 @@ export interface RouteContext {
   heartbeatStore: HeartbeatStore;
 
   // Config
-  validWorkers: readonly string[];
   storageConnectionString: string;
   storageAccountName: string;
 }

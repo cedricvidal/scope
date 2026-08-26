@@ -49,7 +49,7 @@ run
   .option("-p, --persona <path>", "Path to persona YAML file (provides judge personality)")
   .option("-t, --traits <path>", "Path to traits.yaml (default: config/traits.yaml next to persona)")
   .option("-m, --message <message>", "Message/task to process (overrides scenario task)")
-  .option("-w, --worker <worker>", "Worker to use (coder-acp-claude-code, coder-acp-copilot)", "coder-acp-copilot")
+  .option("-w, --worker <worker>", "Registered worker ID (see `scope agent list`)")
   .option("-c, --criteria <criteria...>", "Evaluation criteria (overrides scenario criteria)")
   .option("--max-iterations <number>", "Max judge iterations for multi-turn mode", parseInt)
   .option("--model <model>", "Model to use for the coding agent")
@@ -170,15 +170,22 @@ run
         body.profileVariations = parsed;
       }
 
-      // In variation mode the API derives the worker per-variation from each
-      // profile's workerType, and explicitly rejects `?worker=`. Skip the
-      // query param so the request isn't 400'd, and warn if --worker was
-      // explicitly passed (default values are silently ignored).
+      // Profile submissions derive the worker from the pinned profile version.
+      // Variation mode also rejects an explicit worker because each variation
+      // may select a different registered agent.
       const isVariationSubmit = Array.isArray(body.profileVariations) && body.profileVariations.length > 0;
+      const derivesWorkerFromProfile = Boolean(profileId);
+      if (!derivesWorkerFromProfile && !worker) {
+        console.error(errorText("Error: --worker is required for direct submissions; use `scope agent list` to discover registered workers"));
+        process.exit(1);
+        return;
+      }
       if (isVariationSubmit && command.getOptionValueSource("worker") === "cli") {
         console.warn(label("Warning:"), "--worker is ignored in variation mode; worker is derived per-variation from each profile's workerType.");
+      } else if (profileId && command.getOptionValueSource("worker") === "cli") {
+        console.warn(label("Warning:"), "--worker is ignored for profile submissions; worker is derived from the profile version.");
       }
-      const submitPath = isVariationSubmit
+      const submitPath = derivesWorkerFromProfile
         ? `/requests`
         : `/requests?worker=${worker}`;
 

@@ -309,8 +309,6 @@ services:
       <<: *common-env
       PORT: "80"
       TOKEN_MANAGER_URL: http://token-manager:80
-      AZURE_STORAGE_QUEUE_WORKER_1: queue-coder-acp-claude-code
-      AZURE_STORAGE_QUEUE_WORKER_2: queue-coder-acp-copilot
       AZURE_STORAGE_QUEUE_REPORT: report-queue
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_MODELS_API_KEY: ${GITHUB_MODELS_API_KEY:-${GITHUB_TOKEN}}
@@ -363,6 +361,20 @@ services:
           post "/api/v1/agents" "$$AGENT_JSON"
         }
 
+        # Register a local development version using the manifest's authoritative
+        # queueName rather than deriving a queue from the worker id.
+        register_agent_version() {
+          WORKER_NAME="$$1"
+          AGENT_VERSION="$$2"
+          COMPONENTS="$$3"
+          QUEUE_NAME=$$(yq -r '.queueName' /workers/$$WORKER_NAME/agent.yaml)
+          if [ -z "$$QUEUE_NAME" ] || [ "$$QUEUE_NAME" = "null" ]; then
+            echo "  FAILED: /workers/$$WORKER_NAME/agent.yaml has no queueName"
+            return 1
+          fi
+          post "/api/v1/agents/$$WORKER_NAME/versions" "{\"agentVersion\":\"$$AGENT_VERSION\",\"workerVersion\":\"$$AGENT_VERSION-local-dev\",\"components\":$$COMPONENTS,\"gitCommit\":\"local\",\"buildTime\":\"local\",\"imageTag\":\"dev\",\"queueName\":\"$$QUEUE_NAME\"}"
+        }
+
         echo "Waiting for API to be ready..."
         until curl -sf "$$API_URL/health" > /dev/null 2>&1; do
           echo "API not ready, retrying in 3s..."
@@ -373,10 +385,12 @@ services:
         # Upsert agents from agent.yaml files
         register_agent "coder-acp-copilot"
         register_agent "coder-acp-claude-code"
+        register_agent "coder-acp-copilot-windows"
 
         # Register dev versions
-        post "/api/v1/agents/coder-acp-copilot/versions" '{"agentVersion":"copilot-dev","workerVersion":"copilot-dev-local-dev","components":{"COPILOT_CLI_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-copilot"}'
-        post "/api/v1/agents/coder-acp-claude-code/versions" '{"agentVersion":"claude-agent-acp-dev-sdk-dev","workerVersion":"claude-agent-acp-dev-sdk-dev-local-dev","components":{"CLAUDE_CODE_ACP_VERSION":"dev","CLAUDE_AGENT_SDK_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-claude-code"}'
+        register_agent_version "coder-acp-copilot" "copilot-dev" '{"COPILOT_CLI_VERSION":"dev"}'
+        register_agent_version "coder-acp-claude-code" "claude-agent-acp-dev-sdk-dev" '{"CLAUDE_CODE_ACP_VERSION":"dev","CLAUDE_AGENT_SDK_VERSION":"dev"}'
+        register_agent_version "coder-acp-copilot-windows" "copilot-windows-dev" '{"COPILOT_CLI_VERSION":"dev"}'
 
         echo ""
         echo "All agents and dev versions registered."
@@ -499,9 +513,8 @@ services:
     restart: on-failure:5
     environment:
       <<: *common-env
-      SCHEDULER_WORKER_TYPES: coder-acp-claude-code,coder-acp-copilot
-      SCHEDULER_QUEUE_DEPTH_CODER_ACP_CLAUDE_CODE: "2"
-      SCHEDULER_QUEUE_DEPTH_CODER_ACP_COPILOT: "2"
+      SCHEDULER_TARGET_QUEUE_DEPTH: "2"
+      SCHEDULER_REGISTRY_REFRESH_INTERVAL_MS: "2000"
       SCHEDULER_POLL_INTERVAL_MS: "2000"
       PORT: "8080"
     depends_on:

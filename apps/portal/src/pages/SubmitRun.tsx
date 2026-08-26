@@ -17,7 +17,7 @@ import {
   X, Save, Plus, ChevronDown, FilePlus2, History, ArrowLeft, Check, FolderGit2, FileText,
 } from "lucide-react";
 import {
-  WORKER_TYPES, type CodingAgent, type McpServerDocument,
+  isRoutableAgent, type CodingAgent, type McpServerDocument,
   type ProfileWithVersion, type ProfileVersionDocument, type Run,
 } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -197,7 +197,7 @@ export function SubmitRun() {
   // Form state
   const [task, setTask] = useState("");
   const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
-  const [worker, setWorker] = useState<string>("coder-acp-copilot");
+  const [worker, setWorker] = useState<string>("");
   const [model, setModel] = useState<string>("");
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<number>(10);
@@ -281,15 +281,26 @@ export function SubmitRun() {
   // ─── Derived ────────────────────────────────────────────────────────────
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
-  const availableAgents = activeAgents.filter((a: CodingAgent) => a.available !== false);
-  const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
-  const isVscodeWorker = worker.includes("vscode");
+  const availableAgents = activeAgents.filter(isRoutableAgent);
+  const selectedAgent = availableAgents.find((a: CodingAgent) => a._id === worker);
+  const supportsMcpServers =
+    selectedAgent?.capabilities?.supportsMcpServers === true;
+  const supportsSkills = selectedAgent?.capabilities?.supportsSkills === true;
+  const supportsExtensions =
+    selectedAgent?.capabilities?.supportsExtensions === true;
   const profileList = profiles as ProfileWithVersion[];
   const selectedBaseProfile = profileList.find((profile) => profile._id === selectedProfileId);
   const topProfiles = profileList.slice(0, 3);
 
   // ─── Effects ────────────────────────────────────────────────────────────
-  // When agent changes, reset model + clear extensions for non-vscode workers
+  useEffect(() => {
+    if (selectedProfileId) return;
+    if (!availableAgents.some((agent) => agent._id === worker)) {
+      setWorker(availableAgents[0]?._id ?? "");
+    }
+  }, [availableAgents, selectedProfileId, worker]);
+
+  // When agent changes, reset model and unsupported optional features.
   useEffect(() => {
     if (selectedProfileId) return;
     if (selectedAgent) {
@@ -297,17 +308,24 @@ export function SubmitRun() {
     } else {
       setModel("");
     }
-    if (!worker.includes("vscode")) {
-      setSelectedExtensions([]);
-    }
-  }, [worker, selectedAgent?.defaultModel]);
+    if (!supportsMcpServers) setSelectedMcpServers([]);
+    if (!supportsSkills) setSelectedSkills([]);
+    if (!supportsExtensions) setSelectedExtensions([]);
+  }, [
+    selectedAgent?.defaultModel,
+    selectedProfileId,
+    supportsExtensions,
+    supportsMcpServers,
+    supportsSkills,
+    worker,
+  ]);
 
-  // Auto-open Extensions section when switching to a VS Code worker that has selected extensions
+  // Auto-open Extensions when the selected worker supports them.
   useEffect(() => {
-    if (isVscodeWorker && selectedExtensions.length > 0) {
+    if (supportsExtensions && selectedExtensions.length > 0) {
       setExtensionsOpen(true);
     }
-  }, [isVscodeWorker, selectedExtensions.length]);
+  }, [supportsExtensions, selectedExtensions.length]);
 
   // Fetch active versions for selected agent
   const { data: agentVersions = [] } = useQuery({
@@ -1554,7 +1572,7 @@ export function SubmitRun() {
               <div className="flex h-6 items-center gap-1.5">
                 <Label htmlFor="worker">Worker *</Label>
                 <HelpTooltip
-                  text="The runtime that drives the coding agent: GitHub Copilot, Claude Code, or VS Code Web with Copilot Chat."
+                  text="The registered runtime that drives the coding agent."
                   docs="choosingAgent"
                 />
               </div>
@@ -1563,17 +1581,11 @@ export function SubmitRun() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {availableAgents.length > 0
-                    ? availableAgents.map((a: CodingAgent) => (
-                        <SelectItem key={a._id} value={a._id}>
-                          {a.name}
-                        </SelectItem>
-                      ))
-                    : WORKER_TYPES.map((w) => (
-                        <SelectItem key={w} value={w}>
-                          {w}
-                        </SelectItem>
-                      ))}
+                  {availableAgents.map((a: CodingAgent) => (
+                    <SelectItem key={a._id} value={a._id}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -1642,7 +1654,7 @@ export function SubmitRun() {
       </Card>
 
       {/* ─── MCP Servers (collapsible) ─────────────────────────────────── */}
-      {activeMcpServers.length > 0 && (
+      {supportsMcpServers && activeMcpServers.length > 0 && (
         <CollapsibleCard
           icon={Server}
           title="MCP Servers"
@@ -1692,29 +1704,31 @@ export function SubmitRun() {
       )}
 
       {/* ─── Skills (collapsible) ──────────────────────────────────────── */}
-      <CollapsibleCard
-        icon={BookOpen}
-        title="Skills"
-        help={
-          <HelpTooltip
-            text="Reusable instruction packs (Markdown + assets) attached to the prompt so the agent has consistent guidance."
-            docs="skills"
-          />
-        }
-        summary={
-          selectedSkills.length === 0
-            ? "None selected"
-            : `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"} selected`
-        }
-        open={skillsOpen}
-        onOpenChange={setSkillsOpen}
-        disabled={profileLocked}
-      >
-        <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} disabled={profileLocked} />
-      </CollapsibleCard>
+      {supportsSkills && (
+        <CollapsibleCard
+          icon={BookOpen}
+          title="Skills"
+          help={
+            <HelpTooltip
+              text="Reusable instruction packs (Markdown + assets) attached to the prompt so the agent has consistent guidance."
+              docs="skills"
+            />
+          }
+          summary={
+            selectedSkills.length === 0
+              ? "None selected"
+              : `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"} selected`
+          }
+          open={skillsOpen}
+          onOpenChange={setSkillsOpen}
+          disabled={profileLocked}
+        >
+          <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} disabled={profileLocked} />
+        </CollapsibleCard>
+      )}
 
-      {/* ─── Extensions (collapsible, VS Code only) ────────────────────── */}
-      {isVscodeWorker && (
+      {/* ─── Extensions (collapsible) ──────────────────────────────────── */}
+      {supportsExtensions && (
         <CollapsibleCard
           icon={Puzzle}
           title="Extensions"

@@ -182,13 +182,7 @@ export interface GateRunSummary {
   iterations: number;
 }
 
-export const WORKER_TYPES = [
-  "coder-acp-claude-code",
-  "coder-acp-copilot",
-  "coder-acp-copilot-windows"
-] as const;
-
-export type WorkerType = (typeof WORKER_TYPES)[number];
+export type WorkerType = string;
 
 export const STATUS_LIST: RunStatus[] = [
   "pending",
@@ -682,6 +676,9 @@ export interface AgentVersion {
 // Agent capabilities declared at the worker level
 export interface AgentCapabilities {
   supportsReasoningEffort?: boolean;
+  supportsMcpServers?: boolean;
+  supportsSkills?: boolean;
+  supportsExtensions?: boolean;
 }
 
 // Coding Agent types
@@ -698,6 +695,17 @@ export interface CodingAgent {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
+}
+
+export function isRoutableAgent(agent: CodingAgent): boolean {
+  return (
+    !agent.deletedAt &&
+    agent.available === true &&
+    (agent.versions ?? []).some(
+      (version) =>
+        version.status === "active" && version.queueName.trim().length > 0,
+    )
+  );
 }
 
 // MCP Server types
