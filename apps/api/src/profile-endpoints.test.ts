@@ -49,7 +49,17 @@ describe("Profile API Endpoints", () => {
     (mocks.agentCollection.findOne as any).mockResolvedValue({
       _id: "coder-acp-copilot",
       name: "Copilot",
+      available: true,
       supportedModels: ["gpt-4o", "gpt-5"],
+      capabilities: { supportsExtensions: false },
+      versions: [
+        {
+          agentVersion: "v1",
+          status: "active",
+          queueName: "queue-coder-acp-copilot",
+          createdAt: new Date(),
+        },
+      ],
     });
   });
 
@@ -160,7 +170,7 @@ describe("Profile API Endpoints", () => {
       expect(res.status).toBe(400);
     });
 
-    it("rejects extensions on non-vscode worker", async () => {
+    it("allows capability mismatches while strict enforcement is disabled", async () => {
       const res = await request(app)
         .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
@@ -170,13 +180,13 @@ describe("Profile API Endpoints", () => {
           extensions: ["ms-azuretools.vscode-cosmosdb@0.32.1"],
         });
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain("does not support VS Code extensions");
+      expect(res.status).toBe(201);
+      expect(res.body.version.agentVersion).toBe("v1");
     });
   });
 
   describe("POST /api/v1/profiles/:profileId (new version)", () => {
-    it("rejects extensions on non-vscode worker", async () => {
+    it("allows capability mismatches while strict enforcement is disabled", async () => {
       const profileCol = mocks.profileCollection as any;
       profileCol.findOne = vi.fn().mockResolvedValue({
         _id: "p-1",
@@ -193,8 +203,8 @@ describe("Profile API Endpoints", () => {
           extensions: ["ms-azuretools.vscode-cosmosdb@0.32.1"],
         });
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain("does not support VS Code extensions");
+      expect(res.status).toBe(201);
+      expect(res.body.agentVersion).toBe("v1");
     });
   });
 

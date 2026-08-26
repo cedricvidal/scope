@@ -46,6 +46,21 @@ describe("API Endpoints", () => {
     // Re-inject after clearAllMocks so the mock implementations are fresh
     mocks = createAllMockDependencies();
     _injectTestDependencies(mocks);
+    (mocks.agentCollection.findOne as any).mockResolvedValue({
+      _id: "coder-acp-copilot",
+      name: "Copilot",
+      available: true,
+      supportedModels: [],
+      versions: [
+        {
+          agentVersion: "1.0.0",
+          status: "active",
+          queueName: "queue-coder-acp-copilot",
+          createdAt: new Date(),
+        },
+      ],
+      createdAt: new Date(),
+    });
     // Facets are memoized in a module-level cache; clear it so each test starts cold
     _resetRunFacetsCacheForTests();
   });
@@ -107,6 +122,7 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("commit");
       expect(res.body).toHaveProperty("buildTime");
+      expect(res.body).toHaveProperty("strictAgentCapabilities", false);
       expect(res.body).toHaveProperty("environment");
     });
   });
@@ -412,6 +428,60 @@ describe("API Endpoints", () => {
     });
   });
 
+  describe("POST /api/v1/agents/:id/versions", () => {
+    const versionPayload = {
+      agentVersion: "synthetic-v1",
+      workerVersion: "synthetic-build",
+      components: {},
+      gitCommit: "abc1234",
+      buildTime: "20260101T000000Z",
+      imageTag: "synthetic-build",
+      queueName: "synthetic-dynamic-queue",
+    };
+
+    it("conditionally inserts a new version without allowing duplicate races", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "synthetic-worker",
+        versions: [],
+      });
+      (mocks.agentCollection.updateOne as any)
+        .mockResolvedValueOnce({ matchedCount: 0, modifiedCount: 0 })
+        .mockResolvedValueOnce({ matchedCount: 1, modifiedCount: 1 });
+
+      const res = await request(app)
+        .post("/api/v1/agents/synthetic-worker/versions")
+        .send(versionPayload);
+
+      expect(res.status).toBe(201);
+      expect((mocks.agentCollection.updateOne as any).mock.calls[1][0]).toMatchObject({
+        _id: "synthetic-worker",
+        "versions.agentVersion": { $ne: "synthetic-v1" },
+      });
+    });
+
+    it("converges on an entry inserted by a concurrent registration", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "synthetic-worker",
+        versions: [],
+      });
+      (mocks.agentCollection.updateOne as any)
+        .mockResolvedValueOnce({ matchedCount: 0, modifiedCount: 0 })
+        .mockResolvedValueOnce({ matchedCount: 0, modifiedCount: 0 })
+        .mockResolvedValueOnce({ matchedCount: 1, modifiedCount: 1 });
+
+      const res = await request(app)
+        .post("/api/v1/agents/synthetic-worker/versions")
+        .send(versionPayload);
+
+      expect(res.status).toBe(200);
+      expect(mocks.agentCollection.updateOne).toHaveBeenCalledTimes(3);
+      expect((mocks.agentCollection.updateOne as any).mock.calls[2][0]).toMatchObject({
+        _id: "synthetic-worker",
+        "versions.agentVersion": "synthetic-v1",
+      });
+    });
+  });
+
   // ===================================================================
   // Profiles endpoints
   // ===================================================================
@@ -421,7 +491,16 @@ describe("API Endpoints", () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
         name: "Copilot",
+        available: true,
         supportedModels: [],
+        versions: [
+          {
+            agentVersion: "1.0.0",
+            status: "active",
+            queueName: "queue-coder-acp-copilot",
+            createdAt: new Date(),
+          },
+        ],
       });
 
       const res = await request(app)
@@ -442,7 +521,16 @@ describe("API Endpoints", () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
         name: "Copilot",
+        available: true,
         supportedModels: ["gpt-5"],
+        versions: [
+          {
+            agentVersion: "1.0.0",
+            status: "active",
+            queueName: "queue-coder-acp-copilot",
+            createdAt: new Date(),
+          },
+        ],
       });
 
       const res = await request(app)
@@ -474,7 +562,7 @@ describe("API Endpoints", () => {
         });
 
       expect(res.status).toBe(404);
-      expect(res.body.error).toMatch(/Agent not found/);
+      expect(res.body.error).toMatch(/not registered/);
     });
   });
 
@@ -1483,6 +1571,7 @@ describe("API Endpoints", () => {
         profileId: "profile-1",
         version: 1,
         workerType: "coder-acp-copilot",
+        agentVersion: "v1",
         model: "claude-sonnet-4",
         mcpServers: ["ms-learn"],
         skillRevisions: ["github/awesome-copilot/cosmosdb@abc123"],
@@ -1490,7 +1579,11 @@ describe("API Endpoints", () => {
       });
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
-        versions: [{ agentVersion: "v1", status: "active", createdAt: new Date() }],
+        available: true,
+        versions: [
+          { agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot-v1", createdAt: new Date("2026-01-01") },
+          { agentVersion: "v2", status: "active", queueName: "queue-coder-acp-copilot-v2", createdAt: new Date("2026-02-01") },
+        ],
         supportedModels: ["claude-sonnet-4"],
       });
       // resolveSkillSpecs will validate the skill slug exists
@@ -1512,6 +1605,7 @@ describe("API Endpoints", () => {
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           profileId: "profile-1",
+          agentVersion: "v2",
           // Client omits model, mcpServers, skills, extensions — profile provides them
         });
 
@@ -1522,6 +1616,7 @@ describe("API Endpoints", () => {
       expect(doc).toHaveProperty("skillRevisions", ["github/awesome-copilot/cosmosdb@abc123"]);
       expect(doc).toHaveProperty("profileId", "profile-1");
       expect(doc).toHaveProperty("profileVersionId", "pv-1");
+      expect(doc).toHaveProperty("agentVersion", "v1");
     });
 
     it("returns 400 when client sends fields conflicting with profile", async () => {
@@ -1574,7 +1669,8 @@ describe("API Endpoints", () => {
       });
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
-        versions: [{ agentVersion: "v1", status: "active", createdAt: new Date() }],
+        available: true,
+        versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-sonnet-4"],
       });
       // The project-scoped lookup finds nothing — the slug lives in another project.
@@ -1601,6 +1697,7 @@ describe("API Endpoints", () => {
     it("rejects when effort is incompatible with model capabilities", async () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-opus-4.6"],
       });
@@ -1625,6 +1722,7 @@ describe("API Endpoints", () => {
     it("accepts valid effort and stores it on the run", async () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-opus-4.6"],
       });
@@ -1665,6 +1763,7 @@ describe("API Endpoints", () => {
       });
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-opus-4.6"],
       });
@@ -1689,6 +1788,7 @@ describe("API Endpoints", () => {
     it("returns warnings for models with limited effort support when no effort is specified", async () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-haiku"],
       });
@@ -1718,6 +1818,7 @@ describe("API Endpoints", () => {
     const setupCopilotAgent = () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
         supportedModels: ["claude-haiku-4.5"],
       });
@@ -1799,8 +1900,9 @@ describe("API Endpoints", () => {
     beforeEach(() => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
-        supportedModels: [],
+        supportedModels: ["m1", "m2"],
       });
       // Build gate criterion is compatible with the build gate; "works" is
       // compatible with all gates (no gates restriction).
@@ -1902,8 +2004,9 @@ describe("API Endpoints", () => {
       );
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
-        supportedModels: [],
+        supportedModels: ["m1", "m2"],
       });
       (mocks.criteriaCollection.find as any).mockReturnValue({
         toArray: vi.fn().mockResolvedValue([
@@ -2004,10 +2107,11 @@ describe("API Endpoints", () => {
 
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [
           { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
         ],
-        supportedModels: ["gpt-4o"],
+        supportedModels: ["gpt-4o", "claude-sonnet-4"],
       });
 
       const res = await request(app)
@@ -2041,6 +2145,7 @@ describe("API Endpoints", () => {
 
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [
           { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
         ],
@@ -2088,6 +2193,7 @@ describe("API Endpoints", () => {
       // Mock agentCollection.findOne to return an agent with an active version
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [
           { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
         ],
@@ -2147,6 +2253,7 @@ describe("API Endpoints", () => {
 
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-vscode-insiders",
+        available: true,
         versions: [
           { agentVersion: "insiders-0.1.0", queueName: "queue-vscode-insiders", status: "active", createdAt: new Date() },
         ],
@@ -2213,10 +2320,11 @@ describe("API Endpoints", () => {
 
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
+        available: true,
         versions: [
           { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
         ],
-        supportedModels: ["gpt-4o"],
+        supportedModels: ["gpt-4o", "claude-sonnet-4"],
       });
 
       const res = await request(app)
@@ -2404,6 +2512,7 @@ describe("API Endpoints", () => {
         { _id: "req-1", "run._id": "run-1" },
         expect.objectContaining({
           $set: expect.objectContaining({
+            agentVersion: "1.0.0",
             run: expect.objectContaining({ attemptNumber: 2, status: "pending" }),
           }),
         }),
@@ -2504,6 +2613,12 @@ describe("API Endpoints", () => {
       expect(res.body.results).toHaveLength(2);
       expect(res.body.results.find((r: any) => r.requestId === "req-1").attemptNumber).toBe(2);
       expect(res.body.results.find((r: any) => r.requestId === "req-2").error).toContain("processing");
+      expect(mocks.collection.updateOne).toHaveBeenCalledWith(
+        { _id: "req-1", "run._id": "run-1" },
+        expect.objectContaining({
+          $set: expect.objectContaining({ agentVersion: "1.0.0" }),
+        }),
+      );
     });
 
     it("returns 400 when ids array is empty", async () => {

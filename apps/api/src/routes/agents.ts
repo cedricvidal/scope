@@ -348,35 +348,59 @@ apiRoute(ctx.app, ctx.registry, {
         createdAt: now,
       };
 
-      // Upsert: update existing entry with same agentVersion or push new
-      const existing = (agent.versions ?? []).find((v: AgentVersion) => v.agentVersion === agentVersion);
-      if (existing) {
-        await ctx.agentCollection.updateOne(
-          { _id: id, "versions.agentVersion": agentVersion },
+      const versionUpdate = {
+        $set: {
+          "versions.$.workerVersion": workerVersion,
+          "versions.$.components": components,
+          "versions.$.gitCommit": gitCommit,
+          "versions.$.buildTime": buildTime,
+          "versions.$.imageTag": imageTag,
+          "versions.$.queueName": queueName,
+          "versions.$.status": "active",
+          updatedAt: now,
+        },
+      };
+
+      // The conditional push prevents concurrent registration jobs or an
+      // ambiguous HTTP retry from appending duplicate agentVersion entries.
+      const existingUpdate = await ctx.agentCollection.updateOne(
+        {
+          _id: id,
+          deletedAt: { $exists: false },
+          "versions.agentVersion": agentVersion,
+        },
+        versionUpdate,
+      );
+      let created = false;
+      if (existingUpdate.matchedCount === 0) {
+        const insertUpdate = await ctx.agentCollection.updateOne(
           {
-            $set: {
-              "versions.$.workerVersion": workerVersion,
-              "versions.$.components": components,
-              "versions.$.gitCommit": gitCommit,
-              "versions.$.buildTime": buildTime,
-              "versions.$.imageTag": imageTag,
-              "versions.$.queueName": queueName,
-              "versions.$.status": "active",
-              updatedAt: now,
-            },
-          }
-        );
-      } else {
-        await ctx.agentCollection.updateOne(
-          { _id: id },
+            _id: id,
+            deletedAt: { $exists: false },
+            "versions.agentVersion": { $ne: agentVersion },
+          },
           {
             $push: { versions: versionEntry },
             $set: { updatedAt: now },
-          }
+          },
         );
+        created = insertUpdate.modifiedCount === 1;
+
+        if (!created) {
+          // Another request inserted the version after our first update. Apply
+          // this request's idempotent payload to that now-existing entry.
+          await ctx.agentCollection.updateOne(
+            {
+              _id: id,
+              deletedAt: { $exists: false },
+              "versions.agentVersion": agentVersion,
+            },
+            versionUpdate,
+          );
+        }
       }
 
-      res.status(existing ? 200 : 201).json(versionEntry);
+      res.status(created ? 201 : 200).json(versionEntry);
     } catch (error) {
       next(error);
     }
