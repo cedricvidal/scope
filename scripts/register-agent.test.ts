@@ -76,6 +76,7 @@ if [ "$1" = "-r" ]; then
 fi
 case "$*" in
   *version.yaml*) printf '{"agentVersion":"test-v1","workerVersion":"build","components":{},"gitCommit":"abc","buildTime":"now","imageTag":"build","queueName":"custom-queue"}\\n' ;;
+  *strenv*) printf '{"_id":"test-worker","name":"Test Worker","available":%s}\\n' "$SCOPE_AGENT_AVAILABLE" ;;
   *) printf '{"_id":"test-worker","name":"Test Worker","available":true}\\n' ;;
 esac
 `,
@@ -197,5 +198,45 @@ describe("register-agent.sh", () => {
 
     expect(result.status).toBe(0);
     expect(readFileSync(test.callsFile, "utf8").trim().split("\n")).toHaveLength(3);
+  });
+
+  it("overrides agent availability in memory", () => {
+    const test = fixture([200, 200, 200]);
+    const result = spawnSync(
+      "sh",
+      [
+        script,
+        "http://scope-api",
+        test.agentManifest,
+        "--available",
+        "false",
+        test.versionManifest,
+      ],
+      { encoding: "utf8", env: test.env },
+    );
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(test.callsFile, "utf8")).toContain(
+      '{"_id":"test-worker","name":"Test Worker","available":false}',
+    );
+  });
+
+  it("rejects invalid availability overrides before contacting the API", () => {
+    const test = fixture([200]);
+    const result = spawnSync(
+      "sh",
+      [
+        script,
+        "http://scope-api",
+        test.agentManifest,
+        "--available",
+        "sometimes",
+      ],
+      { encoding: "utf8", env: test.env },
+    );
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("--available must be true or false");
+    expect(readFileSync(test.callsFile, "utf8")).toBe("");
   });
 });

@@ -5,7 +5,7 @@
 set -eu
 
 usage() {
-  echo "Usage: $0 <api-url> <agent-manifest.yaml> [version-manifest.yaml ...]" >&2
+  echo "Usage: $0 <api-url> <agent-manifest.yaml> [--available true|false] [version-manifest.yaml ...]" >&2
 }
 
 if [ "$#" -lt 2 ]; then
@@ -25,6 +25,23 @@ command -v yq >/dev/null 2>&1 || {
 API_URL=${1%/}
 AGENT_MANIFEST=$2
 shift 2
+
+AVAILABLE_OVERRIDE=
+if [ "${1:-}" = "--available" ]; then
+  if [ "$#" -lt 2 ]; then
+    usage
+    exit 2
+  fi
+  AVAILABLE_OVERRIDE=$2
+  case "$AVAILABLE_OVERRIDE" in
+    true | false) ;;
+    *)
+      echo "--available must be true or false" >&2
+      exit 2
+      ;;
+  esac
+  shift 2
+fi
 
 MAX_ATTEMPTS=${SCOPE_REGISTRATION_MAX_ATTEMPTS:-10}
 BASE_DELAY_SECONDS=${SCOPE_REGISTRATION_BASE_DELAY_SECONDS:-1}
@@ -188,7 +205,16 @@ case "$AGENT_ID" in
     ;;
 esac
 
-AGENT_JSON=$(yq -o=json -I=0 "$AGENT_MANIFEST")
+if [ -n "$AVAILABLE_OVERRIDE" ]; then
+  AGENT_JSON=$(
+    SCOPE_AGENT_AVAILABLE="$AVAILABLE_OVERRIDE" \
+      yq -o=json -I=0 \
+        '.available = (strenv(SCOPE_AGENT_AVAILABLE) == "true")' \
+        "$AGENT_MANIFEST"
+  )
+else
+  AGENT_JSON=$(yq -o=json -I=0 "$AGENT_MANIFEST")
+fi
 post_idempotent "/api/v1/agents" "$AGENT_JSON" "agent $AGENT_ID"
 
 for VERSION_MANIFEST in "$@"; do

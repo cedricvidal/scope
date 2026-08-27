@@ -50,6 +50,9 @@ x-worker-deps: &worker-deps
   judge:
     condition: service_started
 
+x-npm-build-args: &npm-build-args
+  NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
+
 services:
   # ===========================================================================
   # Infrastructure services
@@ -270,13 +273,15 @@ services:
   # Database migrations — runs once before the API starts.
   # Reuses the API builder stage (has tsx + source + compiled output).
   db-migrate:
-    # Resource limits mirror prod K8s
+    # The builder image runs pnpm + tsx and needs development-tooling headroom.
     cpus: "0.5"
-    mem_limit: 256m
+    mem_limit: 1g
     build:
       context: .
       dockerfile: apps/api/Dockerfile
       target: builder
+      args:
+        <<: *npm-build-args
     environment:
       MONGO_CONNECTION_STRING: ${MONGO_CONNECTION_STRING:-mongodb://mongodb:27017}
       MONGO_DATABASE: ${MONGO_DATABASE:-requests-db}
@@ -297,6 +302,8 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      args:
+        <<: *npm-build-args
     restart: on-failure:5
     ports:
       - "${API_PORT:-3100}:80"
@@ -336,6 +343,9 @@ services:
     volumes:
       - ./apps/workers:/workers:ro
       - ./scripts/register-agent.sh:/register-agent.sh:ro
+    environment:
+      SCOPE_REGISTER_COPILOT_AGENT: ${SCOPE_REGISTER_COPILOT_AGENT:-false}
+      SCOPE_REGISTER_CLAUDE_CODE_AGENT: ${SCOPE_REGISTER_CLAUDE_CODE_AGENT:-false}
     restart: "no"
     entrypoint:
       - /bin/sh
@@ -344,14 +354,18 @@ services:
         set -eu
         apk add --no-cache curl yq > /dev/null 2>&1
 
-        /register-agent.sh \
-          http://api:80 \
-          /workers/coder-acp-copilot/agent.yaml \
-          /workers/coder-acp-copilot/agent-version.dev.yaml
-        /register-agent.sh \
-          http://api:80 \
-          /workers/coder-acp-claude-code/agent.yaml \
-          /workers/coder-acp-claude-code/agent-version.dev.yaml
+        register_agent() {
+          name="$$1"
+          enabled="$$2"
+          /register-agent.sh \
+            http://api:80 \
+            "/workers/$$name/agent.yaml" \
+            --available "$$enabled" \
+            "/workers/$$name/agent-version.dev.yaml"
+        }
+
+        register_agent coder-acp-copilot "$$SCOPE_REGISTER_COPILOT_AGENT"
+        register_agent coder-acp-claude-code "$$SCOPE_REGISTER_CLAUDE_CODE_AGENT"
 
         echo ""
         echo "All agents and dev versions registered."
@@ -364,6 +378,9 @@ services:
     build:
       context: .
       dockerfile: apps/model-scanners/copilot/Dockerfile
+      args:
+        <<: *npm-build-args
+    profiles: [copilot]
     depends_on:
       api:
         condition: service_started
@@ -385,6 +402,9 @@ services:
     build:
       context: .
       dockerfile: apps/model-scanners/anthropic/Dockerfile
+      args:
+        <<: *npm-build-args
+    profiles: [claude-code]
     depends_on:
       api:
         condition: service_started
@@ -407,6 +427,8 @@ services:
     build:
       context: .
       dockerfile: apps/judge/Dockerfile
+      args:
+        <<: *npm-build-args
     ports:
       - "${JUDGE_PORT:-3200}:80"
     environment:
@@ -448,6 +470,8 @@ services:
     build:
       context: .
       dockerfile: apps/token-manager/Dockerfile
+      args:
+        <<: *npm-build-args
     ports:
       - "${TOKEN_MANAGER_PORT:-3300}:80"
     environment:
@@ -475,6 +499,8 @@ services:
     build:
       context: .
       dockerfile: apps/scheduler/Dockerfile
+      args:
+        <<: *npm-build-args
     restart: on-failure:5
     environment:
       <<: *common-env
@@ -505,6 +531,8 @@ services:
     build:
       context: .
       dockerfile: apps/portal/Dockerfile
+      args:
+        <<: *npm-build-args
     profiles: [portal]
     ports:
       - "${PORTAL_PORT:-5100}:80"
@@ -569,6 +597,7 @@ services:
       context: .
       dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
       args:
+        <<: *npm-build-args
         CLAUDE_CODE_ACP_VERSION: ${CLAUDE_CODE_ACP_VERSION:-}
     profiles: [claude-code]
     group_add:
@@ -674,6 +703,7 @@ services:
       context: .
       dockerfile: apps/workers/coder-acp-copilot/Dockerfile
       args:
+        <<: *npm-build-args
         COPILOT_CLI_VERSION: ${COPILOT_CLI_VERSION:-}
     profiles: [copilot]
     group_add:
@@ -737,6 +767,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/report-generator/Dockerfile
+      args:
+        <<: *npm-build-args
     profiles: [report]
     environment:
       <<: *common-env
@@ -762,6 +794,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/post-processor/Dockerfile
+      args:
+        <<: *npm-build-args
     profiles: [post-processor]
     environment:
       <<: *common-env
@@ -779,6 +813,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/post-processor/Dockerfile
+      args:
+        <<: *npm-build-args
     profiles: [post-processor]
     environment:
       <<: *common-env

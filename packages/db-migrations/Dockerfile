@@ -1,6 +1,8 @@
 FROM node:22.22.0-slim
 
-RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+RUN npm install -g pnpm@10.29.1
 
 WORKDIR /app
 

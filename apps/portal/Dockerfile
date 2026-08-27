@@ -1,6 +1,8 @@
 # Shared Portal dependency layer
 FROM node:20-alpine AS deps
-RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+RUN npm install -g pnpm@10.29.1
 WORKDIR /app
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/portal/package.json apps/portal/

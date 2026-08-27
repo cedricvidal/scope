@@ -1,6 +1,8 @@
 FROM node:22.22.0-slim AS builder
 
-RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+RUN npm install -g pnpm@10.29.1
 
 WORKDIR /app
 
@@ -33,8 +35,10 @@ CMD ["/app/scripts/dev-entrypoint.sh"]
 # --- Production stage ---
 FROM node:22.22.0-slim
 
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
+RUN npm install -g pnpm@10.29.1
 
 WORKDIR /app
 

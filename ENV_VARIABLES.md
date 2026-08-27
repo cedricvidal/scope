@@ -509,6 +509,21 @@ Where MSAL persists its token cache.
 
 Base URL for the public Scope docs site that in-app help tooltips link to. Unlike `VITE_*` flags (which Vite inlines into the bundle at build time), this is read at **container start**: the portal's entrypoint regenerates `/config.js` from this variable and the frontend reads it via `window.__SCOPE_CONFIG__.docsBaseUrl`. This means a single built image can be promoted across environments and still point at the correct docs deployment without a rebuild — set or override it via the portal's Kubernetes Deployment env. In local Vite development the static `apps/portal/public/config.js` provides the default.
 
+## Docker Build Configuration
+
+### NPM_REGISTRY
+**Default:** `https://registry.npmjs.org/`
+**Type:** URL string
+**Scope:** Node image builds
+
+Registry used to install pnpm and workspace dependencies in every Node Docker
+image. Docker Compose forwards this value to all Node service builds, including
+services behind optional profiles. For example:
+
+```bash
+NPM_REGISTRY=https://packagefeedproxy.microsoft.io/npm/ docker compose build api
+```
+
 ## Setting Variables
 
 ### Docker Compose

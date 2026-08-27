@@ -480,6 +480,9 @@ scripts/register-agent.sh \
 ```
 
 The helper is idempotent: both API endpoints upsert by agent ID and version ID.
+Docker Compose commands may pass `--available true|false` after the agent
+manifest to override its availability in the submitted JSON without modifying
+the manifest on disk.
 It waits for `/health`, retries network failures and HTTP
 408/425/429/5xx responses with bounded exponential backoff, and exits non-zero
 immediately for permanent errors such as invalid manifests, unknown agents, or
