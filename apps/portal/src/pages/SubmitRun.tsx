@@ -28,6 +28,7 @@ import { CodebasePicker } from "@/components/CodebasePicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { ProfileCreateForm } from "@/components/ProfileCreateForm";
 import { ProfilePicker } from "@/components/ProfilePicker";
+import { AgentBadge } from "@/components/AgentBadge";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { AdvancedSection } from "@/components/AdvancedSection";
 import { AdvancedModeToggle } from "@/components/AdvancedModeToggle";
@@ -106,7 +107,7 @@ function randomVariationColor(): string {
 interface GalleryCardProps {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   onClick: () => void;
 }
 
@@ -254,8 +255,8 @@ export function SubmitRun() {
 
   // ─── Queries ────────────────────────────────────────────────────────────
   const { data: agents = [], isSuccess: agentsLoaded } = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => api.listAgents(),
+    queryKey: ["agents", "include-deleted"],
+    queryFn: () => api.listAgents({ includeDeleted: true }),
   });
 
   const { data: mcpServers = [] } = useQuery({
@@ -284,7 +285,7 @@ export function SubmitRun() {
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
   const availableAgents = agents.filter(isAgentAvailable);
-  const agentNameById = new Map(activeAgents.map((agent) => [agent._id, agent.name]));
+  const agentNameById = new Map(agents.map((agent) => [agent._id, agent.name]));
   const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
   const supportsMcpServers = !strictAgentCapabilities || selectedAgent?.capabilities?.supportsMcpServers === true;
   const supportsSkills = !strictAgentCapabilities || selectedAgent?.capabilities?.supportsSkills === true;
@@ -844,7 +845,12 @@ export function SubmitRun() {
                 key={p._id}
                 icon={SlidersHorizontal}
                 title={p.name}
-                description={`Profile · v${p.latestVersion} · ${agentNameById.get(p.version.workerType) ?? p.version.workerType}`}
+                description={
+                  <span className="inline-flex items-center gap-1">
+                    <span>Profile · v{p.latestVersion} ·</span>
+                    <AgentBadge agentId={p.version.workerType} triggerLink={false} />
+                  </span>
+                }
                 onClick={() => applyProfile(p._id)}
               />
             ))}
@@ -853,7 +859,13 @@ export function SubmitRun() {
                 key={r._id}
                 icon={History}
                 title={truncate(r.scenario?.task ?? "Untitled run", 60)}
-                description={`Recent · ${agentNameById.get(r.workerType) ?? r.workerType}${r.model ? ` · ${r.model}` : ""}`}
+                description={
+                  <span className="inline-flex items-center gap-1">
+                    <span>Recent ·</span>
+                    <AgentBadge agentId={r.workerType} triggerLink={false} />
+                    {r.model && <span>· {r.model}</span>}
+                  </span>
+                }
                 onClick={() => applyRecentRun(r)}
               />
             ))}
@@ -1466,7 +1478,10 @@ export function SubmitRun() {
                     {selectedGraphPreview.name} {selectedGraphPreview.version ? `v${selectedGraphPreview.version}` : ""}
                   </p>
                   <p className="mt-1 text-muted-foreground">
-                    {selectedGraphPreview.versionDocument?.workerType ?? "worker: n/a"} · {selectedGraphPreview.versionDocument?.model ?? "model: n/a"}
+                    {selectedGraphPreview.versionDocument
+                      ? (agentNameById.get(selectedGraphPreview.versionDocument.workerType) ?? "Unknown agent")
+                      : "worker: n/a"}{" "}
+                    · {selectedGraphPreview.versionDocument?.model ?? "model: n/a"}
                   </p>
                   <p className="mt-1 text-muted-foreground">
                     {(selectedGraphPreview.versionDocument?.mcpServers?.length ?? 0)} MCP · {(selectedGraphPreview.versionDocument?.skillRevisions?.length ?? 0)} skills · {(selectedGraphPreview.versionDocument?.extensions?.length ?? 0)} extensions
@@ -1640,12 +1655,19 @@ export function SubmitRun() {
                 <SelectContent>
                   {profileLocked && worker && !availableAgents.some((agent) => agent._id === worker) && (
                     <SelectItem value={worker} disabled>
-                      {selectedAgent?.name ?? worker} (unavailable)
+                      <span className="flex items-center gap-1">
+                        <AgentBadge
+                          agentId={worker}
+                          agent={selectedAgent}
+                          triggerLink={false}
+                        />
+                        <span>(unavailable)</span>
+                      </span>
                     </SelectItem>
                   )}
                   {availableAgents.map((a: CodingAgent) => (
                     <SelectItem key={a._id} value={a._id}>
-                      {a.name}
+                      <AgentBadge agentId={a._id} agent={a} triggerLink={false} />
                     </SelectItem>
                   ))}
                 </SelectContent>

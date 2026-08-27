@@ -557,6 +557,7 @@ reusable badge components provide a consistent **hover-to-preview + click-to-nav
 |-----------|--------|----------|---------------|
 | `components/CriteriaBadge.tsx` | Criterion | `/criteria/:id` | Criterion prompt snippet |
 | `components/TaskPromptBadge.tsx` | Task prompt (any type) | `/task-prompts/:id` | Type label, text snippet, list of detected features, created date, **Open details** button |
+| `components/AgentBadge.tsx` | Coding agent | `/agents/:id` | Registry name, internal ID, deleted state, version, **View agent** button |
 
 Both follow the same rules:
 
@@ -579,6 +580,13 @@ Both follow the same rules:
   popup is interactive (hoverable feature badges + a clickable button), its `TooltipContent` is
   wrapped in a Radix `Tooltip.Portal` with `collisionPadding` so it can't be clipped by an
   overflow container (e.g. a table cell) — the same portaling `ShortId` uses.
+- **Agent identity presentation.** `workerType` and `agentId` are stable routing/storage keys, not
+  user-facing labels. Outside the Agents list and Agent detail technical views, the Portal renders
+  the registry `name` through `AgentBadge`; the raw ID is available only in its hover content and
+  route. Filter and selector triggers stay non-linking so selection behavior is preserved, while
+  the hover action still opens Agent detail. A shared React Query catalog request includes
+  soft-deleted records so historical runs keep their saved name and link to a read-only detail
+  view. Missing records render **Unknown agent** without a dead link.
 
 A sibling affordance, `components/ShortId.tsx`, applies the same hoverable-tooltip pattern to
 **identifiers**: the Runs list renders run and submission IDs truncated to 8 chars

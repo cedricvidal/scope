@@ -21,12 +21,18 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/agents",
   tags: ["Agents"],
   summary: "List agents",
-  query: z.object({ modelProvider: z.string().optional() }),
+  query: z.object({
+    modelProvider: z.string().optional(),
+    includeDeleted: z.enum(["true", "false"]).optional(),
+  }),
   response: z.array(AgentResponseSchema),
   handler: async (req, res, next) => {
     try {
       const modelProvider = req.query?.modelProvider as string | undefined;
-      const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+      const includeDeleted = req.query?.includeDeleted === "true";
+      const filter: Record<string, unknown> = includeDeleted
+        ? {}
+        : { deletedAt: { $exists: false } };
       if (modelProvider) {
         filter.modelProvider = modelProvider;
       }
@@ -49,6 +55,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Agents"],
   summary: "Get agent",
   params: z.object({ id: z.string() }),
+  query: z.object({ includeDeleted: z.enum(["true", "false"]).optional() }),
   response: AgentResponseSchema,
   errorResponses: {
     404: { description: "Agent not found" },
@@ -56,7 +63,11 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const { id } = req.params;
-      const agent = await ctx.agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      const includeDeleted = req.query?.includeDeleted === "true";
+      const agent = await ctx.agentCollection.findOne({
+        _id: id,
+        ...(includeDeleted ? {} : { deletedAt: { $exists: false } }),
+      });
       if (!agent) {
         res.status(404).json({ error: "Agent not found" });
         return;

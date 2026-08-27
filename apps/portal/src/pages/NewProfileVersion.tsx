@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { AgentBadge } from "@/components/AgentBadge";
 import { useStrictAgentCapabilities } from "@/hooks/useStrictAgentCapabilities";
 import {
   getActiveAgentVersions,
@@ -48,7 +49,7 @@ export function NewProfileVersion() {
   // Fetch agents (workers)
   const { data: agents = [], isSuccess: agentsLoaded } = useQuery({
     queryKey: ["agents"],
-    queryFn: api.listAgents,
+    queryFn: () => api.listAgents({ includeDeleted: true }),
   });
 
   // Fetch MCP servers
@@ -213,10 +214,21 @@ export function NewProfileVersion() {
               </SelectTrigger>
               <SelectContent>
                 {worker && !selectedAgentIsEligible && (
-                  <SelectItem value={worker} disabled>{selectedAgent?.name ?? worker} (unavailable)</SelectItem>
+                  <SelectItem value={worker} disabled>
+                    <span className="flex items-center gap-1">
+                      <AgentBadge
+                        agentId={worker}
+                        agent={selectedAgent}
+                        triggerLink={false}
+                      />
+                      <span>(unavailable)</span>
+                    </span>
+                  </SelectItem>
                 )}
                 {eligibleAgents.map((a: CodingAgent) => (
-                  <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
+                  <SelectItem key={a._id} value={a._id}>
+                    <AgentBadge agentId={a._id} agent={a} triggerLink={false} />
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>

@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { AgentBadge } from "@/components/AgentBadge";
 import { useStrictAgentCapabilities } from "@/hooks/useStrictAgentCapabilities";
 import {
   getActiveAgentVersions,
@@ -59,7 +60,7 @@ export function ProfileCreateForm({
 
   const { data: agents = [] } = useQuery({
     queryKey: ["agents"],
-    queryFn: api.listAgents,
+    queryFn: () => api.listAgents(),
   });
 
   const { data: mcpServers = [] } = useQuery({
@@ -137,7 +138,7 @@ export function ProfileCreateForm({
     const parts: string[] = [];
     const descParts: string[] = [];
 
-    const agentName = selectedAgent?.name ?? worker;
+    const agentName = selectedAgent?.name ?? (worker ? "Unknown agent" : "");
     if (agentName) {
       const workerLabel = selectedAgentVersion ? `${agentName}@${selectedAgentVersion}` : agentName;
       parts.push(workerLabel);
@@ -246,7 +247,9 @@ export function ProfileCreateForm({
               </SelectTrigger>
               <SelectContent>
                 {eligibleAgents.map((a: CodingAgent) => (
-                  <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
+                  <SelectItem key={a._id} value={a._id}>
+                    <AgentBadge agentId={a._id} agent={a} triggerLink={false} />
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>

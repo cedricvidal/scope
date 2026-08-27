@@ -33,6 +33,7 @@ import {
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
 import { HelpTooltip } from "@/components/HelpTooltip";
+import { AgentBadge } from "@/components/AgentBadge";
 
 const FILTER_KEYS = ["worker"] as const;
 
@@ -65,12 +66,12 @@ export function ProfileList() {
     queryFn: () => api.listProfiles(),
   });
   const { data: agents = [] } = useQuery({
-    queryKey: ["agents"],
-    queryFn: api.listAgents,
+    queryKey: ["agents", "include-deleted"],
+    queryFn: () => api.listAgents({ includeDeleted: true }),
     staleTime: 60_000,
   });
-  const agentNameById = useMemo(
-    () => new Map(agents.filter((agent) => !agent.deletedAt).map((agent) => [agent._id, agent.name])),
+  const agentById = useMemo(
+    () => new Map(agents.map((agent) => [agent._id, agent])),
     [agents],
   );
 
@@ -109,13 +110,23 @@ export function ProfileList() {
       if (wt) map.set(wt, (map.get(wt) ?? 0) + 1);
     }
     return [...map.entries()]
+      .sort(([a], [b]) =>
+        (agentById.get(a)?.name ?? "Unknown agent").localeCompare(
+          agentById.get(b)?.name ?? "Unknown agent",
+        ),
+      )
       .map(([workerId, count]) => ({
         value: workerId,
-        label: agentNameById.get(workerId) ?? workerId,
+        label: (
+          <AgentBadge
+            agentId={workerId}
+            agent={agentById.get(workerId)}
+            triggerLink={false}
+          />
+        ),
         count,
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [profiles, agentNameById]);
+      }));
+  }, [profiles, agentById]);
 
   const filteredProfiles = useMemo(() => {
     const workers = state.getFilterList("worker");
@@ -190,7 +201,11 @@ export function ProfileList() {
       header: "Worker",
       sortable: true,
       cell: (p: ProfileWithVersion) => (
-        <span className="text-xs">{agentNameById.get(p.version.workerType) ?? p.version.workerType}</span>
+        <AgentBadge
+          agentId={p.version.workerType}
+          version={p.version.agentVersion}
+          className="text-xs"
+        />
       ),
     }] : []),
     ...(!columnVisibility.isHidden("model") ? [{

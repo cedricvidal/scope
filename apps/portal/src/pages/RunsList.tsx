@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { TaskPromptBadge } from "@/components/TaskPromptBadge";
+import { AgentBadge } from "@/components/AgentBadge";
 import { ShortId } from "@/components/ShortId";
 import {
   ListLayout,
@@ -53,6 +54,7 @@ import { useModelCapabilities, ModelSelectItems } from "@/components/ReasoningEf
 import { formatDate, formatId, formatDuration, truncate, cn } from "@/lib/utils";
 import { isAgentAvailable, isAgentVersionAvailable, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, RunStatus, RunOutcome, IterationOp, BulkResubmitOverrides, RunSortField, RunFacetBucket } from "@/types";
+import { buildRunWorkerFilterOptions } from "./run-worker-filter-options";
 
 const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "submissionId", "criteria", "model", "profile", "os", "priority", "version", "dateFrom", "dateTo", "groupBy", "turns", "turnsOp", "maxIter", "maxIterOp"] as const;
 
@@ -703,8 +705,8 @@ export function RunsList() {
   });
   // Registry data also supplies worker labels for filters and historical values.
   const { data: agentsData = [] } = useQuery({
-    queryKey: ["agents", "runs-list-resubmit"],
-    queryFn: () => api.listAgents(),
+    queryKey: ["agents", "include-deleted"],
+    queryFn: () => api.listAgents({ includeDeleted: true }),
     staleTime: 60_000,
   });
   const { data: mcpServersData = [] } = useQuery({
@@ -723,8 +725,8 @@ export function RunsList() {
     [agentsData],
   );
   const agentNameById = useMemo(
-    () => new Map(registeredAgents.map((agent) => [agent._id, agent.name])),
-    [registeredAgents],
+    () => new Map(agentsData.map((agent) => [agent._id, agent.name])),
+    [agentsData],
   );
 
   // Flat-mode rows: the server already applied every filter and the sort, so the
@@ -1270,24 +1272,28 @@ export function RunsList() {
   // every selectable value appears with an accurate full-dataset count — not just
   // the values present on the loaded page. Enum dimensions show all known values
   // (even at count 0); open-ended dimensions show only values that exist.
-  const workerOptions = useMemo(() => {
-    const facetWorkerIds = (facets?.workerType ?? [])
-      .map((bucket) => bucket.value)
-      .filter((value) => value !== EMPTY_FILTER_VALUE);
-    const workerIds = [...new Set([...registeredAgents.map((agent) => agent._id), ...facetWorkerIds])];
-    return enumFacetOptions(workerIds, facets?.workerType)
-      .map((option) => ({
-        ...option,
-        label: option.value === EMPTY_FILTER_VALUE
-          ? option.label
-          : (agentNameById.get(option.value) ?? option.value),
-      }))
-      .sort((a, b) => {
-        if (a.value === EMPTY_FILTER_VALUE) return 1;
-        if (b.value === EMPTY_FILTER_VALUE) return -1;
-        return a.label.localeCompare(b.label);
-      });
-  }, [agentNameById, facets, registeredAgents]);
+  const workerOptions = useMemo(
+    () => buildRunWorkerFilterOptions(agentsData, facets?.workerType),
+    [agentsData, facets?.workerType],
+  );
+  const workerFilterOptions = useMemo(
+    () =>
+      workerOptions.map((option) =>
+        option.value === "__empty__"
+          ? option
+          : {
+              ...option,
+              label: (
+                <AgentBadge
+                  agentId={option.value}
+                  agent={agentsData.find((agent) => agent._id === option.value)}
+                  triggerLink={false}
+                />
+              ),
+            },
+      ),
+    [agentsData, workerOptions],
+  );
   const statusOptions = useMemo(
     () => enumFacetOptions(STATUS_LIST as readonly string[], facets?.status),
     [facets],
@@ -1413,16 +1419,13 @@ export function RunsList() {
       width: "180px",
       hidden: columnVisibility.isHidden("worker"),
       cell: (r) => {
-        const workerLabel = agentNameById.get(r.workerType) ?? r.workerType;
         return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Badge variant="outline" className="max-w-[160px] min-w-0 text-xs cursor-default">
-                <span className="block min-w-0 truncate">{truncate(workerLabel, 18)}</span>
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent className="text-xs">{workerLabel}</TooltipContent>
-          </Tooltip>
+          <AgentBadge
+            agentId={r.workerType}
+            version={r.agentVersion}
+            variant="badge"
+            className="max-w-[160px] min-w-0"
+          />
         );
       },
     },
@@ -1998,7 +2001,7 @@ export function RunsList() {
           </FilterSection>
           <FilterSection title="Worker" storageKey="runs-worker" sortableId="worker">
             <CheckboxFilterGroup
-              options={workerOptions}
+              options={workerFilterOptions}
               selected={workers}
               onToggle={(v) => state.toggleFilterValue("worker", v)}
             />
@@ -2378,6 +2381,7 @@ export function RunsList() {
                     label: string,
                     getKey: (r: Run) => string | null | undefined,
                     renderSingle?: (r: Run) => ReactNode,
+                    renderValue?: (value: string) => ReactNode,
                   ): ReactNode => {
                     const values = Array.from(
                       new Set(
@@ -2399,9 +2403,9 @@ export function RunsList() {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent className="text-xs max-w-xs">
-                          <div className="flex flex-col gap-0.5 font-mono">
+                          <div className="flex flex-col gap-0.5">
                             {values.slice(0, 10).map((v) => (
-                              <span key={v}>{v}</span>
+                              <span key={v}>{renderValue ? renderValue(v) : v}</span>
                             ))}
                             {values.length > 10 && <span>… +{values.length - 10} more</span>}
                           </div>
@@ -2490,7 +2494,17 @@ export function RunsList() {
                     case "task":
                       return distinct("tasks", (r) => r.scenario?.task);
                     case "worker":
-                      return distinct("workers", (r) => r.workerType);
+                      return distinct(
+                        "workers",
+                        (r) => r.workerType,
+                        undefined,
+                        (workerId) => (
+                          <AgentBadge
+                            agentId={workerId}
+                            agent={agentsData.find((agent) => agent._id === workerId)}
+                          />
+                        ),
+                      );
                     case "version":
                       return distinct("versions", (r) => r.agentVersion);
                     case "model":
@@ -2781,7 +2795,7 @@ export function RunsList() {
                 </Label>
                 {activeProfile ? (
                   <span className="text-sm text-muted-foreground">
-                    {agentNameById.get(activeProfile.version.workerType) ?? activeProfile.version.workerType}
+                    {agentNameById.get(activeProfile.version.workerType) ?? "Unknown agent"}
                   </span>
                 ) : (
                 <Select
@@ -2819,7 +2833,7 @@ export function RunsList() {
                   <SelectContent>
                     <SelectItem value="__keep__">
                       {selectedRunsSummary.worker
-                        ? (agentNameById.get(selectedRunsSummary.worker) ?? selectedRunsSummary.worker)
+                        ? (agentNameById.get(selectedRunsSummary.worker) ?? "Unknown agent")
                         : selectedRunsSummary.isMultiWorker ? "Mixed (keep each)" : "—"}
                     </SelectItem>
                     {availableAgents

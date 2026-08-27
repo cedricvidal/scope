@@ -28,8 +28,8 @@ export function AgentDetail() {
   const queryClient = useQueryClient();
 
   const { data: agent, isLoading, error } = useQuery({
-    queryKey: ["agent", id],
-    queryFn: () => api.getAgent(id!),
+    queryKey: ["agent", id, "include-deleted"],
+    queryFn: () => api.getAgent(id!, { includeDeleted: true }),
     enabled: !!id,
   });
 
@@ -120,11 +120,17 @@ export function AgentDetail() {
 
   return (
     <DetailPanel
-      title={agent.name}
+      title={
+        <span className="flex items-center gap-2">
+          <span>{agent.name}</span>
+          {agent.deletedAt && <Badge variant="destructive">Deleted</Badge>}
+        </span>
+      }
       subtitle={<span className="font-mono">{agent._id}</span>}
       onClose={closePanel}
     >
       <div className="space-y-4">
+        {!agent.deletedAt && (
         <div className="flex items-center justify-end gap-2">
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -148,15 +154,16 @@ export function AgentDetail() {
             </AlertDialogContent>
           </AlertDialog>
         </div>
+        )}
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Supported Models</CardTitle>
-            {!editing ? (
+            {!agent.deletedAt && !editing ? (
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
                 Edit
               </Button>
-            ) : (
+            ) : !agent.deletedAt ? (
               <div className="flex gap-2">
                 <Button
                   size="sm"
@@ -182,7 +189,7 @@ export function AgentDetail() {
                   Save
                 </Button>
               </div>
-            )}
+            ) : null}
           </CardHeader>
           <CardContent className="space-y-3">
             {editing ? (
@@ -288,7 +295,9 @@ export function AgentDetail() {
                 <div>
                   <dt className="text-xs text-muted-foreground">Availability</dt>
                   <dd className="mt-0.5">
-                    {!isAgentAvailable(agent) ? (
+                    {agent.deletedAt ? (
+                      <Badge variant="destructive">Deleted</Badge>
+                    ) : !isAgentAvailable(agent) ? (
                       <Badge variant="secondary">Unavailable</Badge>
                     ) : (
                       <Badge variant="default">Available</Badge>
@@ -309,6 +318,12 @@ export function AgentDetail() {
                   <div>
                     <dt className="text-xs text-muted-foreground">Updated</dt>
                     <dd>{formatDate(agent.updatedAt)}</dd>
+                  </div>
+                )}
+                {agent.deletedAt && (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Deleted</dt>
+                    <dd>{formatDate(agent.deletedAt)}</dd>
                   </div>
                 )}
               </dl>

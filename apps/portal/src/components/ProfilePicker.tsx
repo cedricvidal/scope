@@ -7,6 +7,7 @@ import { Check, Search } from "lucide-react";
 import type { ProfileWithVersion } from "@/types";
 import { Input } from "@/components/ui/input";
 import { truncate } from "@/lib/utils";
+import { AgentBadge } from "@/components/AgentBadge";
 
 interface ProfilePickerProps {
   profiles: ProfileWithVersion[];
@@ -141,9 +142,15 @@ export function ProfilePicker({
                     {truncate(profile.name, 80)}
                     {isSelected && <Check className="h-4 w-4 shrink-0" />}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    v{profile.latestVersion} · {workerNameById?.get(profile.version.workerType) ?? profile.version.workerType} · {profile.version.model}
-                  </p>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <span>v{profile.latestVersion} ·</span>
+                    <AgentBadge
+                      agentId={profile.version.workerType}
+                      triggerLink={false}
+                      className="text-xs"
+                    />
+                    <span>· {profile.version.model}</span>
+                  </div>
                 </li>
               );
               })}
