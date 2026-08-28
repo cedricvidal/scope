@@ -119,7 +119,8 @@ async function insertRun(
 ): Promise<void> {
   await collection.insertOne({
     _id: id,
-    workerType: "coder-acp-copilot",
+    workerType: "itest-worker",
+    agentVersion: "itest-v1",
     scenario: { criteria: [], task: "x" },
     run: {
       _id: runId,

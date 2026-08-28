@@ -161,7 +161,8 @@ describe("queue-processor redelivery (A1) — fresh heartbeat re-defers, does no
 
       const requestDoc = {
         _id: requestId,
-        workerType: "coder-acp-copilot",
+        workerType: "itest-worker",
+        agentVersion: "itest-v1",
         scenario: { criteria: [], task: "x" },
         run: {
           _id: runId,
