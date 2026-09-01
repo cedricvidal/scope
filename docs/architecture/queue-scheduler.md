@@ -106,9 +106,13 @@ Every 2 seconds (configurable via `SCHEDULER_POLL_INTERVAL_MS`):
 2. Build one exact worker/version target per advertised queue. If legacy or racing
    registry writes assign a queue to multiple targets, fail that queue closed and emit
    `scheduler.registry_queue_conflict`.
-3. Reconcile queued requests against the refreshed registry. Requests whose target disappeared,
-   whose queue changed, or whose legacy record lacks `run.queuedQueueName` return atomically to
-   `pending`; workers discard messages from the superseded dispatch.
+3. Every 30 seconds (configurable via
+   `SCHEDULER_QUEUE_RECONCILIATION_INTERVAL_MS`), reconcile queued requests
+   against the refreshed registry. Requests whose target disappeared, whose
+   queue changed, or whose legacy record lacks `run.queuedQueueName` return
+   atomically to `pending`; workers discard messages from the superseded
+   dispatch. Between reconciliations, reuse the cached queued-request counts and
+   increment them for successful dispatches.
 4. Count queued requests per exact worker/version target from MongoDB and read the physical
    Azure queue depth. Compute available slots from the greater count so stale queue messages
    or an eventually consistent queue-depth read cannot overfill the queue.
@@ -144,6 +148,7 @@ Scheduler environment variables (set on the scheduler Deployment):
 |----------|-------|---------|
 | `SCHEDULER_TARGET_QUEUE_DEPTH` | 5 | Target queued-request depth for each exact worker/version |
 | `SCHEDULER_POLL_INTERVAL_MS` | 2000 | Polling interval in ms |
+| `SCHEDULER_QUEUE_RECONCILIATION_INTERVAL_MS` | 30000 | MongoDB queued-request reconciliation interval in ms |
 
 There is no scheduler worker inventory and no queue naming convention.
 `AgentVersion.queueName` is authoritative. In particular,

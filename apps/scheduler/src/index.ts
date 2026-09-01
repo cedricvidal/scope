@@ -37,6 +37,12 @@ const TARGET_QUEUE_DEPTH = parsePositiveInt(
   1,
   "SCHEDULER_TARGET_QUEUE_DEPTH",
 );
+const QUEUE_RECONCILIATION_INTERVAL_MS = parsePositiveInt(
+  process.env.SCHEDULER_QUEUE_RECONCILIATION_INTERVAL_MS,
+  30_000,
+  1_000,
+  "SCHEDULER_QUEUE_RECONCILIATION_INTERVAL_MS",
+);
 const HEALTH_PORT = parseInt(process.env.PORT || "8080", 10);
 
 /**
@@ -139,6 +145,7 @@ async function main(): Promise<void> {
     {
       pollIntervalMs: POLL_INTERVAL_MS,
       targetQueueDepth: TARGET_QUEUE_DEPTH,
+      queueReconciliationIntervalMs: QUEUE_RECONCILIATION_INTERVAL_MS,
     },
   );
   scheduler.start();

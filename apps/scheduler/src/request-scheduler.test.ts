@@ -210,6 +210,14 @@ function makeCollections(
   return { requestCollection, agentCollection, mutableAgents };
 }
 
+function queuedReconciliationCalls(
+  requestCollection: { aggregate: ReturnType<typeof vi.fn> },
+): number {
+  return requestCollection.aggregate.mock.calls.filter(
+    ([pipeline]) => pipeline[0]?.$match?.["run.status"] === "queued",
+  ).length;
+}
+
 describe("RequestScheduler", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -255,6 +263,57 @@ describe("RequestScheduler", () => {
       workerType: "synthetic-worker-7f3",
       agentVersion: "synthetic-v9",
     });
+  });
+
+  it("reconciles queued requests on a slower cadence than dispatch", async () => {
+    const { requestCollection, agentCollection } = makeCollections(
+      [],
+      [makeAgent("worker", [{ agentVersion: "v1", queueName: "queue" }])],
+    );
+    const scheduler = new RequestScheduler(
+      requestCollection,
+      agentCollection,
+      () => makeQueueClient(),
+      { queueReconciliationIntervalMs: 30_000 },
+    );
+
+    await (scheduler as any).dispatch();
+    await (scheduler as any).dispatch();
+
+    expect(queuedReconciliationCalls(requestCollection)).toBe(1);
+
+    (scheduler as any).lastQueueReconciliationAt -= 30_000;
+    await (scheduler as any).dispatch();
+
+    expect(queuedReconciliationCalls(requestCollection)).toBe(2);
+  });
+
+  it("caches dispatched counts between reconciliations", async () => {
+    const requests = [
+      makeRequest("request-1", "worker", "v1"),
+      makeRequest("request-2", "worker", "v1"),
+    ];
+    const { requestCollection, agentCollection } = makeCollections(
+      requests,
+      [makeAgent("worker", [{ agentVersion: "v1", queueName: "queue" }])],
+    );
+    const queue = makeQueueClient(0);
+    const scheduler = new RequestScheduler(
+      requestCollection,
+      agentCollection,
+      () => queue,
+      {
+        targetQueueDepth: 1,
+        queueReconciliationIntervalMs: 30_000,
+      },
+    );
+
+    await (scheduler as any).dispatch();
+    await (scheduler as any).dispatch();
+
+    expect(queuedReconciliationCalls(requestCollection)).toBe(1);
+    expect(queue.sendMessage).toHaveBeenCalledTimes(1);
+    expect(requests.filter((request) => request.run?.status === "pending")).toHaveLength(1);
   });
 
   it("refreshes registry targets without restart", async () => {

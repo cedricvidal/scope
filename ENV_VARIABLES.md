@@ -609,6 +609,15 @@ How often the request scheduler polls MongoDB for pending requests to dispatch t
 The scheduler refreshes agents and versions from the registry on every poll.
 There is no `SCHEDULER_WORKER_TYPES` allowlist.
 
+### SCHEDULER_QUEUE_RECONCILIATION_INTERVAL_MS
+**Default:** `30000`
+**Type:** positive integer (milliseconds, minimum 1000)
+
+How often the scheduler aggregates queued requests in MongoDB to detect stale
+queue assignments and refresh its queued-request counts. The scheduler caches
+those counts between reconciliations and increments them when it dispatches, so
+the two-second dispatch loop does not repeat the RU-consuming aggregate.
+
 ### SCHEDULER_TARGET_QUEUE_DEPTH
 **Default:** `5`
 **Type:** positive integer

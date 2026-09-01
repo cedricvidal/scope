@@ -11,6 +11,7 @@ export type QueueClientFactory = (queueName: string) => QueueClient;
 export interface RequestSchedulerOptions {
   pollIntervalMs?: number;
   targetQueueDepth?: number;
+  queueReconciliationIntervalMs?: number;
   invalidTargetReportIntervalMs?: number;
 }
 
@@ -46,7 +47,10 @@ export class RequestScheduler {
   private readonly queueClients = new Map<string, Promise<QueueClient>>();
   private readonly pollIntervalMs: number;
   private readonly targetQueueDepth: number;
+  private readonly queueReconciliationIntervalMs: number;
   private readonly invalidTargetReportIntervalMs: number;
+  private queuedCountsByTarget = new Map<string, number>();
+  private lastQueueReconciliationAt: number | undefined;
   private invalidTargetSignature = "";
   private lastInvalidTargetReportAt = 0;
   private conflictingTargetKeys = new Set<string>();
@@ -60,6 +64,8 @@ export class RequestScheduler {
   ) {
     this.pollIntervalMs = options.pollIntervalMs ?? 2000;
     this.targetQueueDepth = options.targetQueueDepth ?? 5;
+    this.queueReconciliationIntervalMs =
+      options.queueReconciliationIntervalMs ?? 30_000;
     this.invalidTargetReportIntervalMs =
       options.invalidTargetReportIntervalMs ?? 30_000;
   }
@@ -91,7 +97,7 @@ export class RequestScheduler {
       const agents = await this.agentCollection.find({}).toArray();
       const queueTargets = this.buildQueueTargets(agents);
       const queuedCountsByTarget =
-        await this.reconcileQueuedTargets(queueTargets);
+        await this.maybeReconcileQueuedTargets(queueTargets);
 
       for (const queueTarget of queueTargets) {
         try {
@@ -351,6 +357,24 @@ export class RequestScheduler {
     return queuedCountsByTarget;
   }
 
+  private async maybeReconcileQueuedTargets(
+    queueTargets: QueueTarget[],
+  ): Promise<Map<string, number>> {
+    const now = Date.now();
+    if (
+      this.lastQueueReconciliationAt !== undefined &&
+      now - this.lastQueueReconciliationAt <
+        this.queueReconciliationIntervalMs
+    ) {
+      return this.queuedCountsByTarget;
+    }
+
+    const counts = await this.reconcileQueuedTargets(queueTargets);
+    this.queuedCountsByTarget = counts;
+    this.lastQueueReconciliationAt = now;
+    return counts;
+  }
+
   private async dispatchForQueue(
     queueTarget: QueueTarget,
     queuedCountsByTarget: Map<string, number>,
@@ -463,6 +487,10 @@ export class RequestScheduler {
       }
 
       dispatched++;
+      queuedCountsByTarget.set(
+        targetKey,
+        (queuedCountsByTarget.get(targetKey) ?? 0) + 1,
+      );
       console.log(
         `[Scheduler] queue=${queueTarget.queueName}: dispatched ${claimed._id} ` +
           `(worker=${claimed.workerType}, version=${claimed.agentVersion}, ` +
