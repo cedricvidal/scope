@@ -102,7 +102,7 @@ function buildVersionApp(documents: Array<Record<string, unknown>>) {
     registry: new OpenAPIRegistry(),
     agentCollection,
   } as unknown as RouteContext);
-  return { app, updateOne };
+  return { app, updateOne, findOne: agentCollection.findOne };
 }
 
 describe("agent historical lookup", () => {
@@ -201,6 +201,103 @@ describe("agent historical lookup", () => {
       expect(updateOne).toHaveBeenCalledTimes(1);
     });
 
+    it("lets the latest version of an agent take over its queue", async () => {
+      const target = {
+        ...activeAgent,
+        _id: "target-agent",
+        versions: [
+          {
+            ...versionPayload,
+            agentVersion: "v1",
+            status: "active",
+            createdAt: new Date("2026-01-01T00:00:00Z"),
+          },
+        ],
+      };
+      const { app, updateOne } = buildVersionApp([target]);
+
+      const response = await request(app)
+        .post(`/api/v1/agents/${target._id}/versions`)
+        .send({
+          ...versionPayload,
+          agentVersion: "v2",
+          workerVersion: "v2-build",
+        });
+
+      expect(response.status).toBe(201);
+      expect(updateOne).toHaveBeenCalledTimes(1);
+      expect(updateOne.mock.calls[0][0]).toEqual(
+        expect.objectContaining({ versions: target.versions }),
+      );
+      const update = updateOne.mock.calls[0][1] as {
+        $set: { versions: Array<{ agentVersion: string; status: string }> };
+      };
+      expect(update.$set.versions).toEqual([
+        expect.objectContaining({ agentVersion: "v1", status: "retired" }),
+        expect.objectContaining({ agentVersion: "v2", status: "active" }),
+      ]);
+    });
+
+    it("retries a same-agent takeover when versions change concurrently", async () => {
+      const target = {
+        ...activeAgent,
+        _id: "target-agent",
+        versions: [
+          {
+            ...versionPayload,
+            agentVersion: "v1",
+            status: "active",
+            createdAt: new Date("2026-01-01T00:00:00Z"),
+          },
+        ],
+      };
+      const concurrentlyUpdated = {
+        ...target,
+        versions: [
+          {
+            ...target.versions[0],
+            status: "retired",
+          },
+          {
+            ...versionPayload,
+            agentVersion: "v2",
+            workerVersion: "v2-build",
+            status: "active",
+            createdAt: new Date("2026-02-01T00:00:00Z"),
+          },
+        ],
+      };
+      const { app, updateOne, findOne } = buildVersionApp([target]);
+      updateOne
+        .mockResolvedValueOnce({ matchedCount: 0, modifiedCount: 0 })
+        .mockResolvedValueOnce({ matchedCount: 1, modifiedCount: 1 });
+      findOne
+        .mockResolvedValueOnce(target)
+        .mockResolvedValueOnce(concurrentlyUpdated);
+
+      const response = await request(app)
+        .post(`/api/v1/agents/${target._id}/versions`)
+        .send({
+          ...versionPayload,
+          agentVersion: "v3",
+          workerVersion: "v3-build",
+        });
+
+      expect(response.status).toBe(201);
+      expect(updateOne).toHaveBeenCalledTimes(2);
+      expect(updateOne.mock.calls[1][0]).toEqual(
+        expect.objectContaining({ versions: concurrentlyUpdated.versions }),
+      );
+      const retryUpdate = updateOne.mock.calls[1][1] as {
+        $set: { versions: Array<{ agentVersion: string; status: string }> };
+      };
+      expect(retryUpdate.$set.versions).toEqual([
+        expect.objectContaining({ agentVersion: "v1", status: "retired" }),
+        expect.objectContaining({ agentVersion: "v2", status: "retired" }),
+        expect.objectContaining({ agentVersion: "v3", status: "active" }),
+      ]);
+    });
+
     it("rejects reactivating a version whose queue has a new owner", async () => {
       const target = {
         ...activeAgent,
@@ -233,6 +330,43 @@ describe("agent historical lookup", () => {
 
       expect(response.status).toBe(409);
       expect(updateOne).not.toHaveBeenCalled();
+    });
+
+    it("lets an activated version take over its same-agent queue", async () => {
+      const target = {
+        ...activeAgent,
+        _id: "target-agent",
+        versions: [
+          {
+            ...versionPayload,
+            agentVersion: "v1",
+            status: "retired",
+            createdAt: new Date("2026-01-01T00:00:00Z"),
+          },
+          {
+            ...versionPayload,
+            agentVersion: "v2",
+            workerVersion: "v2-build",
+            status: "active",
+            createdAt: new Date("2026-02-01T00:00:00Z"),
+          },
+        ],
+      };
+      const { app, updateOne } = buildVersionApp([target]);
+
+      const response = await request(app)
+        .patch(`/api/v1/agents/${target._id}/versions/v1`)
+        .send({ status: "active" });
+
+      expect(response.status).toBe(200);
+      expect(updateOne).toHaveBeenCalledTimes(1);
+      const update = updateOne.mock.calls[0][1] as {
+        $set: { versions: Array<{ agentVersion: string; status: string }> };
+      };
+      expect(update.$set.versions).toEqual([
+        expect.objectContaining({ agentVersion: "v1", status: "active" }),
+        expect.objectContaining({ agentVersion: "v2", status: "retired" }),
+      ]);
     });
 
     it("rejects restoring an agent with conflicting active queue assignments", async () => {

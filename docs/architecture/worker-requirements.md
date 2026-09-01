@@ -457,11 +457,15 @@ queueName: my-explicit-worker-queue
 ```
 
 Every shown version field is required and must be non-empty.
-`components` is a string-to-string map. Registration activates the version;
-versions can later be retired through the version status endpoint. Queue names
-are opaque deployment-owned values, but each non-deleted active agent version
-must own a distinct queue. Dynamically named workers are supported, and no
-platform service prepends `queue-` or otherwise derives queue names.
+`components` is a string-to-string map. Registration activates the version.
+When another version of the same agent registers that queue, the new registration
+atomically retires the previous same-agent owner; the last successful registration
+wins. A different agent cannot claim the queue and receives HTTP 409. Versions can
+also be retired or reactivated through the version status endpoint; reactivation
+uses the same same-agent takeover rule. Queue names are opaque deployment-owned
+values, and each queue has at most one non-deleted active exact target. Dynamically
+named workers are supported, and no platform service prepends `queue-` or otherwise
+derives queue names.
 
 At runtime, `SCOPE_AGENT_VERSION` or `WorkerProcessor.getAgentVersion()` must
 provide the exact registered `agentVersion`. The queue processor fails during

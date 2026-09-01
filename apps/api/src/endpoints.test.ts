@@ -439,11 +439,12 @@ describe("API Endpoints", () => {
       queueName: "synthetic-dynamic-queue",
     };
 
-    it("conditionally inserts a new version without allowing duplicate races", async () => {
-      (mocks.agentCollection.findOne as any).mockResolvedValue({
+    it("retries when the versions snapshot changes during registration", async () => {
+      const agent = {
         _id: "synthetic-worker",
         versions: [],
-      });
+      };
+      (mocks.agentCollection.findOne as any).mockResolvedValue(agent);
       (mocks.agentCollection.updateOne as any)
         .mockResolvedValueOnce({ matchedCount: 0, modifiedCount: 0 })
         .mockResolvedValueOnce({ matchedCount: 1, modifiedCount: 1 });
@@ -455,17 +456,28 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(201);
       expect((mocks.agentCollection.updateOne as any).mock.calls[1][0]).toMatchObject({
         _id: "synthetic-worker",
-        "versions.agentVersion": { $ne: "synthetic-v1" },
+        versions: agent.versions,
       });
     });
 
     it("converges on an entry inserted by a concurrent registration", async () => {
-      (mocks.agentCollection.findOne as any).mockResolvedValue({
+      const initialAgent = {
         _id: "synthetic-worker",
         versions: [],
-      });
+      };
+      const concurrentVersion = {
+        ...versionPayload,
+        status: "active",
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+      };
+      const concurrentlyUpdatedAgent = {
+        ...initialAgent,
+        versions: [concurrentVersion],
+      };
+      (mocks.agentCollection.findOne as any)
+        .mockResolvedValueOnce(initialAgent)
+        .mockResolvedValueOnce(concurrentlyUpdatedAgent);
       (mocks.agentCollection.updateOne as any)
-        .mockResolvedValueOnce({ matchedCount: 0, modifiedCount: 0 })
         .mockResolvedValueOnce({ matchedCount: 0, modifiedCount: 0 })
         .mockResolvedValueOnce({ matchedCount: 1, modifiedCount: 1 });
 
@@ -474,10 +486,10 @@ describe("API Endpoints", () => {
         .send(versionPayload);
 
       expect(res.status).toBe(200);
-      expect(mocks.agentCollection.updateOne).toHaveBeenCalledTimes(3);
-      expect((mocks.agentCollection.updateOne as any).mock.calls[2][0]).toMatchObject({
+      expect(mocks.agentCollection.updateOne).toHaveBeenCalledTimes(2);
+      expect((mocks.agentCollection.updateOne as any).mock.calls[1][0]).toMatchObject({
         _id: "synthetic-worker",
-        "versions.agentVersion": "synthetic-v1",
+        versions: concurrentlyUpdatedAgent.versions,
       });
     });
   });

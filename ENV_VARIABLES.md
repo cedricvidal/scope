@@ -616,7 +616,8 @@ There is no `SCHEDULER_WORKER_TYPES` allowlist.
 Maximum queued-request depth for each exact worker/version target discovered
 from active `AgentVersion.queueName` records. The scheduler never derives a
 queue name from the worker ID. Each active target must own a distinct physical
-queue; registry writes reject queue reuse and the scheduler fails legacy
+queue; a newer same-agent registration takes over its queue, registry writes reject
+cross-agent queue reuse, and the scheduler fails legacy
 conflicts closed.
 
 ### SCHEDULER_PP_POLL_INTERVAL_MS

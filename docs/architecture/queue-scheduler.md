@@ -119,9 +119,10 @@ Every 2 seconds (configurable via `SCHEDULER_POLL_INTERVAL_MS`):
 6. Send `{ requestId, runId, workerType, agentVersion }` to that advertised Azure Storage Queue. If the send fails, retry the idempotent queued-to-pending rollback. Exhausted rollback failures emit `scheduler.claim_rollback_failed`.
 
 Each exact target owns a dedicated physical queue and therefore has an independent
-shallow-buffer budget. The registry API rejects active queue reuse by another target;
-the scheduler independently detects legacy or racing conflicts and dispatches
-nothing to the conflicted queue.
+shallow-buffer budget. Registering a new version of the same agent on its existing
+queue atomically retires the previous owner, so the last successful registration
+wins. The registry API rejects reuse by a different agent; the scheduler independently
+detects legacy or racing conflicts and dispatches nothing to the conflicted queue.
 
 The registry is refreshed on every cycle, so registrations, retirements,
 availability changes, and queue changes take effect without restarting the
