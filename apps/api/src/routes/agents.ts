@@ -82,6 +82,95 @@ function takeOverQueue(
   return updatedVersions;
 }
 
+type QueueTakeoverOutcome =
+  | { kind: "success"; version: AgentVersion; existed: boolean }
+  | { kind: "conflict"; owner: QueueOwner; queueName: string }
+  | { kind: "agent_not_found" }
+  | { kind: "version_not_found" }
+  | { kind: "queue_missing" }
+  | { kind: "unstable" };
+
+async function activateVersionWithQueueTakeover(
+  agentCollection: RouteContext["agentCollection"],
+  initialAgent: CodingAgentDocument,
+  selectVersion: (agent: CodingAgentDocument) => AgentVersion | undefined,
+  updatedAt?: Date,
+): Promise<QueueTakeoverOutcome> {
+  let currentAgent = initialAgent;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const requestedVersion = selectVersion(currentAgent);
+    if (!requestedVersion) {
+      return { kind: "version_not_found" };
+    }
+
+    const queueName = requestedVersion.queueName?.trim();
+    if (!queueName) {
+      return { kind: "queue_missing" };
+    }
+
+    const owner = await findActiveQueueOwner(
+      agentCollection,
+      queueName,
+      {
+        agentId: currentAgent._id,
+        agentVersion: requestedVersion.agentVersion,
+      },
+      true,
+    );
+    if (owner) {
+      return { kind: "conflict", owner, queueName };
+    }
+
+    const currentVersions = currentAgent.versions ?? [];
+    const existingVersion = currentVersions.find(
+      (version) => version.agentVersion === requestedVersion.agentVersion,
+    );
+    const activatedVersion: AgentVersion = {
+      ...requestedVersion,
+      status: "active",
+      createdAt: existingVersion?.createdAt ?? requestedVersion.createdAt,
+    };
+    const nextVersions = takeOverQueue(currentVersions, activatedVersion);
+    // Compare the embedded array snapshot so same-agent claims serialize
+    // without requiring a multi-document transaction.
+    const versionSnapshotFilter =
+      currentAgent.versions === undefined
+        ? { versions: { $exists: false } }
+        : { versions: currentAgent.versions };
+    const takeover = await agentCollection.updateOne(
+      {
+        _id: currentAgent._id,
+        deletedAt: { $exists: false },
+        ...versionSnapshotFilter,
+      },
+      {
+        $set: {
+          versions: nextVersions,
+          updatedAt: updatedAt ?? new Date(),
+        },
+      },
+    );
+    if (takeover.matchedCount === 1) {
+      return {
+        kind: "success",
+        version: activatedVersion,
+        existed: existingVersion !== undefined,
+      };
+    }
+
+    const refreshedAgent = await agentCollection.findOne({
+      _id: currentAgent._id,
+      deletedAt: { $exists: false },
+    });
+    if (!refreshedAgent) {
+      return { kind: "agent_not_found" };
+    }
+    currentAgent = refreshedAgent;
+  }
+
+  return { kind: "unstable" };
+}
+
 function queueConflictError(queueName: string, owner: QueueOwner): string {
   return `Queue "${queueName}" is already assigned to ${owner.agentId}@${owner.agentVersion}`;
 }
@@ -455,26 +544,10 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       const now = new Date();
-      let currentAgent = agent;
-      for (let attempt = 1; attempt <= 5; attempt += 1) {
-        const owner = await findActiveQueueOwner(
-          ctx.agentCollection,
-          normalizedQueueName,
-          { agentId: id, agentVersion },
-          true,
-        );
-        if (owner) {
-          res
-            .status(409)
-            .json({ error: queueConflictError(normalizedQueueName, owner) });
-          return;
-        }
-
-        const currentVersions = currentAgent.versions ?? [];
-        const existingVersion = currentVersions.find(
-          (version) => version.agentVersion === agentVersion,
-        );
-        const versionEntry: AgentVersion = {
+      const outcome = await activateVersionWithQueueTakeover(
+        ctx.agentCollection,
+        agent,
+        () => ({
           agentVersion,
           workerVersion,
           components,
@@ -483,43 +556,31 @@ apiRoute(ctx.app, ctx.registry, {
           imageTag,
           queueName: normalizedQueueName,
           status: "active",
-          createdAt: existingVersion?.createdAt ?? now,
-        };
-        const nextVersions = takeOverQueue(currentVersions, versionEntry);
-        // Compare the embedded array snapshot so same-agent claims serialize
-        // without requiring a multi-document transaction.
-        const versionSnapshotFilter =
-          currentAgent.versions === undefined
-            ? { versions: { $exists: false } }
-            : { versions: currentAgent.versions };
-        const takeover = await ctx.agentCollection.updateOne(
-          {
-            _id: id,
-            deletedAt: { $exists: false },
-            ...versionSnapshotFilter,
-          },
-          {
-            $set: {
-              versions: nextVersions,
-              updatedAt: now,
-            },
-          },
-        );
-
-        if (takeover.matchedCount === 1) {
-          res.status(existingVersion ? 200 : 201).json(versionEntry);
-          return;
-        }
-
-        const refreshedAgent = await ctx.agentCollection.findOne({
-          _id: id,
-          deletedAt: { $exists: false },
-        });
-        if (!refreshedAgent) {
-          res.status(404).json({ error: "Agent not found" });
-          return;
-        }
-        currentAgent = refreshedAgent;
+          createdAt: now,
+        }),
+        now,
+      );
+      if (outcome.kind === "success") {
+        res.status(outcome.existed ? 200 : 201).json(outcome.version);
+        return;
+      }
+      if (outcome.kind === "conflict") {
+        res
+          .status(409)
+          .json({ error: queueConflictError(outcome.queueName, outcome.owner) });
+        return;
+      }
+      if (outcome.kind === "agent_not_found") {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+      if (outcome.kind === "queue_missing") {
+        res.status(400).json({ error: "Active version must have a queueName" });
+        return;
+      }
+      if (outcome.kind === "version_not_found") {
+        res.status(404).json({ error: "Version not found" });
+        return;
       }
 
       res.status(503).json({
@@ -569,73 +630,40 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       if (status === "active") {
-        let currentAgent = agent;
-        for (let attempt = 1; attempt <= 5; attempt += 1) {
-          const currentVersions = currentAgent.versions ?? [];
-          const currentVersion = currentVersions.find(
-            (candidate: AgentVersion) =>
-              candidate.agentVersion === agentVersion,
-          );
-          if (!currentVersion) {
-            res.status(404).json({ error: "Version not found" });
-            return;
-          }
-
-          const queueName = currentVersion.queueName?.trim();
-          if (!queueName) {
-            res.status(400).json({ error: "Active version must have a queueName" });
-            return;
-          }
-          const owner = await findActiveQueueOwner(
-            ctx.agentCollection,
-            queueName,
-            { agentId: id, agentVersion },
-            true,
-          );
-          if (owner) {
-            res.status(409).json({ error: queueConflictError(queueName, owner) });
-            return;
-          }
-
-          const activatedVersion: AgentVersion = {
-            ...currentVersion,
-            status: "active",
-          };
-          const nextVersions = takeOverQueue(
-            currentVersions,
-            activatedVersion,
-          );
-          const versionSnapshotFilter =
-            currentAgent.versions === undefined
-              ? { versions: { $exists: false } }
-              : { versions: currentAgent.versions };
-          const activation = await ctx.agentCollection.updateOne(
-            {
-              _id: id,
-              deletedAt: { $exists: false },
-              ...versionSnapshotFilter,
-            },
-            {
-              $set: {
-                versions: nextVersions,
-                updatedAt: new Date(),
-              },
-            },
-          );
-          if (activation.matchedCount === 1) {
-            res.json(activatedVersion);
-            return;
-          }
-
-          const refreshedAgent = await ctx.agentCollection.findOne({
-            _id: id,
-            deletedAt: { $exists: false },
+        const outcome = await activateVersionWithQueueTakeover(
+          ctx.agentCollection,
+          agent,
+          (currentAgent) =>
+            (currentAgent.versions ?? []).find(
+              (candidate: AgentVersion) =>
+                candidate.agentVersion === agentVersion,
+            ),
+        );
+        if (outcome.kind === "success") {
+          res.json(outcome.version);
+          return;
+        }
+        if (
+          outcome.kind === "agent_not_found" ||
+          outcome.kind === "version_not_found"
+        ) {
+          res.status(404).json({
+            error:
+              outcome.kind === "agent_not_found"
+                ? "Agent not found"
+                : "Version not found",
           });
-          if (!refreshedAgent) {
-            res.status(404).json({ error: "Agent not found" });
-            return;
-          }
-          currentAgent = refreshedAgent;
+          return;
+        }
+        if (outcome.kind === "queue_missing") {
+          res.status(400).json({ error: "Active version must have a queueName" });
+          return;
+        }
+        if (outcome.kind === "conflict") {
+          res.status(409).json({
+            error: queueConflictError(outcome.queueName, outcome.owner),
+          });
+          return;
         }
 
         res.status(503).json({
