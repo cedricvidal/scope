@@ -73,20 +73,29 @@ function makeCollections(
 ) {
   const mutableAgents = [...agents];
   const requestCollection = {
-    aggregate: vi.fn().mockImplementation(() => ({
+    aggregate: vi.fn().mockImplementation((pipeline: Array<Record<string, any>>) => ({
       toArray: async () => {
+        const status = pipeline[0]?.$match?.["run.status"];
         const grouped = new Map<
           string,
           {
-            _id: { workerType?: string; agentVersion?: string };
+            _id: {
+              workerType?: string;
+              agentVersion?: string;
+              queuedQueueName?: string;
+            };
             count: number;
           }
         >();
         for (const request of requests.filter(
           (candidate) =>
-            candidate.run?.status === "pending" && !candidate.deletedAt,
+            candidate.run?.status === status && !candidate.deletedAt,
         )) {
-          const key = `${request.workerType}\0${request.agentVersion ?? ""}`;
+          const queuedQueueName =
+            status === "queued" ? request.run?.queuedQueueName : undefined;
+          const key =
+            `${request.workerType}\0${request.agentVersion ?? ""}` +
+            `\0${queuedQueueName ?? ""}`;
           const current = grouped.get(key);
           if (current) current.count++;
           else {
@@ -96,6 +105,7 @@ function makeCollections(
                 ...(request.agentVersion
                   ? { agentVersion: request.agentVersion }
                   : {}),
+                ...(queuedQueueName ? { queuedQueueName } : {}),
               },
               count: 1,
             });
@@ -109,6 +119,12 @@ function makeCollections(
         filter: {
           workerType: string;
           agentVersion: string;
+        },
+        update: {
+          $set: {
+            "run.status": "queued";
+            "run.queuedQueueName": string;
+          };
         },
       ) => {
         const request = requests
@@ -125,19 +141,63 @@ function makeCollections(
           )[0];
         if (!request?.run) return null;
         request.run.status = "queued";
+        request.run.queuedQueueName = update.$set["run.queuedQueueName"];
         return request;
       },
     ),
     updateOne: vi.fn().mockImplementation(
       async (
         filter: { _id: string },
-        update: { $set: { "run.status": string } },
+        update: {
+          $set: { "run.status": string };
+          $unset?: { "run.queuedQueueName"?: string };
+        },
       ) => {
         const request = requests.find((candidate) => candidate._id === filter._id);
         if (request?.run) {
           request.run.status = update.$set["run.status"] as "pending";
+          if (update.$unset?.["run.queuedQueueName"] !== undefined) {
+            delete request.run.queuedQueueName;
+          }
         }
         return { matchedCount: request ? 1 : 0 };
+      },
+    ),
+    updateMany: vi.fn().mockImplementation(
+      async (
+        filter: {
+          workerType?: string;
+          agentVersion?: string;
+          "run.queuedQueueName"?: string | { $exists: false };
+        },
+        update: {
+          $set: { "run.status": string };
+          $unset?: { "run.queuedQueueName"?: string };
+        },
+      ) => {
+        const matches = requests.filter((candidate) => {
+          if (candidate.run?.status !== "queued" || candidate.deletedAt) return false;
+          if (
+            typeof filter.workerType === "string" &&
+            candidate.workerType !== filter.workerType
+          ) return false;
+          if (
+            typeof filter.agentVersion === "string" &&
+            candidate.agentVersion !== filter.agentVersion
+          ) return false;
+          const queueFilter = filter["run.queuedQueueName"];
+          if (typeof queueFilter === "string") {
+            return candidate.run.queuedQueueName === queueFilter;
+          }
+          return candidate.run.queuedQueueName === undefined;
+        });
+        for (const request of matches) {
+          request.run!.status = update.$set["run.status"] as "pending";
+          if (update.$unset?.["run.queuedQueueName"] !== undefined) {
+            delete request.run!.queuedQueueName;
+          }
+        }
+        return { matchedCount: matches.length, modifiedCount: matches.length };
       },
     ),
   } as any;
@@ -224,7 +284,7 @@ describe("RequestScheduler", () => {
     expect(queue.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("deduplicates a shared queue across workers and versions", async () => {
+  it("refuses a queue claimed by multiple exact targets", async () => {
     const requests = [
       makeRequest("one", "worker-a", "v1", 10),
       makeRequest("two", "worker-a", "v2", 5),
@@ -241,6 +301,8 @@ describe("RequestScheduler", () => {
     ]);
     const queue = makeQueueClient();
     const factory = vi.fn(() => queue);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     const scheduler = new RequestScheduler(
       requestCollection,
       agentCollection,
@@ -250,58 +312,42 @@ describe("RequestScheduler", () => {
 
     await (scheduler as any).dispatch();
 
-    expect(factory).toHaveBeenCalledTimes(1);
-    expect(queue.getProperties).toHaveBeenCalledTimes(1);
-    expect(queue.sendMessage).toHaveBeenCalledTimes(3);
-    const claimCalls = requestCollection.findOneAndUpdate.mock.calls as Array<
-      [
-        { workerType?: string; agentVersion?: string },
-        unknown,
-        { returnDocument?: string },
-      ]
-    >;
-    expect(
-      claimCalls
-        .filter((call) => call[2]?.returnDocument === "after")
-        .slice(0, 3)
-        .map((call) => ({
-          workerType: call[0].workerType,
-          agentVersion: call[0].agentVersion,
-        })),
-    ).toEqual([
-      { workerType: "worker-a", agentVersion: "v1" },
-      { workerType: "worker-a", agentVersion: "v2" },
-      { workerType: "worker-b", agentVersion: "v7" },
-    ]);
+    expect(factory).not.toHaveBeenCalled();
+    expect(queue.sendMessage).not.toHaveBeenCalled();
+    expect(requests.every((candidate) => candidate.run?.status === "pending")).toBe(
+      true,
+    );
+    expect(error.mock.calls.flat().join("\n")).toContain(
+      'Refusing conflicting queue "shared-queue"',
+    );
   });
 
-  it("rotates a shared queue budget across active targets", async () => {
+  it("keeps a healthy dedicated queue dispatching when another queue is full", async () => {
     const requests = [
       makeRequest("a-1", "worker-a", "v1", 100),
-      makeRequest("a-2", "worker-a", "v1", 90),
       makeRequest("b-1", "worker-b", "v2", 1),
     ];
+    requests[0].run!.status = "queued";
+    requests[0].run!.queuedQueueName = "queue-a";
     const { requestCollection, agentCollection } = makeCollections(requests, [
-      makeAgent("worker-a", [{ agentVersion: "v1", queueName: "shared" }]),
-      makeAgent("worker-b", [{ agentVersion: "v2", queueName: "shared" }]),
+      makeAgent("worker-a", [{ agentVersion: "v1", queueName: "queue-a" }]),
+      makeAgent("worker-b", [{ agentVersion: "v2", queueName: "queue-b" }]),
     ]);
-    const queue = makeQueueClient();
+    const queueA = makeQueueClient(100);
+    const queueB = makeQueueClient();
     const scheduler = new RequestScheduler(
       requestCollection,
       agentCollection,
-      () => queue,
+      (queueName) => (queueName === "queue-a" ? queueA : queueB),
       { targetQueueDepth: 1 },
     );
 
     await (scheduler as any).dispatch();
-    requestCollection.updateOne.mockClear();
-    requests[0].run!.status = "done";
-    queue.getProperties.mockResolvedValueOnce({ approximateMessagesCount: 0 });
-    await (scheduler as any).dispatch();
 
-    expect(requests[0].run?.status).toBe("done");
-    expect(requests[1].run?.status).toBe("pending");
-    expect(requests[2].run?.status).toBe("queued");
+    expect(queueA.sendMessage).not.toHaveBeenCalled();
+    expect(queueB.sendMessage).toHaveBeenCalledTimes(1);
+    expect(requests[0].run?.status).toBe("queued");
+    expect(requests[1].run?.status).toBe("queued");
   });
 
   it("leaves a target pending when duplicate version records advertise conflicting queues", async () => {
@@ -427,6 +473,7 @@ describe("RequestScheduler", () => {
 
     expect(requestCollection.updateOne).toHaveBeenCalled();
     expect(request.run?.status).toBe("pending");
+    expect(request.run?.queuedQueueName).toBeUndefined();
   });
 
   it("retries a transient claim rollback after queue send fails", async () => {
@@ -463,9 +510,13 @@ describe("RequestScheduler", () => {
       [request],
       [makeAgent("worker", [{ agentVersion: "v1", queueName: "queue" }])],
     );
-    requestCollection.aggregate.mockImplementationOnce(() => ({
-      toArray: vi.fn().mockRejectedValue(new Error("diagnostics unavailable")),
-    }));
+    const aggregateImplementation =
+      requestCollection.aggregate.getMockImplementation();
+    requestCollection.aggregate
+      .mockImplementationOnce(aggregateImplementation)
+      .mockImplementationOnce(() => ({
+        toArray: vi.fn().mockRejectedValue(new Error("diagnostics unavailable")),
+      }));
     const queue = makeQueueClient();
     vi.spyOn(console, "error").mockImplementation(() => {});
     const scheduler = new RequestScheduler(
@@ -480,25 +531,136 @@ describe("RequestScheduler", () => {
     expect(request.run?.status).toBe("queued");
   });
 
-  it("respects queue depth for all targets sharing a queue", async () => {
+  it("fails a conflicting legacy queue closed", async () => {
     const requests = [
-      makeRequest("one", "worker", "v1"),
-      makeRequest("two", "worker", "v1"),
+      makeRequest("dead", "worker-a", "v1"),
+      makeRequest("healthy", "worker-b", "v2"),
     ];
     const { requestCollection, agentCollection } = makeCollections(
       requests,
-      [makeAgent("worker", [{ agentVersion: "v1", queueName: "queue" }])],
+      [
+        makeAgent("worker-a", [{ agentVersion: "v1", queueName: "shared" }]),
+        makeAgent("worker-b", [{ agentVersion: "v2", queueName: "shared" }]),
+      ],
     );
-    const queue = makeQueueClient(4);
+    const queue = makeQueueClient(100);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     const scheduler = new RequestScheduler(
       requestCollection,
       agentCollection,
       () => queue,
-      { targetQueueDepth: 5 },
+      { targetQueueDepth: 1 },
     );
 
     await (scheduler as any).dispatch();
 
+    expect(queue.sendMessage).not.toHaveBeenCalled();
+    expect(requests.every((candidate) => candidate.run?.status === "pending")).toBe(
+      true,
+    );
+    expect(error).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when an unavailable active owner conflicts with a routable target", async () => {
+    const request = makeRequest("healthy", "worker-b", "v2");
+    const { requestCollection, agentCollection } = makeCollections(
+      [request],
+      [
+        makeAgent(
+          "worker-a",
+          [{ agentVersion: "v1", queueName: "shared" }],
+          { available: false },
+        ),
+        makeAgent("worker-b", [
+          { agentVersion: "v2", queueName: "shared" },
+        ]),
+      ],
+    );
+    const factory = vi.fn(() => makeQueueClient());
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const scheduler = new RequestScheduler(
+      requestCollection,
+      agentCollection,
+      factory,
+    );
+
+    await (scheduler as any).dispatch();
+
+    expect(factory).not.toHaveBeenCalled();
+    expect(request.run?.status).toBe("pending");
+  });
+
+  it("recovers and redispatches queued requests when their target moves queues", async () => {
+    const request = makeRequest("moved", "worker", "v1");
+    request.run!.status = "queued";
+    request.run!.queuedQueueName = "old-queue";
+    const { requestCollection, agentCollection } = makeCollections(
+      [request],
+      [makeAgent("worker", [{ agentVersion: "v1", queueName: "new-queue" }])],
+    );
+    const queue = makeQueueClient();
+    const factory = vi.fn(() => queue);
+    const scheduler = new RequestScheduler(
+      requestCollection,
+      agentCollection,
+      factory,
+      { targetQueueDepth: 1 },
+    );
+
+    await (scheduler as any).dispatch();
+
+    expect(requestCollection.updateMany).toHaveBeenCalledTimes(1);
+    expect(factory).toHaveBeenCalledWith("new-queue");
+    expect(request.run?.status).toBe("queued");
+    expect(request.run?.queuedQueueName).toBe("new-queue");
+    expect(queue.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers queued requests whose target disappeared", async () => {
+    const request = makeRequest("retired", "worker", "v1");
+    request.run!.status = "queued";
+    request.run!.queuedQueueName = "old-queue";
+    const { requestCollection, agentCollection } = makeCollections(
+      [request],
+      [],
+    );
+    const factory = vi.fn(() => makeQueueClient());
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const scheduler = new RequestScheduler(
+      requestCollection,
+      agentCollection,
+      factory,
+    );
+
+    await (scheduler as any).dispatch();
+
+    expect(request.run?.status).toBe("pending");
+    expect(request.run?.queuedQueueName).toBeUndefined();
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("recovers legacy queued requests without queue metadata", async () => {
+    const request = makeRequest("legacy", "worker", "v1");
+    request.run!.status = "queued";
+    const { requestCollection, agentCollection } = makeCollections(
+      [request],
+      [makeAgent("worker", [{ agentVersion: "v1", queueName: "queue" }])],
+    );
+    const queue = makeQueueClient();
+    const scheduler = new RequestScheduler(
+      requestCollection,
+      agentCollection,
+      () => queue,
+      { targetQueueDepth: 1 },
+    );
+
+    await (scheduler as any).dispatch();
+
+    expect(requestCollection.updateMany).toHaveBeenCalledTimes(1);
+    expect(request.run?.status).toBe("queued");
+    expect(request.run?.queuedQueueName).toBe("queue");
     expect(queue.sendMessage).toHaveBeenCalledTimes(1);
   });
 });

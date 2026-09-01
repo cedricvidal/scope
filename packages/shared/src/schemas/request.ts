@@ -188,6 +188,7 @@ export const RunStateSchema = z
     _id: z.string(),                                     // Unique per attempt
     attemptNumber: z.number().int().min(1),              // 1, 2, 3…
     status: RequestStatusSchema,
+    queuedQueueName: z.string().optional(),
     outcome: RequestOutcomeSchema.optional(),
     result: z.string().optional(),
     error: z.string().optional(),

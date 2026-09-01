@@ -371,6 +371,9 @@ export interface RunState {
   _id: string;                              // Unique per attempt
   attemptNumber: number;                    // 1, 2, 3…
   status: "pending" | "queued" | "processing" | "paused" | "done";
+  /** Physical queue used for the current dispatch claim. Cleared when the claim
+   * is rolled back or accepted for processing. */
+  queuedQueueName?: string;
   outcome?: "succeeded" | "failed" | "finished";
   result?: string;
   error?: string;

@@ -68,6 +68,43 @@ function buildApp() {
   return app;
 }
 
+const versionPayload = {
+  agentVersion: "v1",
+  workerVersion: "v1-build",
+  components: {},
+  gitCommit: "abcdef0",
+  buildTime: "20260101T000000Z",
+  imageTag: "v1-build",
+  queueName: "queue-target",
+};
+
+function buildVersionApp(documents: Array<Record<string, unknown>>) {
+  const updateOne = vi.fn().mockResolvedValue({
+    matchedCount: 1,
+    modifiedCount: 1,
+  });
+  const agentCollection = {
+    find: vi.fn((filter: Record<string, unknown>) => ({
+      toArray: vi.fn(async () =>
+        documents.filter((document) => matches(document, filter)),
+      ),
+    })),
+    findOne: vi.fn(async (filter: Record<string, unknown>) =>
+      documents.find((document) => matches(document, filter)) ?? null,
+    ),
+    updateOne,
+  } as unknown as RouteContext["agentCollection"];
+
+  const app = express();
+  app.use(express.json());
+  registerAgentsRoutes({
+    app,
+    registry: new OpenAPIRegistry(),
+    agentCollection,
+  } as unknown as RouteContext);
+  return { app, updateOne };
+}
+
 describe("agent historical lookup", () => {
   it("excludes deleted agents from the list by default", async () => {
     const response = await request(buildApp()).get("/api/v1/agents");
@@ -103,6 +140,129 @@ describe("agent historical lookup", () => {
     expect(included.body).toMatchObject({
       id: deletedAgent._id,
       name: deletedAgent.name,
+    });
+  });
+
+  describe("agent queue ownership", () => {
+    it("rejects another exact target claiming an active queue", async () => {
+      const target = {
+        ...activeAgent,
+        _id: "target-agent",
+        versions: [],
+      };
+      const owner = {
+        ...activeAgent,
+        _id: "owner-agent",
+        versions: [
+          {
+            ...versionPayload,
+            agentVersion: "owner-v1",
+            queueName: versionPayload.queueName,
+            status: "active",
+            createdAt: new Date(),
+          },
+        ],
+      };
+      const { app, updateOne } = buildVersionApp([target, owner]);
+
+      const response = await request(app)
+        .post(`/api/v1/agents/${target._id}/versions`)
+        .send(versionPayload);
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toContain("owner-agent@owner-v1");
+      expect(updateOne).not.toHaveBeenCalled();
+    });
+
+    it("allows idempotent registration by the current exact target", async () => {
+      const target = {
+        ...activeAgent,
+        _id: "target-agent",
+        versions: [
+          {
+            ...versionPayload,
+            status: "active",
+            createdAt: new Date(),
+          },
+        ],
+      };
+      const { app, updateOne } = buildVersionApp([target]);
+
+      const response = await request(app)
+        .post(`/api/v1/agents/${target._id}/versions`)
+        .send(versionPayload);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        agentVersion: versionPayload.agentVersion,
+        queueName: versionPayload.queueName,
+        status: "active",
+      });
+      expect(updateOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects reactivating a version whose queue has a new owner", async () => {
+      const target = {
+        ...activeAgent,
+        _id: "target-agent",
+        versions: [
+          {
+            ...versionPayload,
+            status: "retired",
+            createdAt: new Date(),
+          },
+        ],
+      };
+      const owner = {
+        ...activeAgent,
+        _id: "owner-agent",
+        versions: [
+          {
+            ...versionPayload,
+            agentVersion: "owner-v1",
+            status: "active",
+            createdAt: new Date(),
+          },
+        ],
+      };
+      const { app, updateOne } = buildVersionApp([target, owner]);
+
+      const response = await request(app)
+        .patch(`/api/v1/agents/${target._id}/versions/${versionPayload.agentVersion}`)
+        .send({ status: "active" });
+
+      expect(response.status).toBe(409);
+      expect(updateOne).not.toHaveBeenCalled();
+    });
+
+    it("rejects restoring an agent with conflicting active queue assignments", async () => {
+      const deleted = {
+        ...deletedAgent,
+        _id: "restored-agent",
+        versions: [
+          {
+            ...versionPayload,
+            agentVersion: "v1",
+            status: "active",
+            createdAt: new Date(),
+          },
+          {
+            ...versionPayload,
+            agentVersion: "v2",
+            status: "active",
+            createdAt: new Date(),
+          },
+        ],
+      };
+      const { app, updateOne } = buildVersionApp([deleted]);
+
+      const response = await request(app).post("/api/v1/agents").send({
+        _id: deleted._id,
+        name: "Restored agent",
+      });
+
+      expect(response.status).toBe(409);
+      expect(updateOne).not.toHaveBeenCalled();
     });
   });
 

@@ -459,14 +459,14 @@ queueName: my-explicit-worker-queue
 Every shown version field is required and must be non-empty.
 `components` is a string-to-string map. Registration activates the version;
 versions can later be retired through the version status endpoint. Queue names
-are opaque deployment-owned values: shared queues and dynamically named
-workers are supported, and no platform service prepends `queue-` or otherwise
-derives them.
+are opaque deployment-owned values, but each non-deleted active agent version
+must own a distinct queue. Dynamically named workers are supported, and no
+platform service prepends `queue-` or otherwise derives queue names.
 
 At runtime, `SCOPE_AGENT_VERSION` or `WorkerProcessor.getAgentVersion()` must
 provide the exact registered `agentVersion`. The queue processor fails during
 startup if neither provides a non-empty identity. This prevents a worker from
-executing a message for another version when queues are shared. The OSS local
+executing a stale or misrouted message. The OSS local
 Compose manifests set `SCOPE_AGENT_VERSION` to their development manifest value;
 production deployments normally derive it from the installed agent components.
 

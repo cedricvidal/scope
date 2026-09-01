@@ -76,6 +76,7 @@ stateDiagram-v2
     [*] --> pending
     pending --> paused : pause()
     pending --> queued : scheduler dispatch
+    queued --> pending : registry target recovery
     queued --> paused : pause()
     queued --> processing : worker pickup
     paused --> pending : resume()
@@ -86,7 +87,7 @@ stateDiagram-v2
 | Status | Meaning |
 |--------|---------|
 | `pending` | Awaiting scheduler dispatch. Can be paused. |
-| `queued` | Dispatched to Azure queue, awaiting worker pickup. Can be paused. |
+| `queued` | Dispatched to the Azure queue recorded in `run.queuedQueueName`, awaiting worker pickup. Can be paused. |
 | `processing` | Worker actively running. Cannot be paused. |
 | `paused` | Held — scheduler skips. Resume returns to `pending`. |
 | `done` | Terminal (outcome: succeeded / failed / finished). |
@@ -102,24 +103,31 @@ stateDiagram-v2
 Every 2 seconds (configurable via `SCHEDULER_POLL_INTERVAL_MS`):
 
 1. Read the agent registry and keep only non-deleted agents with `available: true` and active versions whose `queueName` is non-empty.
-2. Group exact worker/version targets by advertised queue name, deduplicating shared queues and repeated versions.
-3. For each discovered queue, read Azure queue depth via `getProperties().approximateMessagesCount`
-4. Compute available slots: `targetQueueDepth − currentDepth`
-5. For each slot, round-robin across the exact registered worker/version targets,
-   retaining the cursor across cycles, then `findOneAndUpdate` the
-   highest-priority pending request within that target:
+2. Build one exact worker/version target per advertised queue. If legacy or racing
+   registry writes assign a queue to multiple targets, fail that queue closed and emit
+   `scheduler.registry_queue_conflict`.
+3. Reconcile queued requests against the refreshed registry. Requests whose target disappeared,
+   whose queue changed, or whose legacy record lacks `run.queuedQueueName` return atomically to
+   `pending`; workers discard messages from the superseded dispatch.
+4. Count queued requests per exact worker/version target from MongoDB and read the physical
+   Azure queue depth. Compute available slots from the greater count so stale queue messages
+   or an eventually consistent queue-depth read cannot overfill the queue.
+5. `findOneAndUpdate` the highest-priority pending request within that target:
    - Filter: `run.status: "pending"`, exact `workerType` + `agentVersion`, no `deletedAt`
    - Sort within the target: `priority: -1, createdAt: 1`
-   - Update: set `run.status: "queued"`
+   - Update: set `run.status: "queued"` and `run.queuedQueueName` to the advertised queue
 6. Send `{ requestId, runId, workerType, agentVersion }` to that advertised Azure Storage Queue. If the send fails, retry the idempotent queued-to-pending rollback. Exhausted rollback failures emit `scheduler.claim_rollback_failed`.
 
-Round-robin target selection prevents a high-volume target from starving another
-active version that shares the physical queue, while the single queue-depth
-budget still prevents overfilling that queue.
+Each exact target owns a dedicated physical queue and therefore has an independent
+shallow-buffer budget. The registry API rejects active queue reuse by another target;
+the scheduler independently detects legacy or racing conflicts and dispatches
+nothing to the conflicted queue.
 
 The registry is refreshed on every cycle, so registrations, retirements,
 availability changes, and queue changes take effect without restarting the
-scheduler. Pending requests whose target is missing, deleted, unavailable,
+scheduler. Already-queued requests are recovered to pending before dispatch when
+their exact target is no longer routable or advertises a different queue.
+Pending requests whose target is missing, deleted, unavailable,
 inactive, versionless, or missing a queue are not claimed. The scheduler emits
 `scheduler.invalid_pending_target` and `scheduler.invalid_pending_requests`
 telemetry with an actionable reason whenever that invalid-target set changes.
@@ -133,7 +141,7 @@ Scheduler environment variables (set on the scheduler Deployment):
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
-| `SCHEDULER_TARGET_QUEUE_DEPTH` | 5 | Target depth for every discovered queue |
+| `SCHEDULER_TARGET_QUEUE_DEPTH` | 5 | Target queued-request depth for each exact worker/version |
 | `SCHEDULER_POLL_INTERVAL_MS` | 2000 | Polling interval in ms |
 
 There is no scheduler worker inventory and no queue naming convention.
@@ -150,13 +158,12 @@ Once a message is in Azure Storage Queue, it cannot be reordered or removed. By 
 
 ### Back Pressure
 
-The scheduler provides natural back pressure. When workers are busy, messages sit in the queue and `approximateMessagesCount` stays at or above `targetQueueDepth`. The scheduler sees zero available slots and stops dispatching — pending requests accumulate in MongoDB where they remain re-prioritizable and pausable.
+The scheduler provides natural back pressure. When workers are busy, messages sit in the queue and the greater of `approximateMessagesCount` and the MongoDB queued-request count stays at or above `targetQueueDepth`. The scheduler sees zero available slots and stops dispatching — pending requests accumulate in MongoDB where they remain re-prioritizable and pausable.
 
 When workers finish and drain messages, slots open up and the scheduler fills them on the next tick (≤2s). This creates a pull-based flow: workers pull work at their own pace, and the scheduler never overwhelms them regardless of how many requests are pending in MongoDB.
 
-If worker replicas scale up, increase `SCHEDULER_TARGET_QUEUE_DEPTH`. The target
-depth is shared by all discovered queues and should be high enough to keep the
-largest worker pool supplied.
+If worker replicas scale up, increase `SCHEDULER_TARGET_QUEUE_DEPTH`. The same target depth is applied independently to every discovered queue and should
+be high enough to keep the largest worker pool supplied.
 
 ## Worker Behavior
 
@@ -274,10 +281,11 @@ Each row in the runs table has inline icon buttons for Pause (pending/queued), R
 
 The scheduler has no static queue inventory. Inspect active
 `AgentVersion.queueName` values in the agent registry to see the current queues.
-When a queue is intentionally shared, each consumer compares the request's
-exact worker and version with its own runtime identity. It immediately releases
-non-matching messages instead of executing or deleting them, then observes its
-normal poll delay so the matching consumer gets a polling window.
+Each non-deleted active agent version must own a distinct queue. Workers still
+compare the request's exact worker/version and recorded `run.queuedQueueName`
+with their runtime identity as defense in depth against stale or legacy messages.
+The atomic `queued → processing` claim also requires the worker's current queue
+name, closing the race where a run is reassigned after the worker's initial read.
 
 ## Key Files
 

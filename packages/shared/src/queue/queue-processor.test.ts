@@ -185,7 +185,7 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     return { qp, requestDoc, message, heartbeat, stop, log, findOneAndUpdate, updateOne, safeDeleteMessage, safeDeferMessage, heartbeatStore, runId, requestId };
   }
 
-  it("defers a shared-queue message for another worker", async () => {
+  it("defers a legacy misrouted message for another worker", async () => {
     const h = makeHarness("queued");
     h.requestDoc.workerType = "other-worker";
 
@@ -206,7 +206,7 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
   });
 
-  it("defers a shared-queue message for another agent version", async () => {
+  it("defers a legacy misrouted message for another agent version", async () => {
     const h = makeHarness("queued");
     h.requestDoc.agentVersion = "test-2.0.0";
 
@@ -225,6 +225,61 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
       0,
     );
     expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
+  });
+
+  it("deletes a stale message after the scheduler returns its run to pending", async () => {
+    const h = makeHarness("pending");
+    h.requestDoc.workerType = "other-worker";
+
+    await (h.qp as any).handleRequest(
+      h.requestDoc,
+      h.message,
+      h.heartbeat,
+      h.log,
+      { runId: h.runId },
+    );
+
+    expect(h.safeDeleteMessage).toHaveBeenCalledWith("msg-1", "pop-1");
+    expect(h.safeDeferMessage).not.toHaveBeenCalled();
+    expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
+  });
+
+  it("deletes a stale message after the target moves to another queue", async () => {
+    const h = makeHarness("queued", { queuedQueueName: "new-queue" });
+
+    await (h.qp as any).handleRequest(
+      h.requestDoc,
+      h.message,
+      h.heartbeat,
+      h.log,
+      { runId: h.runId },
+    );
+
+    expect(h.safeDeleteMessage).toHaveBeenCalledWith("msg-1", "pop-1");
+    expect(h.updateOne).not.toHaveBeenCalled();
+    expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
+  });
+
+  it("binds the atomic processing claim to the worker queue", async () => {
+    const h = makeHarness("queued", { queuedQueueName: "test-queue" });
+
+    await (h.qp as any).handleRequest(
+      h.requestDoc,
+      h.message,
+      h.heartbeat,
+      h.log,
+      { runId: h.runId },
+    );
+
+    expect(h.updateOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: h.requestId,
+        "run._id": h.runId,
+        "run.status": "queued",
+        "run.queuedQueueName": "test-queue",
+      }),
+      expect.any(Object),
+    );
   });
 
   it("marks run failed when no heartbeat AND startedAt is older than the staleness threshold", async () => {
@@ -479,6 +534,7 @@ describe("CodingAgentQueueProcessor pre-processing failures", () => {
       _id: requestId,
       "run._id": runId,
       "run.status": "queued",
+      "run.queuedQueueName": "test-queue",
     });
     expect(updateOne.mock.calls[1][0]).toEqual({
       _id: requestId,

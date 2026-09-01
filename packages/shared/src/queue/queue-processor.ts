@@ -127,6 +127,29 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     payload?: Record<string, unknown>,
   ): Promise<void> {
     const runtimeAgentVersion = this.runtimeAgentVersion;
+    if (requestDoc.run?.status === "pending") {
+      console.log(
+        `[${this.workerName}] Discarding stale queue message for pending request ${requestDoc._id}`,
+      );
+      await log("info", "Stale queue message discarded after scheduler recovery");
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+    if (
+      requestDoc.run?.queuedQueueName &&
+      requestDoc.run.queuedQueueName !== this.config.queueName
+    ) {
+      console.log(
+        `[${this.workerName}] Discarding stale queue message for ${requestDoc._id} ` +
+          `(queued=${requestDoc.run.queuedQueueName}, current=${this.config.queueName})`,
+      );
+      await log("info", "Stale queue message discarded after queue reassignment", {
+        queuedQueueName: requestDoc.run.queuedQueueName,
+        currentQueueName: this.config.queueName,
+      });
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
     if (
       requestDoc.workerType !== this.workerName ||
       requestDoc.agentVersion !== runtimeAgentVersion
@@ -143,9 +166,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         runtimeWorkerType: this.workerName,
         runtimeAgentVersion,
       });
-      // Release immediately. The base poll loop sleeps after this batch, giving
-      // the matching consumer a polling window instead of letting a faster
-      // wrong-target consumer repeatedly hold the message.
+      // Release immediately. Queue ownership rules prevent this in new registry
+      // state, but deferral preserves recoverability for legacy/racing records.
       await this.safeDeferMessage(message.messageId, popReceipt, 0);
       return;
     }
@@ -434,6 +456,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         _id: requestDoc._id,
         "run._id": runId,
         "run.status": "queued",
+        "run.queuedQueueName": this.config.queueName,
       } as any,
       {
         $set: {
@@ -450,6 +473,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           "run.os": versionFields.os,
           updatedAt: startedAt,
         },
+        $unset: { "run.queuedQueueName": "" },
       } as any,
     ));
 

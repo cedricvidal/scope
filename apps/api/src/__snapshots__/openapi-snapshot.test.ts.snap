@@ -2862,6 +2862,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "null",
             ],
           },
+          "queuedQueueName": {
+            "type": "string",
+          },
           "rawChatFormat": {
             "type": "string",
           },
@@ -3838,6 +3841,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "400": {
             "description": "Validation error",
           },
+          "409": {
+            "description": "Restored agent versions conflict with an active queue owner",
+          },
         },
         "summary": "Create or update agent (upsert)",
         "tags": [
@@ -4052,6 +4058,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "404": {
             "description": "Agent not found",
           },
+          "409": {
+            "description": "Queue is assigned to another active agent version",
+          },
         },
         "summary": "Register agent version (upsert)",
         "tags": [
@@ -4104,6 +4113,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "404": {
             "description": "Agent or version not found",
+          },
+          "409": {
+            "description": "Queue is assigned to another active agent version",
           },
         },
         "summary": "Patch agent version",

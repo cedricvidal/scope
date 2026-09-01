@@ -25,6 +25,15 @@ interface QueueTarget {
   targets: RegistryTarget[];
 }
 
+interface QueuedTargetGroup {
+  _id: {
+    workerType?: string;
+    agentVersion?: string;
+    queuedQueueName?: string | null;
+  };
+  count: number;
+}
+
 /**
  * Dispatch pending requests exclusively through active targets advertised by
  * the agent registry. The registry is refreshed every cycle, so registrations,
@@ -35,13 +44,13 @@ export class RequestScheduler {
   private interval: ReturnType<typeof setInterval> | null = null;
   private dispatching = false;
   private readonly queueClients = new Map<string, Promise<QueueClient>>();
-  private readonly nextTargetIndexByQueue = new Map<string, number>();
   private readonly pollIntervalMs: number;
   private readonly targetQueueDepth: number;
   private readonly invalidTargetReportIntervalMs: number;
   private invalidTargetSignature = "";
   private lastInvalidTargetReportAt = 0;
   private conflictingTargetKeys = new Set<string>();
+  private queueConflictSignature = "";
 
   constructor(
     private readonly requestCollection: Collection<RequestDocument>,
@@ -81,10 +90,15 @@ export class RequestScheduler {
     try {
       const agents = await this.agentCollection.find({}).toArray();
       const queueTargets = this.buildQueueTargets(agents);
+      const queuedCountsByTarget =
+        await this.reconcileQueuedTargets(queueTargets);
 
       for (const queueTarget of queueTargets) {
         try {
-          totalDispatched += await this.dispatchForQueue(queueTarget);
+          totalDispatched += await this.dispatchForQueue(
+            queueTarget,
+            queuedCountsByTarget,
+          );
         } catch (error) {
           console.error(
             `[Scheduler] Error dispatching queue "${queueTarget.queueName}":`,
@@ -119,10 +133,11 @@ export class RequestScheduler {
 
   private buildQueueTargets(agents: CodingAgentDocument[]): QueueTarget[] {
     const targetsByKey = new Map<string, RegistryTarget>();
+    const routableTargetKeys = new Set<string>();
     const conflictingTargetKeys = new Set<string>();
 
     for (const agent of agents) {
-      if (agent.deletedAt || agent.available !== true) continue;
+      if (agent.deletedAt) continue;
 
       for (const version of agent.versions ?? []) {
         const queueName = version.queueName?.trim();
@@ -143,10 +158,12 @@ export class RequestScheduler {
           continue;
         }
         targetsByKey.set(targetKey, target);
+        if (agent.available === true) {
+          routableTargetKeys.add(targetKey);
+        }
       }
     }
 
-    this.conflictingTargetKeys = conflictingTargetKeys;
     const targetsByQueue = new Map<string, Map<string, RegistryTarget>>();
 
     for (const [targetKey, target] of targetsByKey) {
@@ -156,7 +173,48 @@ export class RequestScheduler {
       targetsByQueue.set(target.queueName, queueTargets);
     }
 
+    const queueConflicts = [...targetsByQueue.entries()]
+      .filter(([, targets]) => targets.size > 1)
+      .map(([queueName, targets]) => ({
+        queueName,
+        targets: [...targets.values()].map((target) =>
+          this.targetKey(target.workerType, target.agentVersion),
+        ),
+      }))
+      .sort((left, right) => left.queueName.localeCompare(right.queueName));
+
+    for (const conflict of queueConflicts) {
+      for (const targetKey of conflict.targets) {
+        conflictingTargetKeys.add(targetKey);
+      }
+      targetsByQueue.delete(conflict.queueName);
+    }
+    this.conflictingTargetKeys = conflictingTargetKeys;
+
+    const conflictSignature = JSON.stringify(queueConflicts);
+    if (conflictSignature !== this.queueConflictSignature) {
+      this.queueConflictSignature = conflictSignature;
+      for (const conflict of queueConflicts) {
+        console.error(
+          `[Scheduler] Refusing conflicting queue "${conflict.queueName}" claimed by ` +
+            conflict.targets.join(", "),
+        );
+        trackEvent({
+          name: "scheduler.registry_queue_conflict",
+          properties: {
+            queueName: conflict.queueName,
+            targets: conflict.targets.join(","),
+          },
+        });
+      }
+    }
+
     return [...targetsByQueue.entries()]
+      .filter(([, targets]) =>
+        [...targets.keys()].some((targetKey) =>
+          routableTargetKeys.has(targetKey),
+        ),
+      )
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([queueName, targets]) => ({
         queueName,
@@ -194,51 +252,148 @@ export class RequestScheduler {
     }
   }
 
-  private async dispatchForQueue(queueTarget: QueueTarget): Promise<number> {
+  private async reconcileQueuedTargets(
+    queueTargets: QueueTarget[],
+  ): Promise<Map<string, number>> {
+    const expectedQueueByTarget = new Map(
+      queueTargets.flatMap((queue) =>
+        queue.targets.map(
+          (target) =>
+            [
+              this.targetKey(target.workerType, target.agentVersion),
+              queue.queueName,
+            ] as const,
+        ),
+      ),
+    );
+    const queuedGroups = await this.requestCollection
+      .aggregate<QueuedTargetGroup>([
+        {
+          $match: {
+            "run.status": "queued",
+            deletedAt: { $exists: false },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              workerType: "$workerType",
+              agentVersion: "$agentVersion",
+              queuedQueueName: "$run.queuedQueueName",
+            },
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray();
+    const queuedCountsByTarget = new Map<string, number>();
+
+    for (const group of queuedGroups) {
+      const targetKey = this.targetKey(
+        group._id.workerType ?? "",
+        group._id.agentVersion ?? "",
+      );
+      const expectedQueue = expectedQueueByTarget.get(targetKey);
+      const queuedQueue = group._id.queuedQueueName?.trim();
+      if (expectedQueue && queuedQueue === expectedQueue) {
+        queuedCountsByTarget.set(
+          targetKey,
+          (queuedCountsByTarget.get(targetKey) ?? 0) + group.count,
+        );
+        continue;
+      }
+
+      const now = new Date();
+      const result = await this.requestCollection.updateMany(
+        {
+          "run.status": "queued",
+          deletedAt: { $exists: false },
+          ...(group._id.workerType
+            ? { workerType: group._id.workerType }
+            : { workerType: { $exists: false } }),
+          ...(group._id.agentVersion
+            ? { agentVersion: group._id.agentVersion }
+            : { agentVersion: { $exists: false } }),
+          ...(queuedQueue
+            ? { "run.queuedQueueName": queuedQueue }
+            : { "run.queuedQueueName": { $exists: false } }),
+        } as never,
+        {
+          $set: {
+            "run.status": "pending",
+            "run.updatedAt": now,
+            updatedAt: now,
+          },
+          $unset: { "run.queuedQueueName": "" },
+        } as never,
+      );
+      if (result.modifiedCount > 0) {
+        const reason = expectedQueue ? "queue_changed" : "target_unavailable";
+        console.warn(
+          `[Scheduler] Returned ${result.modifiedCount} queued request(s) to pending ` +
+            `(worker=${group._id.workerType ?? "(missing)"}, ` +
+            `version=${group._id.agentVersion ?? "(missing)"}, reason=${reason})`,
+        );
+        trackEvent({
+          name: "scheduler.queued_target_reconciled",
+          properties: {
+            workerType: group._id.workerType ?? "",
+            agentVersion: group._id.agentVersion ?? "",
+            previousQueueName: queuedQueue ?? "",
+            currentQueueName: expectedQueue ?? "",
+            reason,
+            requestCount: String(result.modifiedCount),
+          },
+        });
+      }
+    }
+
+    return queuedCountsByTarget;
+  }
+
+  private async dispatchForQueue(
+    queueTarget: QueueTarget,
+    queuedCountsByTarget: Map<string, number>,
+  ): Promise<number> {
+    const target = queueTarget.targets[0];
+    if (!target || queueTarget.targets.length !== 1) {
+      throw new Error(
+        `Queue "${queueTarget.queueName}" must have exactly one active target`,
+      );
+    }
     const queueClient = await this.getQueueClient(queueTarget.queueName);
     const properties = await queueClient.getProperties();
-    const currentDepth = properties.approximateMessagesCount ?? 0;
-    const slots = this.targetQueueDepth - currentDepth;
-    if (slots <= 0) return 0;
+    const targetKey = this.targetKey(target.workerType, target.agentVersion);
+    const queuedRequestCount = queuedCountsByTarget.get(targetKey) ?? 0;
+    const physicalQueueDepth = properties.approximateMessagesCount ?? 0;
+    let remainingSlots =
+      this.targetQueueDepth -
+      Math.max(queuedRequestCount, physicalQueueDepth);
+    if (remainingSlots <= 0) return 0;
 
     let dispatched = 0;
-    let nextTargetIndex =
-      (this.nextTargetIndexByQueue.get(queueTarget.queueName) ?? 0) %
-      queueTarget.targets.length;
-    for (let index = 0; index < slots; index++) {
-      let claimed: RequestDocument | null = null;
-      for (
-        let targetOffset = 0;
-        targetOffset < queueTarget.targets.length;
-        targetOffset++
-      ) {
-        const targetIndex =
-          (nextTargetIndex + targetOffset) % queueTarget.targets.length;
-        const target = queueTarget.targets[targetIndex];
-        claimed = await this.requestCollection.findOneAndUpdate(
-          {
-            "run.status": "pending",
-            deletedAt: { $exists: false },
-            workerType: target.workerType,
-            agentVersion: target.agentVersion,
-          } as never,
-          {
-            $set: {
-              "run.status": "queued",
-              "run.updatedAt": new Date(),
-            },
-          } as never,
-          {
-            sort: { priority: -1, createdAt: 1 },
-            returnDocument: "after",
+    while (remainingSlots > 0) {
+      const claimed = await this.requestCollection.findOneAndUpdate(
+        {
+          "run.status": "pending",
+          deletedAt: { $exists: false },
+          workerType: target.workerType,
+          agentVersion: target.agentVersion,
+        } as never,
+        {
+          $set: {
+            "run.status": "queued",
+            "run.queuedQueueName": queueTarget.queueName,
+            "run.updatedAt": new Date(),
           },
-        );
-        if (claimed) {
-          nextTargetIndex = (targetIndex + 1) % queueTarget.targets.length;
-          break;
-        }
-      }
+        } as never,
+        {
+          sort: { priority: -1, createdAt: 1 },
+          returnDocument: "after",
+        },
+      );
       if (!claimed) break;
+      remainingSlots--;
 
       const message = Buffer.from(
         JSON.stringify({
@@ -266,6 +421,7 @@ export class RequestScheduler {
                     "run.status": "pending",
                     "run.updatedAt": new Date(),
                   },
+                  $unset: { "run.queuedQueueName": "" },
                 } as never,
               ),
             {
@@ -310,11 +466,11 @@ export class RequestScheduler {
       console.log(
         `[Scheduler] queue=${queueTarget.queueName}: dispatched ${claimed._id} ` +
           `(worker=${claimed.workerType}, version=${claimed.agentVersion}, ` +
-          `priority=${claimed.priority}, depth=${currentDepth + dispatched}/${this.targetQueueDepth})`,
+          `priority=${claimed.priority}, targetDepth=` +
+          `${this.targetQueueDepth - remainingSlots}/${this.targetQueueDepth})`,
       );
     }
 
-    this.nextTargetIndexByQueue.set(queueTarget.queueName, nextTargetIndex);
     return dispatched;
   }
 

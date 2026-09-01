@@ -13,6 +13,43 @@ import {
 import { apiRoute } from "../openapi/api-route.js";
 import type { AgentVersion, CodingAgentDocument, RouteContext } from "../route-context.js";
 
+interface QueueOwner {
+  agentId: string;
+  agentVersion: string;
+}
+
+async function findActiveQueueOwner(
+  agentCollection: RouteContext["agentCollection"],
+  queueName: string,
+  requestedTarget: QueueOwner,
+): Promise<QueueOwner | undefined> {
+  const agents = await agentCollection
+    .find({ deletedAt: { $exists: false } })
+    .toArray();
+
+  for (const agent of agents) {
+    for (const version of agent.versions ?? []) {
+      if (
+        version.status === "active" &&
+        version.queueName?.trim() === queueName &&
+        (agent._id !== requestedTarget.agentId ||
+          version.agentVersion !== requestedTarget.agentVersion)
+      ) {
+        return {
+          agentId: agent._id,
+          agentVersion: version.agentVersion,
+        };
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function queueConflictError(queueName: string, owner: QueueOwner): string {
+  return `Queue "${queueName}" is already assigned to ${owner.agentId}@${owner.agentVersion}`;
+}
+
 export function registerAgentsRoutes(ctx: RouteContext): void {
 
 // List all agents
@@ -89,6 +126,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: AgentResponseSchema,
   errorResponses: {
     400: { description: "Validation error" },
+    409: { description: "Restored agent versions conflict with an active queue owner" },
   },
   handler: async (req, res, next) => {
     try {
@@ -120,6 +158,37 @@ apiRoute(ctx.app, ctx.registry, {
       const existing = await ctx.agentCollection.findOne({ _id });
 
       if (existing) {
+        if (existing.deletedAt) {
+          const restoredTargetByQueue = new Map<string, string>();
+          const restoredQueueByTarget = new Map<string, string>();
+          for (const version of existing.versions ?? []) {
+            const queueName = version.queueName?.trim();
+            if (version.status !== "active" || !queueName) continue;
+            const existingVersion = restoredTargetByQueue.get(queueName);
+            const existingQueue = restoredQueueByTarget.get(version.agentVersion);
+            if (
+              (existingVersion && existingVersion !== version.agentVersion) ||
+              (existingQueue && existingQueue !== queueName)
+            ) {
+              res.status(409).json({
+                error: `Restored agent has conflicting active queue assignments involving "${queueName}"`,
+              });
+              return;
+            }
+            restoredTargetByQueue.set(queueName, version.agentVersion);
+            restoredQueueByTarget.set(version.agentVersion, queueName);
+            const owner = await findActiveQueueOwner(
+              ctx.agentCollection,
+              queueName,
+              { agentId: _id, agentVersion: version.agentVersion },
+            );
+            if (owner) {
+              res.status(409).json({ error: queueConflictError(queueName, owner) });
+              return;
+            }
+          }
+        }
+
         // Upsert: update existing (un-delete if soft-deleted)
         // Only update supportedModels if explicitly provided — prevents registration
         // jobs from wiping models set by the scanner
@@ -303,6 +372,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: AgentVersionSchema,
   errorResponses: {
     400: { description: "Validation error" },
+    409: { description: "Queue is assigned to another active agent version" },
     404: { description: "Agent not found" },
   },
   handler: async (req, res, next) => {
@@ -335,14 +405,27 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: "imageTag is required and must be a string" });
         return;
       }
-      if (!queueName || typeof queueName !== "string") {
+      if (!queueName || typeof queueName !== "string" || !queueName.trim()) {
         res.status(400).json({ error: "queueName is required and must be a string" });
         return;
       }
+      const normalizedQueueName = queueName.trim();
 
       const agent = await ctx.agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
       if (!agent) {
         res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+
+      const owner = await findActiveQueueOwner(
+        ctx.agentCollection,
+        normalizedQueueName,
+        { agentId: id, agentVersion },
+      );
+      if (owner) {
+        res
+          .status(409)
+          .json({ error: queueConflictError(normalizedQueueName, owner) });
         return;
       }
 
@@ -354,7 +437,7 @@ apiRoute(ctx.app, ctx.registry, {
         gitCommit,
         buildTime,
         imageTag,
-        queueName,
+        queueName: normalizedQueueName,
         status: "active",
         createdAt: now,
       };
@@ -366,7 +449,7 @@ apiRoute(ctx.app, ctx.registry, {
           "versions.$.gitCommit": gitCommit,
           "versions.$.buildTime": buildTime,
           "versions.$.imageTag": imageTag,
-          "versions.$.queueName": queueName,
+          "versions.$.queueName": normalizedQueueName,
           "versions.$.status": "active",
           updatedAt: now,
         },
@@ -429,6 +512,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: AgentVersionSchema,
   errorResponses: {
     400: { description: "Invalid status value" },
+    409: { description: "Queue is assigned to another active agent version" },
     404: { description: "Agent or version not found" },
   },
   handler: async (req, res, next) => {
@@ -451,6 +535,23 @@ apiRoute(ctx.app, ctx.registry, {
       if (!version) {
         res.status(404).json({ error: "Version not found" });
         return;
+      }
+
+      if (status === "active") {
+        const queueName = version.queueName?.trim();
+        if (!queueName) {
+          res.status(400).json({ error: "Active version must have a queueName" });
+          return;
+        }
+        const owner = await findActiveQueueOwner(
+          ctx.agentCollection,
+          queueName,
+          { agentId: id, agentVersion },
+        );
+        if (owner) {
+          res.status(409).json({ error: queueConflictError(queueName, owner) });
+          return;
+        }
       }
 
       await ctx.agentCollection.updateOne(
