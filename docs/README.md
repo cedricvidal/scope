@@ -24,6 +24,12 @@ Central documentation hub for the Scope platform — an AI coding agent benchmar
 | [AKS Node Pool Separation](infrastructure/aks-node-pool-separation.md) | Taints, tolerations, node selectors for workload isolation |
 | [Azure Developer CLI](infrastructure/azd-deployment.md) | Provisioning with `azd up`, feature flags, environment variables |
 
+## Responsible AI
+
+| Document | Description |
+|----------|-------------|
+| [Responsible AI FAQ](responsible-ai-faq.md) | Intended uses, limitations, AI capabilities, risks and mitigations for the OneRAI transparency documentation |
+
 ## Operations
 
 | Document | Description |

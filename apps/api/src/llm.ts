@@ -1,8 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import {
+  gatesSatisfyInvariant,
+  type GateId,
+} from "shared";
 import { isUnexpected } from "@azure-rest/ai-inference";
-import { gatesSatisfyInvariant, type GateId } from "shared";
+import { postAdaptiveChatCompletion } from "./adaptive-chat-completions.js";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
 export type SuggestDirection = "parents" | "children";
@@ -190,20 +194,21 @@ function parseJson(content: string): any {
 
 async function chat(
   llm: ChatClient,
+  endpoint: string,
   model: string,
   systemPrompt: string,
   userMessage: string,
 ): Promise<string> {
-  const response = await llm.path("/chat/completions").post({
-    body: {
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      model,
-      temperature: 0.3,
-      max_tokens: 512,
-    },
+  const response = await postAdaptiveChatCompletion({
+    endpoint,
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ],
+    temperature: 0.3,
+    maxTokens: 512,
+    send: (body) => llm.path("/chat/completions").post({ body }),
   });
 
   if (isUnexpected(response)) {
@@ -224,12 +229,14 @@ async function chat(
  */
 async function author(
   llm: ChatClient,
+  endpoint: string,
   model: string,
   behavior: string,
   gates?: GateId[],
 ): Promise<{ prompt: string; suggestedId: string }> {
   const content = await chat(
     llm,
+    endpoint,
     model,
     SYSTEM_PROMPT_AUTHOR,
     `NEW CRITERION TO CREATE:\n${behavior}${authorGateHint(gates)}`,
@@ -272,6 +279,7 @@ function buildSuggestMessage(
 async function suggestDeps(
   direction: SuggestDirection,
   llm: ChatClient,
+  endpoint: string,
   model: string,
   behavior: string,
   pool: ExistingCriterion[],
@@ -281,6 +289,7 @@ async function suggestDeps(
   try {
     const content = await chat(
       llm,
+      endpoint,
       model,
       suggestSystemPrompt(direction),
       buildSuggestMessage(direction, behavior, pool),
@@ -314,7 +323,11 @@ export async function generateCriteriaPrompt(
   newGates?: GateId[],
   model?: string,
 ): Promise<GenerateResult> {
-  const { client: llm, model: foundryModel } = await acquireInferenceClient();
+  const {
+    client: llm,
+    endpoint,
+    model: foundryModel,
+  } = await acquireInferenceClient();
 
   // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
   const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
@@ -327,9 +340,23 @@ export async function generateCriteriaPrompt(
     : existingCriteria;
 
   const [authored, suggestedParents, suggestedChildrenRaw] = await Promise.all([
-    author(llm, modelName, behavior, newGates),
-    suggestDeps("parents", llm, modelName, behavior, parentPool),
-    suggestDeps("children", llm, modelName, behavior, childPool),
+    author(llm, endpoint, modelName, behavior, newGates),
+    suggestDeps(
+      "parents",
+      llm,
+      endpoint,
+      modelName,
+      behavior,
+      parentPool,
+    ),
+    suggestDeps(
+      "children",
+      llm,
+      endpoint,
+      modelName,
+      behavior,
+      childPool,
+    ),
   ]);
 
   // The parent and child suggestion calls are independent, so the model can return

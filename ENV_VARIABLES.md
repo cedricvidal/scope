@@ -82,8 +82,8 @@ verify which provider served a given AI call:
 [llm-token] inference provider: source=azure-ai-foundry via=azure-ai-foundry-env endpoint=https://<resource>.services.ai.azure.com/models model=gpt-4.1-mini
 ```
 
-> **Local dev with Docker Compose:** the three Foundry-related variables
-> (`AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_AI_INFERENCE_API_KEY`, `LLM_MODEL`)
+> **Local dev with Docker Compose:** the Foundry-related variables
+> (`AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_AI_INFERENCE_API_KEY`, and `LLM_MODEL`)
 > must live in **`.env.local`** at the repo root, **not** `.env`. The `.env`
 > file is auto-generated per worktree by `worktree-env` and will overwrite
 > manual edits. `.env.local` is gitignored and is loaded into the `api`
@@ -161,7 +161,11 @@ the api service's `env_file`.
 
 Model name / deployment name used by both backends. For Foundry, this must
 match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
-`gpt-4o`, `gpt-4.1-mini`. Put in `.env.local` (see note above).
+`gpt-4o`, `gpt-4.1-mini`, `gpt-5.4-mini`. Put in `.env.local` (see note above).
+The API discovers supported token-limit and sampling parameters from structured
+inference errors at runtime. Learned compatibility is cached in each API
+process by endpoint and deployment name. It is relearned after a process
+restart or when Azure rejects a previously accepted request shape.
 
 ## Prompt Storage Configuration
 

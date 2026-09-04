@@ -50,8 +50,13 @@ x-worker-deps: &worker-deps
   judge:
     condition: service_started
 
+# npm/pnpm registry for the image builds. Defaults to the public registry, so
+# external contributors and CI need no configuration. scripts/dev-compose.sh
+# auto-detects the host's registry (npm config get registry, which reads ~/.npmrc)
+# and forwards it here, so engineers behind a private proxy (e.g. Microsoft's npm
+# proxy) build with no setup. Export NPM_CONFIG_REGISTRY to override the detected value.
 x-npm-build-args: &npm-build-args
-  NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
+  NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}
 
 services:
   # ===========================================================================
@@ -279,9 +284,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-      target: builder
       args:
         <<: *npm-build-args
+      target: builder
     environment:
       MONGO_CONNECTION_STRING: ${MONGO_CONNECTION_STRING:-mongodb://mongodb:27017}
       MONGO_DATABASE: ${MONGO_DATABASE:-requests-db}

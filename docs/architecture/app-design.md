@@ -546,6 +546,16 @@ The Portal mirrors the API's fail-fast model: it holds a **selected project** (n
 - **`components/Layout.tsx`** hides project-scoped sidebar entries until a project is in use: with no selection (`hasProject === false`) only the global entries render (Projects, the Platform group of Agents/Models/Secrets, and the footer), while the New Run CTA and the Activity / Library / Resources / Dev groups appear once a project is selected. This keeps the first-run sidebar from advertising links that would only hit the `ProjectGate`. Scoped-vs-global mirrors `App.tsx` (`<ProjectGate>`-wrapped routes are scoped). The **Scope logo** doubles as home: it is a plain link to `/`, so clicking it lands on `HomeRoute`, which does the de-scoping — no click-handler side effect and no open-in-new-tab special-casing.
 - **`pages/Projects.tsx`** (`/projects`, unscoped) manages projects themselves — create / rename / describe / soft-delete. Delete always succeeds (**204**), even for a non-empty project, because it is a reversible soft-delete. A **Show deleted** toggle lists soft-deleted projects (`GET /projects?includeDeleted=true`) and offers a **Restore** action per row (`POST /projects/:id/restore`); deleted projects are not selectable until restored. The same affordances exist in the CLI (`project list --include-deleted`, `project restore <id>`).
 
+### User disclosures
+
+The shared `components/VersionFooter.tsx` tells users that Scope is an AI
+evaluation platform and that they should not attribute human qualities or
+intent to it. The notice also warns that AI-generated content may be inaccurate
+and asks users to review and edit generated output. The footer links to the
+public data collection and privacy document so users can understand what Scope
+handles and why. `components/Layout.tsx` renders this footer on both standard
+and full-bleed routes so the disclosures remain visible throughout the Portal.
+
 ### Hover-preview + navigate badges
 
 Criteria and task prompts appear across many surfaces (Run Detail, Runs list and its

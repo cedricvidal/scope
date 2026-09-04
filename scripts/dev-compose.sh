@@ -18,6 +18,22 @@ for p in /usr/local/bin /opt/homebrew/bin "$HOME/.docker/bin"; do
   [[ -d "$p" ]] && [[ ":$PATH:" != *":$p:"* ]] && export PATH="$p:$PATH"
 done
 
+# ---------------------------------------------------------------------------
+# Forward the host's npm registry into the image builds.
+# ---------------------------------------------------------------------------
+# docker-compose.yml passes ${NPM_CONFIG_REGISTRY} to every image build as a
+# build arg (default: the public registry). Detect the registry configured on
+# the host (npm/pnpm read ~/.npmrc) and forward it, so engineers whose network
+# cannot reach registry.npmjs.org directly — e.g. behind Microsoft's npm proxy —
+# build out of the box. External contributors detect the public registry and are
+# unaffected. An explicitly exported NPM_CONFIG_REGISTRY always wins.
+if [ -z "${NPM_CONFIG_REGISTRY:-}" ]; then
+  detected_registry="$(npm config get registry 2>/dev/null || pnpm config get registry 2>/dev/null || true)"
+  case "$detected_registry" in
+    http://*|https://*) export NPM_CONFIG_REGISTRY="$detected_registry" ;;
+  esac
+fi
+
 # Read SCOPE_SHARED_INFRA flag safely (no source to avoid special char issues)
 if [ -f .env.local ]; then
   SCOPE_SHARED_INFRA=$(grep "^SCOPE_SHARED_INFRA=" .env.local | cut -d= -f2- || true)

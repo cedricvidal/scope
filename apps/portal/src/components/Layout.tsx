@@ -484,7 +484,7 @@ export function Layout() {
           </aside>
 
           {/* Main column (mobile header + content + version footer) */}
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {/* Mobile nav bar (hamburger only, logo lives in top header) */}
             <div className="flex h-10 items-center border-b border-border/60 bg-background/95 px-2 backdrop-blur sm:hidden">
               <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -592,8 +592,7 @@ export function Layout() {
               <Outlet />
             </main>
 
-            {/* Version footer — hidden in full-bleed mode */}
-            {!isFullBleed && <VersionFooter />}
+            <VersionFooter />
           </div>
         </div>
       </div>
