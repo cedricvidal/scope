@@ -4059,7 +4059,10 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "description": "Agent not found",
           },
           "409": {
-            "description": "Queue is assigned to another active agent version",
+            "description": "Queue is assigned to another agent",
+          },
+          "503": {
+            "description": "Concurrent registration did not stabilize",
           },
         },
         "summary": "Register agent version (upsert)",
@@ -4115,7 +4118,10 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "description": "Agent or version not found",
           },
           "409": {
-            "description": "Queue is assigned to another active agent version",
+            "description": "Queue is assigned to another agent",
+          },
+          "503": {
+            "description": "Concurrent activation did not stabilize",
           },
         },
         "summary": "Patch agent version",

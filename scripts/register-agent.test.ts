@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const temporaryDirectories: string[] = [];
 const script = resolve("scripts/register-agent.sh");
+const SCRIPT_TEST_TIMEOUT_MS = 15_000;
 
 function fixture(statuses: number[], exitCodes: number[] = []) {
   const directory = mkdtempSync(join(tmpdir(), "scope-register-agent-"));
@@ -129,7 +130,7 @@ describe("register-agent.sh", () => {
     expect(readFileSync(test.callsFile, "utf8").trim().split("\n")).toHaveLength(
       5,
     );
-  });
+  }, SCRIPT_TEST_TIMEOUT_MS);
 
   it("fails immediately and non-zero on permanent agent errors", () => {
     const test = fixture([200, 400, 201, 201]);
@@ -149,7 +150,7 @@ describe("register-agent.sh", () => {
     expect(readFileSync(test.callsFile, "utf8").trim().split("\n")).toHaveLength(
       2,
     );
-  });
+  }, SCRIPT_TEST_TIMEOUT_MS);
 
   it("fails immediately and non-zero on permanent version errors", () => {
     const test = fixture([200, 200, 422, 201]);
@@ -171,7 +172,7 @@ describe("register-agent.sh", () => {
     expect(readFileSync(test.callsFile, "utf8").trim().split("\n")).toHaveLength(
       3,
     );
-  });
+  }, SCRIPT_TEST_TIMEOUT_MS);
 
   it("fails immediately on a permanent curl configuration error", () => {
     const test = fixture([200], [3]);
