@@ -127,7 +127,6 @@ def aggregate_quality(
     coverage: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
     execution: str = "completed",
     policy: Mapping[str, Any] | None = None,
-    pass_rate_cap: float | None = 0.8,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
     case_results = _case_results(observations)
     by_family = _dimension_aggregates(case_results, ("family", "evaluator"))
@@ -193,7 +192,7 @@ def aggregate_quality(
 
     decision = build_decision(
         case_results, family_thresholds, coverage=coverage, execution=execution,
-        policy=policy, pass_rate_cap=pass_rate_cap,
+        policy=policy,
     )
     for gate in decision["gates"]:
         if gate["violations"]:

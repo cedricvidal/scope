@@ -68,16 +68,15 @@ families:
         load_quality_configuration(rubric, manifest_path=manifest)
 
 
-def test_new_policy_rejects_above_eighty_percent_but_history_retains_it(tmp_path):
+@pytest.mark.parametrize("floor", [0.8, 0.95, 1.0])
+def test_configuration_accepts_exact_floors_through_one_hundred_percent(tmp_path, floor):
     source = Path(__file__).resolve().parents[2] / "evaluators/rubrics.yaml"
     data = yaml.safe_load(source.read_text())
-    data["families"]["criteria-authoring"]["thresholds"]["generation_success"]["minPassRate"] = 1
+    data["families"]["criteria-authoring"]["thresholds"]["generation_success"]["minPassRate"] = floor
     path = tmp_path / "historical.yaml"
     path.write_text(yaml.safe_dump(data))
-    with pytest.raises(QualityConfigurationError, match="0.8"):
-        load_quality_configuration(path)
-    historical = load_quality_configuration(path, historical=True)
-    assert historical.thresholds("criteria-authoring")["generation_success"]["minPassRate"] == 1
+    configuration = load_quality_configuration(path)
+    assert configuration.thresholds("criteria-authoring")["generation_success"]["minPassRate"] == floor
 
 
 @pytest.mark.parametrize("field,value", [("minMeanScore", float("nan")), ("minPassRate", float("inf")), ("blocking", "false")])

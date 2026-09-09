@@ -217,10 +217,13 @@ evaluation runs.
 Deterministic checks own exact contracts: schema validity, nonempty content,
 identifier syntax, candidate-only references, forbidden language, Markdown
 shape, complete criterion/feature coverage, precision/recall/F1, and exact
-match. Each case check remains exact; aggregate required pass rates are capped
-at **80%** by policy `aggregate-pass-rate-cap-v1`, including schema and security
-checks. Existing lower floors (such as 67%) remain unchanged. The ceiling does
-not alter individual score cutoffs, measured rates, or minimum mean scores.
+match. Each case check remains exact. The current rubric revision
+`aggregate-pass-rate-floors-80-v1` edits previously higher aggregate pass-rate
+floors to **80%**, including schema and security checks; lower floors (such as
+67%) remain unchanged. This is a YAML configuration change, not a runtime
+restriction. The generic evaluator accepts configured rates through 100% and
+uses them exactly. Individual score cutoffs, measured rates, and minimum mean
+scores are unchanged.
 
 Azure AI Evaluation SDK built-ins are assigned only where meaningful:
 
@@ -274,8 +277,10 @@ new runs write only `decision-summary.json`, which takes precedence.
 classification, passed/evaluated/applicable/invalid/skipped **case counts**,
 exact unrounded pass rate, actual mean score, configured and effective
 requirements, violations, case/sample evidence IDs, and coverage completeness.
-The baseline-derived requirement is capped explicitly; both its uncapped
-value and effective floor are retained. A gate must meet every requirement.
+The effective requirement is the maximum of the configured minimum pass rate
+and `baselinePassRate - maxRegression`, when provided. The baseline-derived
+value and effective floor are retained without modification. A gate must meet
+every requirement.
 `families[]` and `totals` separate blocking passed/failed/unresolved/not-applicable
 gates, advisory violations, unique failed cases, and case/evaluator failure
 records. `invalidCases` and `skippedCases` count case/evaluator assessments,
@@ -306,7 +311,7 @@ New runs retain `rubric-snapshot.yaml` and its SHA-256. Legacy policy resolution
 accepts only a matching snapshot, working-tree rubric, or historical Git blob
 (bounded to the latest 100 rubric revisions); otherwise reports show unknown
 totals and replay refuses unverified reuse. Old 100% thresholds are not
-retroactively capped.
+retroactively changed.
 
 To export a legacy decision for an external canvas without generating or
 overwriting any report:

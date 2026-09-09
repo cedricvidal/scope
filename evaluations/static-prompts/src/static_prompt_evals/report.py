@@ -83,7 +83,6 @@ def load_decision(run_dir: Path) -> dict[str, Any]:
         coverage=coverage,
         policy={"known": content is not None, "sha256": summary.get("rubricSha256"),
                 "version": version, "rubricVersion": rubric_version},
-        pass_rate_cap=0.8 if version == "aggregate-pass-rate-cap-v1" else None,
     )
     decision["caveats"].append("Legacy view uses saved observations; it does not retroactively repair historical grader output.")
     if content is None:
@@ -105,8 +104,6 @@ def _requirement(gate: dict[str, Any]) -> str:
         parts.append(f'pass rate ≥ {requirement["effectiveMinPassRate"]:.2%}')
     if requirement.get("minMeanScore") is not None:
         parts.append(f'mean score ≥ {requirement["minMeanScore"]:g}')
-    if requirement.get("uncappedMinPassRate") != requirement.get("effectiveMinPassRate"):
-        parts.append(f'capped from {requirement["uncappedMinPassRate"]:.2%}')
     return "; ".join(parts)
 
 

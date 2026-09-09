@@ -18,7 +18,6 @@ def build_decision(
     coverage: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
     execution: str = "completed",
     policy: Mapping[str, Any] | None = None,
-    pass_rate_cap: float | None = 0.8,
 ) -> dict[str, Any]:
     """Invalid/missing cases are unknown, never false prompt grades or passes."""
     coverage = coverage or {}
@@ -48,12 +47,7 @@ def build_decision(
                 requirements["baselineDerivedMinPassRate"] = derived
             if required is not None:
                 required = float(required)
-            requirements["uncappedMinPassRate"] = required
-            requirements["effectiveMinPassRate"] = (
-                min(required, pass_rate_cap)
-                if required is not None and pass_rate_cap is not None else required
-            )
-            requirements["passRateCap"] = pass_rate_cap
+            requirements["effectiveMinPassRate"] = required
             floor = requirements["effectiveMinPassRate"]
             violations = []
             # With incomplete coverage, failed observed cases alone cannot establish
@@ -119,7 +113,7 @@ def build_decision(
     return {
         "schemaVersion": 1, "execution": execution, "acceptance": acceptance(gates),
         "integrity": "unknown" if not known else "incomplete" if incomplete else "valid",
-        "policy": {"version": "aggregate-pass-rate-cap-v1" if policy is None else None, "rubricVersion": None,
+        "policy": {"version": None, "rubricVersion": None,
                    "sha256": None, "known": True, **dict(policy or {})},
         "totals": counts,
         "families": [

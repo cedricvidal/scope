@@ -139,8 +139,10 @@ missing tool traces remain explicit limitations, not invented coverage.
 The plan also supplies `regradeArgv` and shell-quoted `regradeCommand` for
 reviewed execution of the complete affected set.
 
-Required aggregate pass-rate floors cannot exceed 80%; lower floors remain
-unchanged. Individual schema/security checks and minimum mean scores are still
+The current rubric edits formerly higher aggregate pass-rate floors to 80%;
+lower floors remain unchanged. This policy lives only in `rubrics.yaml`:
+the generic evaluator accepts configured rates through 100% without clamping
+them or baseline-derived requirements. Individual schema/security checks and minimum mean scores are still
 exact. For 25 cases, 20 passing meets 80%, whereas 19 fails. Native malformed
 labels/scores are invalid assessments, not failed prompt votes. Old runs use
 their original hash-matched policy, including former 100% floors. See the

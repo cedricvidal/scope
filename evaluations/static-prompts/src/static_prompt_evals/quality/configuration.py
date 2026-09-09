@@ -132,7 +132,6 @@ def load_quality_configuration(
     path: Path,
     *,
     manifest_path: Path | None = None,
-    historical: bool = False,
 ) -> QualityConfiguration:
     raw_bytes = path.read_bytes()
     loaded = _load_yaml_mapping(path)
@@ -215,13 +214,12 @@ def load_quality_configuration(
             if not isinstance(threshold, dict):
                 raise QualityConfigurationError(f"{family}/{name}: threshold must be an object")
             floor = threshold.get("minPassRate")
-            ceiling = 1.0 if historical else 0.8
             if floor is not None and (
                 isinstance(floor, bool) or not isinstance(floor, (int, float))
-                or not math.isfinite(floor) or not 0 <= floor <= ceiling
+                or not math.isfinite(floor) or not 0 <= floor <= 1
             ):
                 raise QualityConfigurationError(
-                    f"{family}/{name}: minPassRate must be between 0 and {ceiling}"
+                    f"{family}/{name}: minPassRate must be between 0 and 1"
                 )
             for field in ("baselinePassRate", "maxRegression"):
                 value = threshold.get(field)

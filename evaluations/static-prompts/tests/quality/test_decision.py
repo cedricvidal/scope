@@ -15,14 +15,13 @@ def observations(passing, total=25):
     ]
 
 
-@pytest.mark.parametrize("passing,floor,cap,expected", [
-    (20, 0.8, 0.8, "passed"), (19, 0.8, 0.8, "failed"),
-    (17, 0.67, 0.8, "passed"), (24, 1.0, None, "failed"),
+@pytest.mark.parametrize("passing,floor,expected", [
+    (20, 0.8, "passed"), (19, 0.8, "failed"),
+    (17, 0.67, "passed"), (24, 1.0, "failed"), (25, 1.0, "passed"),
 ])
-def test_exact_policy_and_historical_floors(passing, floor, cap, expected):
+def test_exact_configured_floors(passing, floor, expected):
     summary, _, _ = aggregate_quality(
         observations(passing), family_thresholds={"family": {"quality": {"minPassRate": floor}}},
-        pass_rate_cap=cap,
     )
     decision = summary["decision"]
     assert decision["acceptance"] == expected
@@ -30,16 +29,19 @@ def test_exact_policy_and_historical_floors(passing, floor, cap, expected):
     assert decision["gates"][0]["requirements"]["effectiveMinPassRate"] == floor
 
 
-def test_baseline_cap_is_explicit_and_does_not_cap_measurements():
+def test_baseline_derived_requirement_is_not_capped():
     summary, _, _ = aggregate_quality(
-        observations(25), family_thresholds={"family": {"quality": {
+        observations(20), family_thresholds={"family": {"quality": {
             "minPassRate": 0.67, "baselinePassRate": 1, "maxRegression": 0.05,
         }}},
     )
     gate = summary["decision"]["gates"][0]
-    assert gate["requirements"]["uncappedMinPassRate"] == 0.95
-    assert gate["requirements"]["effectiveMinPassRate"] == 0.8
-    assert gate["passRate"] == 1
+    assert gate["requirements"]["baselineDerivedMinPassRate"] == 0.95
+    assert gate["requirements"]["effectiveMinPassRate"] == 0.95
+    assert gate["passRate"] == 0.8
+    assert gate["status"] == "failed"
+    assert "passRateCap" not in gate["requirements"]
+    assert "uncappedMinPassRate" not in gate["requirements"]
 
 
 def test_mean_score_independently_blocks_passing_rate():

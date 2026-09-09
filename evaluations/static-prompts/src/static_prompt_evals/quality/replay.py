@@ -239,7 +239,7 @@ def _replay(config, track_dir, source_track, source_hashes, evaluate_callable, a
     # Isolate the policy-only delta on unchanged historical observations.
     old_decision, _, _ = aggregate_quality(
         previous_observations, family_thresholds={f: old.thresholds(f) for f in old.families},
-        pass_rate_cap=None, policy={"known": True, "version": "historical",
+        policy={"known": True, "version": "historical",
                                    "rubricVersion": old.version, "sha256": old.sha256},
         coverage=gate_coverage([NormalizedRow(**r) for r in previous_rows.values()], old),
     )

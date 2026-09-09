@@ -1,7 +1,7 @@
 version: 1
 
 defaults:
-  policyVersion: aggregate-pass-rate-cap-v1
+  policyVersion: aggregate-pass-rate-floors-80-v1
   azureMaxAttempts: 3
   azureRetryBaseSeconds: 1
 
