@@ -22,7 +22,6 @@ def _load_yaml(path: Path, model: type[ModelT]) -> ModelT:
 def load_surface_profiles(path: Path) -> SurfaceProfiles:
     return _load_yaml(path, SurfaceProfiles)
 
-
 def load_red_team_settings(path: Path) -> RedTeamSettings:
     return _load_yaml(path, RedTeamSettings)
-
+    return _load_yaml(path, RedTeamSettings)

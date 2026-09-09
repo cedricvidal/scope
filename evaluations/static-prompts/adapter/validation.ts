@@ -78,4 +78,3 @@ export function objectArray(
   }
   return value.map((item, index) => record(item, `${label}[${index}]`));
 }
-
