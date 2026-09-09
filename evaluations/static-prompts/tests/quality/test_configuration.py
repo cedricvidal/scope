@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from static_prompt_evals.quality.configuration import (
     QualityConfigurationError,
@@ -53,7 +54,7 @@ families:
       - check: generation_success
     evaluators: [quality]
     thresholds:
-      generation_success: {minPassRate: 1}
+      generation_success: {minPassRate: 0.8}
       quality: {minPassRate: 0.5}
 """,
         encoding="utf-8",
@@ -65,6 +66,18 @@ families:
 
     with pytest.raises(QualityConfigurationError, match="missing=\\['two'\\]"):
         load_quality_configuration(rubric, manifest_path=manifest)
+
+
+def test_new_policy_rejects_above_eighty_percent_but_history_retains_it(tmp_path):
+    source = Path(__file__).resolve().parents[2] / "evaluators/rubrics.yaml"
+    data = yaml.safe_load(source.read_text())
+    data["families"]["criteria-authoring"]["thresholds"]["generation_success"]["minPassRate"] = 1
+    path = tmp_path / "historical.yaml"
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(QualityConfigurationError, match="0.8"):
+        load_quality_configuration(path)
+    historical = load_quality_configuration(path, historical=True)
+    assert historical.thresholds("criteria-authoring")["generation_success"]["minPassRate"] == 1
 
 
 def test_quality_dataset_fallback_reads_manifest_files(

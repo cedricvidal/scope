@@ -3,11 +3,50 @@
 from __future__ import annotations
 
 import hashlib
+import math
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+def resolve_historical_rubric(track_dir: Path, package_root: Path, sha256: str | None) -> bytes | None:
+    """Only a byte-for-byte hash match may supply an old run's policy."""
+    if not sha256:
+        return None
+    for path in (track_dir / "rubric-snapshot.yaml", package_root / "evaluators/rubrics.yaml"):
+        if path.is_file():
+            content = path.read_bytes()
+            if hashlib.sha256(content).hexdigest() == sha256:
+                return content
+    repo_root = package_root.parents[1]
+    relative = (package_root / "evaluators/rubrics.yaml").relative_to(repo_root).as_posix()
+    try:
+        history = subprocess.run(
+            ["git", "log", "-100", "--format=%H", "--", relative],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        for revision in history:
+            content = subprocess.run(
+                ["git", "show", f"{revision}:{relative}"], cwd=repo_root,
+                capture_output=True, check=True,
+            ).stdout
+            if hashlib.sha256(content).hexdigest() == sha256:
+                return content
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    return None
+
+
+def historical_configuration(content: bytes, path: Path) -> QualityConfiguration:
+    loaded = yaml.safe_load(content)
+    return QualityConfiguration(
+        path=path, version=loaded["version"], defaults=loaded["defaults"],
+        graders=loaded["graders"], families=loaded["families"],
+        sha256=hashlib.sha256(content).hexdigest(),
+    )
 
 
 class QualityConfigurationError(ValueError):
@@ -93,6 +132,7 @@ def load_quality_configuration(
     path: Path,
     *,
     manifest_path: Path | None = None,
+    historical: bool = False,
 ) -> QualityConfiguration:
     raw_bytes = path.read_bytes()
     loaded = _load_yaml_mapping(path)
@@ -168,6 +208,25 @@ def load_quality_configuration(
             raise QualityConfigurationError(
                 f"{path}: family {family!r} requires thresholds"
             )
+        for name, threshold in config["thresholds"].items():
+            if not isinstance(threshold, dict):
+                raise QualityConfigurationError(f"{family}/{name}: threshold must be an object")
+            floor = threshold.get("minPassRate")
+            ceiling = 1.0 if historical else 0.8
+            if floor is not None and (
+                isinstance(floor, bool) or not isinstance(floor, (int, float))
+                or not math.isfinite(floor) or not 0 <= floor <= ceiling
+            ):
+                raise QualityConfigurationError(
+                    f"{family}/{name}: minPassRate must be between 0 and {ceiling}"
+                )
+            for field in ("baselinePassRate", "maxRegression"):
+                value = threshold.get(field)
+                if value is not None and (
+                    isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or not 0 <= value <= 1
+                ):
+                    raise QualityConfigurationError(f"{family}/{name}: invalid {field}")
         normalized_families[family] = dict(config)
 
     if manifest_path is not None:

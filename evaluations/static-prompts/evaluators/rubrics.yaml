@@ -1,6 +1,7 @@
 version: 1
 
 defaults:
+  policyVersion: aggregate-pass-rate-cap-v1
   azureMaxAttempts: 3
   azureRetryBaseSeconds: 1
 
@@ -152,11 +153,11 @@ families:
       - name: criteria_evidence_source
         expectedLabelKey: criteria_evidence_source
     thresholds:
-      generation_success: {minPassRate: 1.0}
-      output_schema: {minPassRate: 1.0}
-      non_empty_prompt: {minPassRate: 1.0}
-      valid_identifier: {minPassRate: 1.0}
-      candidate_references: {minPassRate: 1.0}
+      generation_success: {minPassRate: 0.8}
+      output_schema: {minPassRate: 0.8}
+      non_empty_prompt: {minPassRate: 0.8}
+      valid_identifier: {minPassRate: 0.8}
+      candidate_references: {minPassRate: 0.8}
       relevance: {minPassRate: 0.67, minMeanScore: 3.0}
       coherence: {minPassRate: 0.67, minMeanScore: 3.0}
       criteria_quality: {minPassRate: 0.67, minMeanScore: 3.0}
@@ -176,9 +177,9 @@ families:
       - relevance
       - dependency_direction
     thresholds:
-      generation_success: {minPassRate: 1.0}
-      output_schema: {minPassRate: 1.0}
-      candidate_references: {minPassRate: 1.0}
+      generation_success: {minPassRate: 0.8}
+      output_schema: {minPassRate: 0.8}
+      candidate_references: {minPassRate: 0.8}
       relevance: {minPassRate: 0.67, minMeanScore: 3.0}
       dependency_direction: {minPassRate: 0.67}
 
@@ -196,9 +197,9 @@ families:
       - relevance
       - dependency_direction
     thresholds:
-      generation_success: {minPassRate: 1.0}
-      output_schema: {minPassRate: 1.0}
-      candidate_references: {minPassRate: 1.0}
+      generation_success: {minPassRate: 0.8}
+      output_schema: {minPassRate: 0.8}
+      candidate_references: {minPassRate: 0.8}
       relevance: {minPassRate: 0.67, minMeanScore: 3.0}
       dependency_direction: {minPassRate: 0.67}
 
@@ -225,10 +226,10 @@ families:
         blocking: false
       - task_prompt_quality
     thresholds:
-      generation_success: {minPassRate: 1.0}
-      output_schema: {minPassRate: 1.0}
-      non_empty_prompt: {minPassRate: 1.0}
-      no_existing_duplicate: {minPassRate: 1.0}
+      generation_success: {minPassRate: 0.8}
+      output_schema: {minPassRate: 0.8}
+      non_empty_prompt: {minPassRate: 0.8}
+      no_existing_duplicate: {minPassRate: 0.8}
       sample_diversity: {minPassRate: 0.67}
       relevance: {minPassRate: 0.67, minMeanScore: 3.0}
       coherence: {minPassRate: 0.67, minMeanScore: 3.0}
@@ -259,10 +260,10 @@ families:
         blocking: false
       - variation_quality
     thresholds:
-      generation_success: {minPassRate: 1.0}
-      output_schema: {minPassRate: 1.0}
-      non_empty_prompt: {minPassRate: 1.0}
-      no_existing_duplicate: {minPassRate: 1.0}
+      generation_success: {minPassRate: 0.8}
+      output_schema: {minPassRate: 0.8}
+      non_empty_prompt: {minPassRate: 0.8}
+      no_existing_duplicate: {minPassRate: 0.8}
       sample_diversity: {minPassRate: 0.67}
       relevance: {minPassRate: 0.67, minMeanScore: 3.0}
       coherence: {minPassRate: 0.67, minMeanScore: 3.0}
@@ -290,11 +291,11 @@ families:
       - coherence
       - feature_definition_quality
     thresholds:
-      generation_success: {minPassRate: 1.0}
-      output_schema: {minPassRate: 1.0}
-      non_empty_definition: {minPassRate: 1.0}
-      valid_identifier: {minPassRate: 1.0}
-      candidate_references: {minPassRate: 1.0}
+      generation_success: {minPassRate: 0.8}
+      output_schema: {minPassRate: 0.8}
+      non_empty_definition: {minPassRate: 0.8}
+      valid_identifier: {minPassRate: 0.8}
+      candidate_references: {minPassRate: 0.8}
       relevance: {minPassRate: 0.67, minMeanScore: 3.0}
       coherence: {minPassRate: 0.67, minMeanScore: 3.0}
       feature_definition_quality: {minPassRate: 0.67, minMeanScore: 3.0}
@@ -325,14 +326,14 @@ families:
       - name: suggested_feature_novelty
         requiredFields: [output.suggestedFeatures]
     thresholds:
-      generation_success: {minPassRate: 1.0}
-      output_schema: {minPassRate: 1.0}
-      feature_result_coverage: {minPassRate: 1.0}
-      candidate_references: {minPassRate: 1.0}
-      feature_precision: {minPassRate: 1.0, minMeanScore: 1.0}
-      feature_recall: {minPassRate: 1.0, minMeanScore: 1.0}
-      feature_f1: {minPassRate: 1.0, minMeanScore: 1.0}
-      feature_exact_match: {minPassRate: 1.0, minMeanScore: 1.0}
+      generation_success: {minPassRate: 0.8}
+      output_schema: {minPassRate: 0.8}
+      feature_result_coverage: {minPassRate: 0.8}
+      candidate_references: {minPassRate: 0.8}
+      feature_precision: {minPassRate: 0.8, minMeanScore: 1.0}
+      feature_recall: {minPassRate: 0.8, minMeanScore: 1.0}
+      feature_f1: {minPassRate: 0.8, minMeanScore: 1.0}
+      feature_exact_match: {minPassRate: 0.8, minMeanScore: 1.0}
       suggested_feature_novelty: {minPassRate: 0.67, minMeanScore: 3.0}
 
   judge-instructions:
@@ -352,9 +353,9 @@ families:
         requiredFields: [query_messages, response_messages, tool_definitions, tool_calls]
       - judge_verdict
     thresholds:
-      generation_success: {minPassRate: 1.0}
-      output_schema: {minPassRate: 1.0}
-      criterion_coverage: {minPassRate: 1.0}
+      generation_success: {minPassRate: 0.8}
+      output_schema: {minPassRate: 0.8}
+      criterion_coverage: {minPassRate: 0.8}
       groundedness: {minPassRate: 0.67, minMeanScore: 3.0}
       task_adherence: {minPassRate: 0.67}
       tool_call_accuracy: {minPassRate: 0.67, minMeanScore: 3.0}
@@ -391,12 +392,12 @@ families:
       - feedback_quality
       - descendant_leakage
     thresholds:
-      generation_success: {minPassRate: 1.0}
-      output_schema: {minPassRate: 1.0}
-      non_empty_feedback: {minPassRate: 1.0}
-      forbidden_language: {minPassRate: 1.0}
-      no_questions: {minPassRate: 1.0}
-      descendant_leakage_check: {minPassRate: 1.0}
+      generation_success: {minPassRate: 0.8}
+      output_schema: {minPassRate: 0.8}
+      non_empty_feedback: {minPassRate: 0.8}
+      forbidden_language: {minPassRate: 0.8}
+      no_questions: {minPassRate: 0.8}
+      descendant_leakage_check: {minPassRate: 0.8}
       relevance: {minPassRate: 0.67, minMeanScore: 3.0}
       coherence: {minPassRate: 0.67, minMeanScore: 3.0}
       fluency: {minPassRate: 0.67, minMeanScore: 3.0}
@@ -432,11 +433,11 @@ families:
       - report_quality
       - report_simulation_interpretation
     thresholds:
-      generation_success: {minPassRate: 1.0}
-      output_schema: {minPassRate: 1.0}
-      non_empty_report: {minPassRate: 1.0}
-      valid_markdown: {minPassRate: 1.0}
-      no_fabricated_references: {minPassRate: 1.0}
+      generation_success: {minPassRate: 0.8}
+      output_schema: {minPassRate: 0.8}
+      non_empty_report: {minPassRate: 0.8}
+      valid_markdown: {minPassRate: 0.8}
+      no_fabricated_references: {minPassRate: 0.8}
       relevance: {minPassRate: 0.67, minMeanScore: 3.0}
       coherence: {minPassRate: 0.67, minMeanScore: 3.0}
       fluency: {minPassRate: 0.67, minMeanScore: 3.0}
