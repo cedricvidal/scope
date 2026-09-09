@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import math
 import random
 import re
 import time
@@ -23,7 +25,7 @@ _BUILTIN_ARGUMENTS: dict[str, tuple[str, ...]] = {
     "coherence": ("query", "response"),
     "fluency": ("response",),
     "groundedness": ("query", "response", "context"),
-    "intent_resolution": ("query", "response"),
+    "intent_resolution": ("query_messages", "response_messages"),
     "task_adherence": ("query_messages", "response_messages"),
     "tool_call_accuracy": (
         "query_messages",
@@ -305,10 +307,33 @@ def _result_value(
         exact = prefix + suffix
         if exact in result_row:
             return result_row[exact]
-    for key, value in result_row.items():
-        if key.startswith(prefix) and any(key.endswith(suffix) for suffix in suffixes):
-            return value
     return None
+
+
+def _sample_result(result_row: Mapping[str, Any], evaluator: str) -> tuple[Any, str]:
+    sample = _result_value(result_row, evaluator, ("sample",))
+    if sample is None:
+        return None, ""
+    if not isinstance(sample, Mapping) or not isinstance(sample.get("output"), list):
+        raise ValueError("malformed SDK grader sample")
+    outputs = sample["output"]
+    messages = [m for m in outputs if isinstance(m, Mapping) and m.get("role") == "assistant"]
+    if len(messages) != 1 or not isinstance(messages[0].get("content"), str):
+        raise ValueError("expected one structured assistant grader output")
+    parsed = json.loads(messages[0]["content"])
+    if not isinstance(parsed, Mapping) or "result" not in parsed:
+        raise ValueError("structured grader output has no result")
+    steps = parsed.get("steps", [])
+    if not isinstance(steps, list) or any(not isinstance(s, Mapping) for s in steps):
+        raise ValueError("invalid structured grader reasoning")
+    reason = "; ".join(str(s.get("conclusion") or s.get("description") or "") for s in steps)
+    return parsed["result"], reason
+
+
+def _canonical_label(evaluator: str, value: Any) -> Any:
+    if evaluator == "criteria_evidence_source" and value == "tool-history":
+        return "tool_history"
+    return value
 
 
 def _as_bool(value: Any) -> bool | None:
@@ -363,20 +388,30 @@ def observation_from_sdk_row(
             infrastructure_error=True,
         )
 
+    invalid_reason = ""
+    try:
+        structured, structured_reason = _sample_result(result_row, evaluator)
+    except (ValueError, TypeError) as error:
+        structured, structured_reason = None, ""
+        invalid_reason = str(error)
     raw_score = _result_value(
         result_row,
         evaluator,
         ("score", f"{evaluator}_score", evaluator),
     )
+    if spec.get("type") == "score" and structured is not None:
+        raw_score = structured
     try:
         score = float(raw_score) if raw_score is not None else None
     except (TypeError, ValueError):
         score = None
     raw_label = _result_value(result_row, evaluator, ("label",))
-    label = str(raw_label) if raw_label is not None else None
+    if spec.get("type") == "label" and structured is not None:
+        raw_label = structured
+    label = _canonical_label(evaluator, raw_label) if isinstance(raw_label, str) else None
     reason = str(
         _result_value(result_row, evaluator, ("reason", f"{evaluator}_reason"))
-        or ""
+        or structured_reason
     )
     passed = _as_bool(
         _result_value(
@@ -392,13 +427,32 @@ def observation_from_sdk_row(
         if expected_label_key
         else None
     )
-    if expected_label is not None:
-        passed = label == str(expected_label)
+    expected_label = _canonical_label(evaluator, expected_label)
+    if spec.get("type") == "label":
+        allowed = spec.get("labels")
+        if label is None or (allowed and label not in allowed):
+            invalid_reason = f"missing or unrecognized grader label: {label!r}"
+        if expected_label is not None and allowed and expected_label not in allowed:
+            invalid_reason = f"unrecognized reviewed label: {expected_label!r}"
+        if raw_score is not None and (
+            isinstance(raw_score, bool) or score is None or not math.isfinite(score) or not 0 <= score <= 1
+        ):
+            invalid_reason = f"invalid label grader score: {raw_score!r}"
+    elif raw_score is not None:
+        low, high = spec.get("range", [0, 5])
+        if isinstance(raw_score, bool) or score is None or not math.isfinite(score) or not low <= score <= high:
+            invalid_reason = f"invalid grader score: {raw_score!r}"
+    elif spec.get("type") == "score":
+        invalid_reason = "missing grader score"
+    if invalid_reason:
+        passed = None
+    elif expected_label is not None:
+        passed = label == expected_label
         if not passed and not reason:
             reason = f"label {label!r} does not match reviewed label {expected_label!r}"
-    elif passed is None and score is not None:
+    elif score is not None and spec.get("type") != "label":
         passed = score >= float(spec.get("scorePassThreshold", 3))
-    elif passed is None and label is not None:
+    elif label is not None:
         passed = label in {str(item) for item in spec.get("passingLabels", ())}
 
     if passed is None:
@@ -411,10 +465,11 @@ def observation_from_sdk_row(
             sample_index=source_row.sample_index,
             evaluator=evaluator,
             passed=None,
-            score=score,
+            score=score if score is not None and math.isfinite(score) else None,
             label=label,
-            reason=reason or "Azure evaluator returned no usable result",
+            reason=invalid_reason or reason or "Azure evaluator returned no usable result",
             infrastructure_error=True,
+            details={"invalidOutput": True, "nativeRowId": source_row.row_id},
         )
     return MetricObservation(
         row_id=source_row.row_id,
@@ -434,6 +489,34 @@ def observation_from_sdk_row(
 
 def _safe_name(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_.-]+", "-", value).strip("-")
+
+
+def parse_native_result(
+    result: Mapping[str, Any], spec: Mapping[str, Any], selected_rows: Sequence[NormalizedRow],
+) -> tuple[list[MetricObservation], set[str]]:
+    evaluator = str(spec["name"])
+    result_rows = result.get("rows")
+    if not isinstance(result_rows, list):
+        raise ValueError("native evaluator result has no rows array")
+    source = {row.row_id: row for row in selected_rows}
+    seen: set[str] = set()
+    skipped: set[str] = set()
+    observations = []
+    for native in result_rows:
+        if not isinstance(native, Mapping):
+            raise ValueError("native evaluator row is not an object")
+        row_id = native.get("inputs.row_id") or native.get("row_id")
+        if row_id not in source or row_id in seen:
+            raise ValueError(f"unknown or duplicate native row ID: {row_id!r}")
+        seen.add(row_id)
+        if _is_skipped_result(native, evaluator):
+            skipped.add(row_id)
+            # SDK skips are not proof of legitimate non-applicability.
+            native = {}
+        observations.append(observation_from_sdk_row(evaluator, spec, native, source[row_id]))
+    for row_id in sorted(source.keys() - seen):
+        observations.append(observation_from_sdk_row(evaluator, spec, {}, source[row_id]))
+    return observations, skipped
 
 
 def run_azure_evaluations(
@@ -476,7 +559,6 @@ def run_azure_evaluations(
             input_path = evaluator_dir / f"{_safe_name(evaluator_name)}-input.jsonl"
             output_path = evaluator_dir / f"{_safe_name(evaluator_name)}.json"
             write_jsonl(input_path, (sdk_row(row) for row in selected_rows))
-            evaluator = create_evaluator(spec, runtime)
             evaluator_config = {
                 evaluator_name: {
                     "column_mapping": evaluator_column_mapping(spec)
@@ -500,6 +582,7 @@ def run_azure_evaluations(
                 )
 
             try:
+                evaluator = create_evaluator(spec, runtime)
                 result, attempts = evaluate_with_retry(
                     operation,
                     max_attempts=max_attempts,
@@ -507,53 +590,7 @@ def run_azure_evaluations(
                 )
                 if not output_path.exists():
                     write_json(output_path, dict(result))
-                result_rows = result.get("rows", [])
-                if not isinstance(result_rows, list):
-                    raise ValueError(
-                        f"Azure evaluator {evaluator_name} returned invalid rows"
-                    )
-                source_by_id = {row.row_id: row for row in selected_rows}
-                observations: list[MetricObservation] = []
-                seen: set[str] = set()
-                skipped: set[str] = set()
-                for index, result_row in enumerate(result_rows):
-                    if not isinstance(result_row, Mapping):
-                        continue
-                    row_id = str(
-                        result_row.get("inputs.row_id")
-                        or result_row.get("row_id")
-                        or ""
-                    )
-                    source_row = source_by_id.get(row_id)
-                    if source_row is None and index < len(selected_rows):
-                        source_row = selected_rows[index]
-                    if source_row is None:
-                        continue
-                    seen.add(source_row.row_id)
-                    if _is_skipped_result(result_row, evaluator_name):
-                        skipped.add(source_row.row_id)
-                        continue
-                    observations.append(
-                        observation_from_sdk_row(
-                            evaluator_name, spec, result_row, source_row
-                        )
-                    )
-                for source_row in selected_rows:
-                    if source_row.row_id not in seen:
-                        observations.append(
-                            MetricObservation(
-                                row_id=source_row.row_id,
-                                case_id=source_row.case_id,
-                                family=source_row.family,
-                                variant=source_row.variant,
-                                source_category=source_row.source_category,
-                                sample_index=source_row.sample_index,
-                                evaluator=evaluator_name,
-                                passed=None,
-                                reason="Azure evaluator omitted this row",
-                                infrastructure_error=True,
-                            )
-                        )
+                observations, skipped = parse_native_result(result, spec, selected_rows)
                 metrics = result.get("metrics")
                 outcomes.append(
                     EvaluatorRunOutcome(

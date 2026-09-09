@@ -170,7 +170,7 @@ def test_adapter_contract_messages_tools_and_expected_label_are_normalized() -> 
     )
 
     assert rows[0].query == "Use both evidence sources"
-    assert rows[0].query_messages[0]["content"] == "Author it"
+    assert rows[0].query_messages[0]["content"] == [{"type": "text", "text": "Author it"}]
     assert rows[0].tool_definitions[0]["name"] == "read_file"
     assert rows[0].expected_labels["criteria_evidence_source"] == "both"
     assert rows[0].source_category == "integration"

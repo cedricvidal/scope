@@ -100,6 +100,10 @@ graders:
       the proposed parent is a genuine prerequisite for the child and the
       direction is correct. Label unnecessary when related but not required,
       and invalid when unrelated, reversed, or incompatible.
+      Grade the candidate-only suggestion task in the query, not the criterion
+      as a request to implement code. An empty suggestion list is valid only
+      when none of the supplied candidates is a genuine prerequisite in the
+      requested direction; otherwise it is invalid. Check every suggested edge.
 
   judge_verdict:
     type: label

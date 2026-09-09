@@ -171,6 +171,42 @@ def stable_text(value: Any) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
+def sdk_messages(messages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Map retained text/tool messages to the pinned SDK's content-block schema."""
+    result = []
+    for message in messages:
+        item = dict(message)
+        content = item.get("content")
+        if isinstance(content, str):
+            item["content"] = content if item.get("role") == "system" else [
+                {"type": "tool_result", "tool_result": content}
+                if item.get("role") == "tool" else {"type": "text", "text": content}
+            ]
+        elif not isinstance(content, list):
+            raise QualityDataError("conversation content must be text or content blocks")
+        result.append(item)
+    return result
+
+
+def tool_response_messages(calls: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    messages = []
+    for call in calls:
+        function = call.get("function") or {"name": call.get("name"), "arguments": call.get("arguments", {})}
+        function = dict(function)
+        if isinstance(function.get("arguments"), str):
+            function["arguments"] = json.loads(function["arguments"])
+        if not call.get("id") or not function.get("name") or not isinstance(function.get("arguments"), dict):
+            raise QualityDataError("retained tool call lacks an id, name, or structured arguments")
+        messages.append({"role": "assistant", "content": [{
+            "type": "tool_call", "tool_call": {"id": call["id"], "type": "function", "function": function},
+        }]})
+        if "response" in call:
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": [
+                {"type": "tool_result", "tool_result": stable_text(call["response"])}
+            ]})
+    return messages
+
+
 def render_response(family: str, output: Any, raw_response: str) -> str:
     if isinstance(output, str) and output.strip():
         return output.strip()
@@ -281,6 +317,8 @@ def normalize_rows(
                 f"generated output references unknown quality case: {case_id}"
             )
         key = (case_id, _sample_index(generated))
+        if key[1] >= expected_samples:
+            raise QualityDataError(f"unexpected sample index for {case_id}: {key[1]}")
         if key in generated_by_key:
             raise QualityDataError(
                 f"duplicate generated output for {case_id} sample {key[1]}"
@@ -393,13 +431,16 @@ def normalize_rows(
                 )
             )
             response = render_response(family, output, raw_response)
+            if family in {"parent-dependency-suggestion", "child-dependency-suggestion", "developer-feedback"}:
+                # Production-composed instructions define the task; reviewed answers
+                # remain exclusively in ground_truth, not in the evaluator query.
+                query = stable_text(query_messages) if query_messages else stable_text(case_input)
+            if family == "developer-feedback" and query_messages:
+                context = stable_text(query_messages)
             if not query_messages:
-                query_messages = [
-                    {"role": "system", "content": expected_behavior},
-                    {"role": "user", "content": query},
-                ]
+                query_messages = [{"role": "user", "content": query}]
             if not response_messages:
-                response_messages = [{"role": "assistant", "content": response}]
+                response_messages = [{"role": "assistant", "content": raw_response or response}]
 
             expected_labels = _expected_labels(case, expected)
             tool_definitions = as_object_list(
@@ -421,9 +462,13 @@ def normalize_rows(
                         "invocationMetadata.toolCalls",
                         "invocation_metadata.tool_calls",
                     ),
-                    default=first_path(case, ("expected.toolCalls", "input.toolCalls")),
+                    default=[],
                 )
             )
+            if tool_calls and not any(m.get("role") == "tool" for m in response_messages):
+                response_messages = [*tool_response_messages(tool_calls), *response_messages]
+            query_messages = sdk_messages(query_messages)
+            response_messages = sdk_messages(response_messages)
             source_category = str(
                 first_path(
                     case,
