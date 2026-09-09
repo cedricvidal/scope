@@ -104,7 +104,7 @@ def build_decision(
             return "failed"
         if execution != "completed" or not known or any(g["status"] == "unresolved" for g in blocking):
             return "undetermined"
-        return "passed" if blocking else "not-evaluated"
+        return "passed" if any(g["status"] == "passed" for g in blocking) else "not-evaluated"
 
     counts = totals(gates)
     counts.update({
@@ -119,7 +119,8 @@ def build_decision(
     return {
         "schemaVersion": 1, "execution": execution, "acceptance": acceptance(gates),
         "integrity": "unknown" if not known else "incomplete" if incomplete else "valid",
-        "policy": dict(policy or {"version": "aggregate-pass-rate-cap-v1", "sha256": None, "known": True}),
+        "policy": {"version": "aggregate-pass-rate-cap-v1" if policy is None else None, "rubricVersion": None,
+                   "sha256": None, "known": True, **dict(policy or {})},
         "totals": counts,
         "families": [
             {"family": f, "acceptance": acceptance(items), **totals(items)}

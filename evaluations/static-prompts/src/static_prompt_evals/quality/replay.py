@@ -213,7 +213,8 @@ def _replay(config, track_dir, source_track, source_hashes, evaluate_callable, a
         [*deterministic, *azure_observations], family_thresholds=thresholds,
         azure_outcomes=outcomes, model=source_summary.get("evaluatorDeployment"),
         coverage=gate_coverage(rows, rubric, outcomes),
-        policy={"known": True, "version": rubric.defaults.get("policyVersion"), "sha256": rubric.sha256},
+        policy={"known": True, "version": rubric.defaults.get("policyVersion"),
+                "rubricVersion": rubric.version, "sha256": rubric.sha256},
     )
     summary.update({
         "status": status, "policyStatus": status, "offline": False, "replay": True,
@@ -238,12 +239,14 @@ def _replay(config, track_dir, source_track, source_hashes, evaluate_callable, a
     # Isolate the policy-only delta on unchanged historical observations.
     old_decision, _, _ = aggregate_quality(
         previous_observations, family_thresholds={f: old.thresholds(f) for f in old.families},
-        pass_rate_cap=None, policy={"known": True, "version": "historical", "sha256": old.sha256},
+        pass_rate_cap=None, policy={"known": True, "version": "historical",
+                                   "rubricVersion": old.version, "sha256": old.sha256},
         coverage=gate_coverage([NormalizedRow(**r) for r in previous_rows.values()], old),
     )
     policy_only, _, _ = aggregate_quality(
         previous_observations, family_thresholds=thresholds,
-        policy={"known": True, "version": rubric.defaults.get("policyVersion"), "sha256": rubric.sha256},
+        policy={"known": True, "version": rubric.defaults.get("policyVersion"),
+                "rubricVersion": rubric.version, "sha256": rubric.sha256},
         coverage=gate_coverage([NormalizedRow(**r) for r in previous_rows.values()], old),
     )
     write_json(track_dir / "comparison.json", {
@@ -252,7 +255,7 @@ def _replay(config, track_dir, source_track, source_hashes, evaluate_callable, a
         "correctedDecision": summary["decision"], "evaluatorProvenance": plans,
         "note": "Policy-only uses original observations (including old adapter defects). Corrections and new grades are not prompt improvements.",
     })
-    write_json(track_dir / "decision.json", summary["decision"])
+    write_json(track_dir / "decision-summary.json", summary["decision"])
     write_json(track_dir / "findings.json", {"findings": findings})
     write_json(track_dir / "summary.json", summary)
     return summary

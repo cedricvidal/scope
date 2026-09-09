@@ -117,3 +117,5 @@ def test_quality_engine_writes_rows_findings_and_summary(tmp_path: Path) -> None
     assert (track_dir / "azure-native" / "index.json").is_file()
     assert (track_dir / "findings.json").is_file()
     assert (track_dir / "summary.json").is_file()
+    assert (track_dir / "decision-summary.json").is_file()
+    assert not (track_dir / "decision.json").exists()

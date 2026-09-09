@@ -88,6 +88,7 @@ def test_legitimate_skips_are_separate_from_missing():
                                   "applicable": 0, "skipped": 25, "notApplicable": True,
                               }})
     assert decision["gates"][0]["status"] == "not-applicable"
+    assert decision["acceptance"] == "not-evaluated"
     assert decision["totals"]["skippedCases"] == 25
 
 

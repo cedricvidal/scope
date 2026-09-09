@@ -82,13 +82,14 @@ returns success when the framework itself completes.
 
 The Azure AI Evaluation SDK does not provide a native Markdown report
 exporter. The package report command renders `REPORT.md` from the persisted
-shared `quality/decision.json`, summary, and finding artifacts. Reports lead
+shared `quality/decision-summary.json`, summary, and finding artifacts. Reports lead
 with execution, acceptance, and evaluator integrity, then blocking gate
 violations—not an unweighted average. Reports remain inside the
 ignored run directory unless `--output` explicitly selects another path.
 Existing historical reports cannot be overwritten: provide a new `--output`.
-For a legacy canvas/client, `--decision-output NEW_PATH` exports the same
+For a legacy canvas/client, `--decision-output NEW_PATH --decision-only` exports the same
 hash-verified historical decision without changing source artifacts.
+The destination must be outside the source run and must not already exist.
 
 The unified runner accepts `--samples N`, `--smoke`, `--results-dir PATH`,
 `--dataset PATH`, `--surface-profiles PATH`, and `--red-team-config PATH`.
@@ -113,6 +114,11 @@ uv run python -m static_prompt_evals.cli --mode quality \
   --regrade parent-dependency-suggestion/dependency_direction
 
 uv run python -m static_prompt_evals.report /absolute/path/to/results/NEW_RUN
+
+# Export only the legacy decision into an alternate canvas preview directory.
+uv run python -m static_prompt_evals.report /absolute/path/to/results/SOURCE_RUN \
+  --decision-output /absolute/path/to/EXTERNAL_PREVIEW/quality/decision-summary.json \
+  --decision-only
 ```
 
 Selections are repeatable, exact `family/evaluator` keys. Unselected affected
@@ -259,7 +265,7 @@ results/<run-id>/
         <evaluator>.json
     findings.json
     summary.json
-    decision.json
+    decision-summary.json
     rubric-snapshot.yaml
     # Source-replay runs also include:
     replay-plan.json

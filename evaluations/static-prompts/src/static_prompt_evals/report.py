@@ -39,10 +39,19 @@ def _anchor(row_id: str) -> str:
 def load_decision(run_dir: Path) -> dict[str, Any]:
     """Read the shared artifact; never infer historical thresholds from today's YAML."""
     track = run_dir / "quality"
-    decision = _load_object(track / "decision.json")
+    decision = _load_object(track / "decision-summary.json")
+    if not decision:
+        decision = _load_object(track / "decision.json")
     if decision:
         if decision.get("schemaVersion") != 1:
             raise ValueError("unsupported decision artifact version")
+        policy = decision["policy"]
+        if "rubricVersion" not in policy:
+            saved_summary = _load_object(track / "summary.json")
+            policy["rubricVersion"] = (
+                saved_summary.get("rubricVersion")
+                if policy.get("sha256") and policy["sha256"] == saved_summary.get("rubricSha256") else None
+            )
         return decision
     summary = _load_object(track / "summary.json")
     manifest = _load_object(run_dir / "manifest.json")
@@ -51,10 +60,12 @@ def load_decision(run_dir: Path) -> dict[str, Any]:
     thresholds = {}
     coverage = None
     version = None
+    rubric_version = None
     if content is not None:
         configuration = historical_configuration(content, track / "rubric-snapshot.yaml")
         thresholds = {f: configuration.thresholds(f) for f in configuration.families}
         version = configuration.defaults.get("policyVersion", "historical")
+        rubric_version = configuration.version
         if (track / "normalized-rows.jsonl").is_file():
             from .quality.models import NormalizedRow
             from .quality.runner import gate_coverage
@@ -70,7 +81,8 @@ def load_decision(run_dir: Path) -> dict[str, Any]:
     decision = build_decision(
         summary.get("caseResults", []), thresholds, execution=execution,
         coverage=coverage,
-        policy={"known": content is not None, "sha256": summary.get("rubricSha256"), "version": version},
+        policy={"known": content is not None, "sha256": summary.get("rubricSha256"),
+                "version": version, "rubricVersion": rubric_version},
         pass_rate_cap=0.8 if version == "aggregate-pass-rate-cap-v1" else None,
     )
     decision["caveats"].append("Legacy view uses saved observations; it does not retroactively repair historical grader output.")
@@ -225,7 +237,13 @@ def render_quality_report(run_dir: Path) -> str:
         *[f'| Track {_escape(name)} | {_escape(track.get("status"))} |'
           for name, track in sorted(manifest.get("tracks", {}).items())],
         "", "## Source artifacts", "",
-        "- [Shared decision](quality/decision.json)",
+        *(
+            ["- [Shared decision](quality/decision-summary.json)"]
+            if (run_dir / "quality/decision-summary.json").is_file()
+            else ["- [Shared decision (previous filename)](quality/decision.json)"]
+            if (run_dir / "quality/decision.json").is_file()
+            else ["- Shared decision: historical view; export with `--decision-output PATH --decision-only`."]
+        ),
         "- [Summary](quality/summary.json)",
         "- [Findings](quality/findings.json)",
         "- [Run manifest](manifest.json)", "",
@@ -236,7 +254,9 @@ def render_quality_report(run_dir: Path) -> str:
 def write_quality_report(run_dir: Path, output: Path | None = None) -> Path:
     run_dir = run_dir.resolve()
     report_path = output.resolve() if output else run_dir / "REPORT.md"
-    if report_path.exists() and not (run_dir / "quality/decision.json").exists():
+    if report_path.exists() and not any(
+        (run_dir / "quality" / name).exists() for name in ("decision-summary.json", "decision.json")
+    ):
         raise ValueError("preserve historical REPORT.md; supply a new --output path")
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report = render_quality_report(run_dir)
@@ -248,15 +268,34 @@ def write_quality_report(run_dir: Path, output: Path | None = None) -> Path:
     return report_path
 
 
+def export_decision(run_dir: Path, destination: Path) -> Path:
+    """Export a legacy/shared decision without writing anything in the source run."""
+    run_dir = run_dir.resolve()
+    destination = destination.resolve()
+    if destination.is_relative_to(run_dir):
+        raise ValueError("--decision-output must be outside the source run")
+    decision = load_decision(run_dir)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("x", encoding="utf-8") as stream:
+        json.dump(decision, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+    return destination
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dir", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--decision-output", type=Path, help="Export the shared legacy decision to a NEW file")
+    parser.add_argument("--decision-only", action="store_true",
+                        help="Only export --decision-output; do not create or modify REPORT.md")
     args = parser.parse_args()
+    if args.decision_only and (not args.decision_output or args.output):
+        parser.error("--decision-only requires --decision-output and cannot combine with --output")
     if args.decision_output:
-        with args.decision_output.open("x", encoding="utf-8") as stream:
-            json.dump(load_decision(args.run_dir), stream, indent=2, sort_keys=True)
+        print(export_decision(args.run_dir, args.decision_output))
+    if args.decision_only:
+        return
     print(write_quality_report(args.run_dir, args.output))
 
 

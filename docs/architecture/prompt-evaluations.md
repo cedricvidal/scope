@@ -255,13 +255,20 @@ prompt grades. Azure calls use bounded retry/backoff.
 
 ### Shared acceptance decisions
 
-`quality/decision.json` is the version-1 contract for Markdown and review
+`quality/decision-summary.json` is the version-1 contract for Markdown and review
 clients. Clients consume it rather than recomputing averages or consulting
 today's editable rubric. It separates:
 
 - `execution`: `running`, `completed`, or `incomplete` (workflow progress);
 - `acceptance`: `passed`, `failed`, `undetermined`, or `not-evaluated`;
 - `integrity`: `valid`, `incomplete`, or `unknown` (coverage/policy validity).
+
+`policy` identifies the evaluated configuration with `version` (acceptance
+policy version), `rubricVersion` (rubric format version), `sha256` (the full
+rubric YAML byte hash), and `known`. An unresolved historical hash is retained
+for diagnosis with `known: false`; it does not authorize using current policy.
+The earlier `decision.json` filename is a read-only compatibility fallback;
+new runs write only `decision-summary.json`, which takes precedence.
 
 `gates[]` contains stable hashed IDs, family/evaluator, blocking/advisory
 classification, passed/evaluated/applicable/invalid/skipped **case counts**,
@@ -300,6 +307,19 @@ accepts only a matching snapshot, working-tree rubric, or historical Git blob
 (bounded to the latest 100 rubric revisions); otherwise reports show unknown
 totals and replay refuses unverified reuse. Old 100% thresholds are not
 retroactively capped.
+
+To export a legacy decision for an external canvas without generating or
+overwriting any report:
+
+```bash
+uv run python -m static_prompt_evals.report /absolute/path/to/SOURCE_RUN \
+  --decision-output /absolute/path/to/EXTERNAL_PREVIEW/quality/decision-summary.json \
+  --decision-only
+```
+
+This helper is offline, creates the destination parent if necessary, refuses
+to overwrite an existing destination, and requires the destination to be
+outside the source run. It never writes into the historical run.
 
 `--mode quality --source-run /absolute/run/path --offline` creates a **new**
 run, copies the original selected cases and production rows byte-for-byte,
@@ -414,7 +434,7 @@ versions, and relative paths to every artifact obtained so far.
 `azure-row-results.jsonl`, `azure-native/index.json`, and per-family
 `azure-native/<family>/<evaluator>-input.jsonl` and
 `azure-native/<family>/<evaluator>.json` SDK-native files,
-`findings.json`, `summary.json`, `decision.json`, and `rubric-snapshot.yaml`.
+`findings.json`, `summary.json`, `decision-summary.json`, and `rubric-snapshot.yaml`.
 Replay runs additionally retain `source-rubric-snapshot.yaml`, `replay-plan.json`,
 `source-integrity.json`, and `comparison.json`. `red-team/summary.json` indexes the
 surface runs; each `<surface-id>/` contains `taxonomy.json`,

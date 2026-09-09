@@ -223,10 +223,12 @@ def _write_early_failure(
     decision = build_decision(
         [], {f: configuration.thresholds(f) for f in configuration.families} if configuration else {},
         execution="incomplete", policy={"known": configuration is not None,
+                                       "version": configuration.defaults.get("policyVersion") if configuration else None,
+                                       "rubricVersion": configuration.version if configuration else None,
                                        "sha256": configuration.sha256 if configuration else None},
     )
     summary["decision"] = decision
-    write_json(track_dir / "decision.json", decision)
+    write_json(track_dir / "decision-summary.json", decision)
     write_json(track_dir / "findings.json", {"findings": [finding]})
     write_json(track_dir / "summary.json", summary)
     return summary
@@ -368,6 +370,7 @@ def run_quality_engine(
         model=model,
         coverage=gate_coverage(normalized_rows, quality_config, azure_outcomes),
         policy={"known": True, "version": quality_config.defaults.get("policyVersion"),
+                "rubricVersion": quality_config.version,
                 "sha256": quality_config.sha256},
     )
     policy_status = status
@@ -410,7 +413,7 @@ def run_quality_engine(
     )
     write_json(track_dir / "findings.json", {"findings": findings})
     write_json(track_dir / "summary.json", summary)
-    write_json(track_dir / "decision.json", summary["decision"])
+    write_json(track_dir / "decision-summary.json", summary["decision"])
     return summary
 
 

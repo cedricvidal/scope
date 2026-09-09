@@ -56,6 +56,7 @@ def test_replay_reuses_exact_responses_with_zero_generator_or_azure_calls(source
     assert summary["status"] == "succeeded"
     assert summary["samples"] == 1
     assert summary["generatorCalls"] == 0
+    assert (dest / "quality/decision-summary.json").is_file()
     assert (dest / "quality/production-rows.jsonl").read_bytes() == (config.run_dir / "quality/production-rows.jsonl").read_bytes()
     assert before == file_hashes(config.run_dir)
     plan = json.loads((dest / "quality/replay-plan.json").read_text())

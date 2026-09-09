@@ -1,10 +1,11 @@
 import json
 import pytest
 import hashlib
+import sys
 from pathlib import Path
 
 from static_prompt_evals.report import render_quality_report, write_quality_report
-from static_prompt_evals.report import load_decision
+from static_prompt_evals.report import load_decision, export_decision, main
 from static_prompt_evals.quality.decision import build_decision
 
 
@@ -110,7 +111,7 @@ def test_report_uses_shared_decision_and_escapes_case_ids(tmp_path):
           "samples": [{"rowId": "case|[x]::sample-0"}]}],
         {"family": {"schema": {"minPassRate": 0.8}}},
     )
-    _write_json(tmp_path / "quality/decision.json", decision)
+    _write_json(tmp_path / "quality/decision-summary.json", decision)
     _write_json(tmp_path / "manifest.json", {"runId": "<unsafe>"})
     report = render_quality_report(tmp_path)
     assert "**Acceptance:** failed" in report
@@ -167,3 +168,30 @@ def test_report_output_elsewhere_keeps_artifact_links_pointing_to_source(tmp_pat
     output = tmp_path / "preview.md"
     write_quality_report(run, output)
     assert "](source/quality/summary.json)" in output.read_text()
+
+
+def test_decision_only_exports_legacy_without_touching_source(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "REPORT.md").write_text("immutable original report")
+    _write_json(source / "quality/summary.json", {"status": "failed", "rubricSha256": "unknown"})
+    before = {p.relative_to(source): p.read_bytes() for p in source.rglob("*") if p.is_file()}
+    output = tmp_path / "external/quality/decision-summary.json"
+    monkeypatch.setattr(sys, "argv", ["report", str(source), "--decision-output", str(output), "--decision-only"])
+    main()
+    decision = json.loads(output.read_text())
+    assert decision["integrity"] == "unknown"
+    assert decision["totals"]["blockingPassed"] is None
+    assert before == {p.relative_to(source): p.read_bytes() for p in source.rglob("*") if p.is_file()}
+    with pytest.raises(FileExistsError):
+        export_decision(source, output)
+    with pytest.raises(ValueError, match="outside"):
+        export_decision(source, source / "quality/decision-summary.json")
+
+
+def test_canonical_decision_takes_precedence_over_previous_filename(tmp_path):
+    canonical = build_decision([], {}, execution="incomplete")
+    old = build_decision([], {}, execution="completed")
+    _write_json(tmp_path / "quality/decision-summary.json", canonical)
+    _write_json(tmp_path / "quality/decision.json", old)
+    assert load_decision(tmp_path) == canonical
