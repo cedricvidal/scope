@@ -366,9 +366,8 @@ class AzureCloudRedTeamClient:
             return
         await self._retry(
             lambda: asyncio.to_thread(
-                self._project.agents.delete_version,
+                self._project.agents.delete,
                 agent_name=target.name,
-                agent_version=target.version,
             )
         )
 

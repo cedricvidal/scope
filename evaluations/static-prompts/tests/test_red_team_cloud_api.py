@@ -38,6 +38,7 @@ class FakeOpenAI:
 class FakeAgents:
     def __init__(self) -> None:
         self.kwargs: dict[str, Any] | None = None
+        self.deleted_agent_name: str | None = None
 
     def create_version(self, **kwargs: Any) -> Any:
         self.kwargs = kwargs
@@ -46,6 +47,9 @@ class FakeAgents:
             (),
             {"name": kwargs["agent_name"], "version": "1", "id": "agent-1"},
         )()
+
+    def delete(self, *, agent_name: str) -> None:
+        self.deleted_agent_name = agent_name
 
 
 class FakeProject:
@@ -93,6 +97,30 @@ async def test_create_target_preserves_production_tool_schema() -> None:
     assert target.tool_descriptions == (
         {"name": "read_file", "description": "Read a file"},
     )
+
+
+@pytest.mark.asyncio
+async def test_delete_target_removes_the_temporary_agent() -> None:
+    client = AzureCloudRedTeamClient.__new__(AzureCloudRedTeamClient)
+    client._project = FakeProject()
+    client._polling = PollingConfig.model_validate(
+        {
+            "intervalSeconds": 1,
+            "timeoutSeconds": 10,
+            "maxTransientRetries": 0,
+            "baseRetryDelaySeconds": 0.01,
+            "maxRetryDelaySeconds": 0.02,
+        }
+    )
+    target = TemporaryTarget(
+        name="scope-target",
+        version="7",
+        identity="agent-version-id",
+    )
+
+    await client.delete_target(target)
+
+    assert client._project.agents.deleted_agent_name == "scope-target"
 
 
 @pytest.mark.asyncio
