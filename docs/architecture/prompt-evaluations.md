@@ -333,8 +333,11 @@ versions, and relative paths to every artifact obtained so far.
 surface runs; each `<surface-id>/` contains `taxonomy.json`,
 `output-items.json` (or the framework's native JSONL/CSV form), and
 `summary.json`. An optional Markdown summary is derived from these files and
-never replaces them. In `both` mode, one track's failure must not suppress
-execution or artifacts for the other.
+never replaces them. The Azure AI Evaluation SDK does not expose a native
+Markdown report exporter, so `pnpm --filter static-prompt-evals report --
+results/<run-id>` renders `REPORT.md` from the persisted run manifest, quality
+summary, aggregates, and findings. In `both` mode, one track's failure must not
+suppress execution or artifacts for the other.
 
 The curated-input provenance manifest is committed. A per-run
 `results/.../manifest.json` is an ignored execution artifact; they are not the
@@ -387,6 +390,10 @@ pnpm eval:prompts -- --mode both
 pnpm eval:static-prompts
 pnpm eval:static-prompts:smoke
 pnpm eval:red-team
+
+# Human-readable report from an existing ignored run
+pnpm --filter static-prompt-evals report -- \
+  results/<run-id>
 
 # Curated data
 pnpm eval:static-prompts:harvest -- --project-name "Default Project"

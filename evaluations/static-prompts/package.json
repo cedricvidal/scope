@@ -16,7 +16,8 @@
     "validate-data": "tsx scripts/validate-dataset.ts && tsx scripts/validate-coverage.ts",
     "evaluate": "pnpm check:uv && uv run python -m static_prompt_evals.cli",
     "evaluate:quality": "pnpm check:uv && uv run python -m static_prompt_evals.cli --mode quality",
-    "evaluate:red-team": "pnpm check:uv && uv run python -m static_prompt_evals.cli --mode red-team"
+    "evaluate:red-team": "pnpm check:uv && uv run python -m static_prompt_evals.cli --mode red-team",
+    "report": "pnpm check:uv && uv run python -m static_prompt_evals.report"
   },
   "dependencies": {
     "yaml": "^2.8.1"

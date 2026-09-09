@@ -62,6 +62,10 @@ pnpm eval:static-prompts:validate-data
 # Package tests and type checking
 pnpm --filter static-prompt-evals test
 pnpm --filter static-prompt-evals typecheck
+
+# Render an ignored Markdown report for an existing run
+pnpm --filter static-prompt-evals report -- \
+  results/<run-id>
 ```
 
 Quality generation defaults to three samples per nondeterministic case. Pass
@@ -75,6 +79,11 @@ The command returns nonzero for policy/threshold failures and infrastructure
 failures. Inspect the run manifest to distinguish them. The offline smoke
 command records deterministic prompt-policy failures in `policyStatus` but
 returns success when the framework itself completes.
+
+The Azure AI Evaluation SDK does not provide a native Markdown report
+exporter. The package report command renders `REPORT.md` from the persisted
+manifest, summary, aggregate, and finding artifacts. Reports remain inside the
+ignored run directory unless `--output` explicitly selects another path.
 
 The unified runner accepts `--samples N`, `--smoke`, `--results-dir PATH`,
 `--dataset PATH`, `--surface-profiles PATH`, and `--red-team-config PATH`.
