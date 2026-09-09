@@ -76,6 +76,8 @@ def test_render_quality_report_describes_smoke_scope_and_findings(
     assert "criteria-authoring" in report
     assert "Needs \\| stronger grounding" in report
     assert "Infrastructure errors | 0" in report
+    assert "descriptive only; it is not the policy gate" in report
+    assert "Any blocking threshold violation fails the run" in report
 
 
 def test_write_quality_report_defaults_inside_run_directory(

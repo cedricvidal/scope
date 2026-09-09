@@ -195,7 +195,17 @@ def render_quality_report(run_dir: Path) -> str:
         "",
         "## Family overview",
         "",
-        "| Prompt family | Cases | Evaluators | Mean pass rate | Findings | Infrastructure errors |",
+        "The mean evaluator pass rate is descriptive only; it is not the policy "
+        "gate. Each evaluator is checked independently against its configured "
+        "minimum pass rate and optional minimum mean score. Any blocking "
+        "threshold violation fails the run. With one sample per case, an "
+        "evaluator pass rate is effectively either 0% or 100%, so one failed "
+        "sample misses every 67% or 100% minimum.",
+        "",
+        "A failed evaluator commonly creates two finding records: one for the "
+        "case failure and one for the aggregate threshold violation.",
+        "",
+        "| Prompt family | Cases | Evaluators | Mean evaluator pass rate | Finding records | Infrastructure errors |",
         "|---|---:|---:|---:|---:|---:|",
         *_family_rows(family_aggregates, findings),
         "",
