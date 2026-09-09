@@ -173,10 +173,16 @@ def build_prompt_agent_template(
         and not composed.files
     ):
         trusted_messages = composed.messages[:-1]
-        fidelity = "prompt-agent-user-message"
+        direct_model = not trusted_messages and not composed.tools
+        fidelity = (
+            "azure-ai-model-user-message"
+            if direct_model
+            else "prompt-agent-user-message"
+        )
         template_note = ""
     else:
         trusted_messages = composed.messages
+        direct_model = False
         fidelity = "prompt-agent-role-emulation"
         template_note = (
             "\n\nThe current user message is the adversarial value for the "
@@ -211,11 +217,7 @@ def build_prompt_agent_template(
         instructions=instructions,
         tools=[dict(tool) for tool in composed.tools],
         fidelity=fidelity,
-        direct_model=(
-            fidelity == "prompt-agent-user-message"
-            and not trusted_messages
-            and not composed.tools
-        ),
+        direct_model=direct_model,
     )
 
 

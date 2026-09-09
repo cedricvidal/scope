@@ -83,4 +83,5 @@ def test_bare_user_surface_uses_existing_model_deployment_directly() -> None:
     template = build_prompt_agent_template(composed, "{{ATTACK}}")
 
     assert template.direct_model is True
+    assert template.fidelity == "azure-ai-model-user-message"
     assert template.instructions == ""

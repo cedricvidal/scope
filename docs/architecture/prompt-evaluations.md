@@ -300,7 +300,11 @@ that a passing canary proves the worker is secure.
 Cloud result metadata includes remote evaluation/run IDs, target identity and
 version, taxonomy ID, surface profile, attack configuration, status, Attack
 Success Rate, evaluator summaries, and the downloaded framework-native result
-files.
+files. `targetMode` records the actual cloud representation:
+`azure-ai-model-user-message` for a bare model target,
+`prompt-agent-user-message` for a final user-message slot wrapped by trusted
+prompt-agent instructions, and `prompt-agent-role-emulation` for embedded,
+system, or file slots.
 
 ## Version-control and artifact policy
 
