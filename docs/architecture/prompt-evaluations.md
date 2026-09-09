@@ -347,11 +347,14 @@ environment:
 
 ```bash
 pnpm install
-cd evaluations/static-prompts
-uv sync --frozen
-cd ../..
+pnpm --filter static-prompt-evals setup:python
 az login
 ```
+
+The setup, Python test, and evaluation commands run a Node preflight before
+invoking `uv`. A host without `uv` receives platform-specific installation
+guidance and a link to Astral's official installation documentation instead of
+an unannotated `command not found` failure.
 
 Configure the generator/evaluator model and Foundry project as documented in
 [`ENV_VARIABLES.md`](../../ENV_VARIABLES.md#prompt-evaluation-configuration).

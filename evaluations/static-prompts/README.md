@@ -18,11 +18,13 @@ From the repository root:
 
 ```bash
 pnpm install
-cd evaluations/static-prompts
-uv sync --frozen
-cd ../..
+pnpm --filter static-prompt-evals setup:python
 az login
 ```
+
+The setup and evaluation commands check for `uv` first. If it is unavailable,
+they stop before execution and print platform-specific installation guidance
+linked to Astral's official instructions.
 
 Set the prompt-evaluation environment variables described in
 [`ENV_VARIABLES.md`](../../ENV_VARIABLES.md#prompt-evaluation-configuration).

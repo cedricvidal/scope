@@ -8,13 +8,15 @@
     "typecheck": "tsc --noEmit",
     "test": "pnpm test:ts && pnpm test:python",
     "test:ts": "vitest run --config adapter/vitest.config.ts",
-    "test:python": "uv run pytest",
+    "test:python": "pnpm check:uv && uv run pytest",
+    "check:uv": "tsx scripts/check-uv.ts",
+    "setup:python": "pnpm check:uv && uv sync --frozen",
     "generate": "tsx adapter/runner.ts",
     "harvest": "tsx scripts/harvest.ts",
     "validate-data": "tsx scripts/validate-dataset.ts && tsx scripts/validate-coverage.ts",
-    "evaluate": "uv run python -m static_prompt_evals.cli",
-    "evaluate:quality": "uv run python -m static_prompt_evals.cli --mode quality",
-    "evaluate:red-team": "uv run python -m static_prompt_evals.cli --mode red-team"
+    "evaluate": "pnpm check:uv && uv run python -m static_prompt_evals.cli",
+    "evaluate:quality": "pnpm check:uv && uv run python -m static_prompt_evals.cli --mode quality",
+    "evaluate:red-team": "pnpm check:uv && uv run python -m static_prompt_evals.cli --mode red-team"
   },
   "dependencies": {
     "yaml": "^2.8.1"
