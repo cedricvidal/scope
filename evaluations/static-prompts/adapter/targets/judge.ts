@@ -1,16 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { randomUUID } from "node:crypto";
 import {
+  mkdtempSync,
   mkdirSync,
-  readdirSync,
   rmSync,
-  rmdirSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 import {
   type ConversationTurn,
   type CriteriaConfig,
@@ -381,17 +379,10 @@ export async function composeJudgeRequest(
   };
 }
 
-const ADAPTER_WORKSPACE_ROOT = fileURLToPath(
-  new URL("../.adapter-workspaces", import.meta.url),
-);
-
 function materializeWorkspaceFiles(files: Record<string, string>): string {
-  mkdirSync(ADAPTER_WORKSPACE_ROOT, { recursive: true });
-  const workspacePath = join(
-    ADAPTER_WORKSPACE_ROOT,
-    `judge-${randomUUID()}`,
+  const workspacePath = mkdtempSync(
+    join(tmpdir(), "scope-static-prompt-judge-"),
   );
-  mkdirSync(workspacePath, { recursive: true });
   try {
     for (const [relativePath, content] of Object.entries(files)) {
       const destination = join(workspacePath, relativePath);
@@ -407,16 +398,6 @@ function materializeWorkspaceFiles(files: Record<string, string>): string {
 
 function cleanupMaterializedWorkspace(workspacePath: string): void {
   rmSync(workspacePath, { recursive: true, force: true });
-  try {
-    if (
-      readdirSync(ADAPTER_WORKSPACE_ROOT, { withFileTypes: true }).length ===
-      0
-    ) {
-      rmdirSync(ADAPTER_WORKSPACE_ROOT);
-    }
-  } catch {
-    // Concurrent adapter runs may still own sibling workspaces.
-  }
 }
 
 export const judgeAdapter: PromptTargetAdapter<NormalizedJudgeOutput> = {
