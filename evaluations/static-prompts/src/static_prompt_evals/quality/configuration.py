@@ -169,7 +169,10 @@ def load_quality_configuration(
             if (
                 not isinstance(score_range, list)
                 or len(score_range) != 2
-                or not all(isinstance(item, (int, float)) for item in score_range)
+                or not all(
+                    not isinstance(item, bool) and isinstance(item, (int, float)) and math.isfinite(item)
+                    for item in score_range
+                )
                 or score_range[0] >= score_range[1]
             ):
                 raise QualityConfigurationError(
@@ -227,6 +230,14 @@ def load_quality_configuration(
                     or not math.isfinite(value) or not 0 <= value <= 1
                 ):
                     raise QualityConfigurationError(f"{family}/{name}: invalid {field}")
+            mean_floor = threshold.get("minMeanScore")
+            if mean_floor is not None and (
+                isinstance(mean_floor, bool) or not isinstance(mean_floor, (int, float))
+                or not math.isfinite(mean_floor)
+            ):
+                raise QualityConfigurationError(f"{family}/{name}: invalid minMeanScore")
+            if "blocking" in threshold and not isinstance(threshold["blocking"], bool):
+                raise QualityConfigurationError(f"{family}/{name}: blocking must be boolean")
         normalized_families[family] = dict(config)
 
     if manifest_path is not None:

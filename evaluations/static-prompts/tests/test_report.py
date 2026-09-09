@@ -1,7 +1,11 @@
 import json
+import pytest
+import hashlib
 from pathlib import Path
 
 from static_prompt_evals.report import render_quality_report, write_quality_report
+from static_prompt_evals.report import load_decision
+from static_prompt_evals.quality.decision import build_decision
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -75,8 +79,9 @@ def test_render_quality_report_describes_smoke_scope_and_findings(
     assert "should not be treated as a full-dataset" in report
     assert "criteria-authoring" in report
     assert "Needs \\| stronger grounding" in report
-    assert "Infrastructure errors | 0" in report
-    assert "descriptive only; it is not the policy gate" in report
+    assert "Evaluator integrity:** unknown" in report
+    assert "gate totals and acceptance are unknown" in report
+    assert "Mean evaluator pass rate" not in report
     assert "Any blocking threshold violation fails the run" in report
 
 
@@ -96,3 +101,69 @@ def test_write_quality_report_defaults_inside_run_directory(
     assert output.read_text(encoding="utf-8").startswith(
         "# Static Prompt Evaluation Report"
     )
+
+
+def test_report_uses_shared_decision_and_escapes_case_ids(tmp_path):
+    decision = build_decision(
+        [{"family": "family", "evaluator": "schema", "caseId": "case|[x]",
+          "casePassed": False, "meanScore": None,
+          "samples": [{"rowId": "case|[x]::sample-0"}]}],
+        {"family": {"schema": {"minPassRate": 0.8}}},
+    )
+    _write_json(tmp_path / "quality/decision.json", decision)
+    _write_json(tmp_path / "manifest.json", {"runId": "<unsafe>"})
+    report = render_quality_report(tmp_path)
+    assert "**Acceptance:** failed" in report
+    assert "**1 failed**" in report
+    assert "0/1 (0.00%)" in report and "80.00%" in report
+    assert "case\\|\\[x\\]" in report
+    assert "&lt;unsafe&gt;" in report
+    assert load_decision(tmp_path) == decision
+
+
+def test_changed_rubric_hash_never_uses_current_thresholds(tmp_path):
+    _write_json(tmp_path / "quality/summary.json", {"rubricSha256": "does-not-match", "status": "succeeded"})
+    decision = load_decision(tmp_path)
+    assert decision["integrity"] == "unknown"
+    assert decision["acceptance"] == "undetermined"
+    assert decision["totals"]["blockingPassed"] is None
+
+
+def test_historical_report_cannot_be_overwritten(tmp_path):
+    (tmp_path / "REPORT.md").write_text("original")
+    with pytest.raises(ValueError, match="preserve historical"):
+        write_quality_report(tmp_path)
+    assert (tmp_path / "REPORT.md").read_text() == "original"
+
+
+def test_hash_matching_historical_snapshot_preserves_hundred_percent(tmp_path):
+    content = b"""version: 1
+defaults: {}
+graders: {}
+families:
+  family:
+    thresholds:
+      schema: {minPassRate: 1.0}
+"""
+    quality = tmp_path / "quality"
+    quality.mkdir()
+    (quality / "rubric-snapshot.yaml").write_bytes(content)
+    _write_json(quality / "summary.json", {
+        "rubricSha256": hashlib.sha256(content).hexdigest(),
+        "caseResults": [{"family": "family", "evaluator": "schema", "caseId": f"case-{i}",
+                         "casePassed": i < 24, "meanScore": None, "samples": []} for i in range(25)],
+    })
+    report = render_quality_report(tmp_path)
+    decision = load_decision(tmp_path)
+    assert decision["gates"][0]["requirements"]["effectiveMinPassRate"] == 1.0
+    assert decision["acceptance"] == "failed"
+    assert "24/25 (96.00%)" in report
+    assert "pass rate ≥ 100.00%" in report
+
+
+def test_report_output_elsewhere_keeps_artifact_links_pointing_to_source(tmp_path):
+    run = tmp_path / "source"
+    run.mkdir()
+    output = tmp_path / "preview.md"
+    write_quality_report(run, output)
+    assert "](source/quality/summary.json)" in output.read_text()

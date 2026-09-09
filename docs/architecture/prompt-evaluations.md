@@ -217,7 +217,10 @@ evaluation runs.
 Deterministic checks own exact contracts: schema validity, nonempty content,
 identifier syntax, candidate-only references, forbidden language, Markdown
 shape, complete criterion/feature coverage, precision/recall/F1, and exact
-match. Schema and security invariants must pass at 100%.
+match. Each case check remains exact; aggregate required pass rates are capped
+at **80%** by policy `aggregate-pass-rate-cap-v1`, including schema and security
+checks. Existing lower floors (such as 67%) remain unchanged. The ceiling does
+not alter individual score cutoffs, measured rates, or minimum mean scores.
 
 Azure AI Evaluation SDK built-ins are assigned only where meaningful:
 
@@ -244,11 +247,93 @@ Generation defaults to three samples for nondeterministic cases. Binary
 expectations use a strict majority. Aggregates are emitted by family, variant,
 source category, and model. AI-assisted thresholds combine:
 
-- a reviewed baseline and no statistically meaningful regression; and
+- a reviewed baseline minus its configured maximum regression, when supplied; and
 - an absolute floor so a poor baseline cannot pass indefinitely.
 
 Transport and rate-limit exhaustion are infrastructure failures, not failed
 prompt grades. Azure calls use bounded retry/backoff.
+
+### Shared acceptance decisions
+
+`quality/decision.json` is the version-1 contract for Markdown and review
+clients. Clients consume it rather than recomputing averages or consulting
+today's editable rubric. It separates:
+
+- `execution`: `running`, `completed`, or `incomplete` (workflow progress);
+- `acceptance`: `passed`, `failed`, `undetermined`, or `not-evaluated`;
+- `integrity`: `valid`, `incomplete`, or `unknown` (coverage/policy validity).
+
+`gates[]` contains stable hashed IDs, family/evaluator, blocking/advisory
+classification, passed/evaluated/applicable/invalid/skipped **case counts**,
+exact unrounded pass rate, actual mean score, configured and effective
+requirements, violations, case/sample evidence IDs, and coverage completeness.
+The baseline-derived requirement is capped explicitly; both its uncapped
+value and effective floor are retained. A gate must meet every requirement.
+`families[]` and `totals` separate blocking passed/failed/unresolved/not-applicable
+gates, advisory violations, unique failed cases, and case/evaluator failure
+records. `invalidCases` and `skippedCases` count case/evaluator assessments,
+not unique dataset cases. Unknown historical totals are `null`, not zero.
+
+Samples vote within each case by strict majority; cases then vote at the gate.
+With one sample per case, 20/25 passes an 80% floor and 19/25 fails. At the old
+100% floor, 24/25 failed. A passing rate with a failing mean score still fails.
+Missing or malformed grades never become failed prompt votes. Required missing
+coverage prevents a passing gate; incomplete gates fail conclusively on pass
+rate only if even all unknown cases passing cannot meet the floor. Otherwise
+they remain unresolved. Valid gate failures can coexist with incomplete
+assessment. Advisory-only violations do not fail the command.
+
+Custom graders parse the SDK's structured
+`outputs.<grader>.sample.output[].content` JSON and validate labels/scores.
+Only the documented evidence alias `tool-history` → `tool_history` is
+canonicalized. Conversation evaluators receive the pinned SDK schema: system
+text, user/assistant text blocks, and recorded tool-call/result blocks. Prior
+schema-fallback output must be regraded, not merely relabeled. Dependency and
+feedback queries use their production-composed task instructions, not a bare
+criterion or the reviewed expected answer. Ground truth stays separate.
+Expected tool calls are never fabricated as actual generation history.
+
+### Immutable-source replay and selective regrading
+
+New runs retain `rubric-snapshot.yaml` and its SHA-256. Legacy policy resolution
+accepts only a matching snapshot, working-tree rubric, or historical Git blob
+(bounded to the latest 100 rubric revisions); otherwise reports show unknown
+totals and replay refuses unverified reuse. Old 100% thresholds are not
+retroactively capped.
+
+`--mode quality --source-run /absolute/run/path --offline` creates a **new**
+run, copies the original selected cases and production rows byte-for-byte,
+and reparses matching native grades without Azure or generator calls. It does
+not use today's dataset manifest, `--samples`, or generation environment.
+`--smoke` cannot accompany `--source-run`. Source row IDs, sample indices,
+families, variants, original inputs/outputs, and raw responses are verified.
+The source's existing generation errors remain recorded; missing rows cannot
+be regenerated.
+
+`replay-plan.json` lists affected graders before any paid call, projected
+old/new input hashes, spec hashes, native artifact hashes, evaluator deployment
+and SDK identity, implementation hashes, source hashes, per-row response hashes,
+and requested/actual generator models where recorded. It distinguishes
+`native-reparse`, `azure-rerun`, `unresolved-not-regraded`, and `not-applicable`.
+Repeat `--regrade FAMILY/EVALUATOR` for the explicitly approved affected
+graders; unexpected selections fail rather than expanding paid scope.
+Unselected affected graders remain unresolved. Regrading requires the source
+evaluator deployment and SDK version; model deployment aliases are not proof
+that a service-side model revision stayed fixed.
+
+`source-integrity.json` verifies the entire source tree before/after and records
+zero generator calls. Incremental native files and the evaluator index survive
+partial failure. `comparison.json` separates the original-policy decision,
+the policy-only delta on original observations (including old parser defects),
+and the corrected decision with per-grader provenance. These are grading
+corrections, **not prompt improvements**.
+
+The original run `20260909T203544Z-712cdcee` lacks an actual generator model on
+some rows and a generator revision snapshot. These remain explicit unknowns.
+Judge tool-call accuracy is unresolved where traces were not retained; no
+regeneration or fabricated evidence is permitted. Source report-generation
+errors also leave unavailable Azure coverage. Offline replay is useful for
+review but cannot resolve graders requiring new Azure output.
 
 ## Cloud red-team evaluation
 
@@ -329,7 +414,9 @@ versions, and relative paths to every artifact obtained so far.
 `azure-row-results.jsonl`, `azure-native/index.json`, and per-family
 `azure-native/<family>/<evaluator>-input.jsonl` and
 `azure-native/<family>/<evaluator>.json` SDK-native files,
-`findings.json`, and `summary.json`. `red-team/summary.json` indexes the
+`findings.json`, `summary.json`, `decision.json`, and `rubric-snapshot.yaml`.
+Replay runs additionally retain `source-rubric-snapshot.yaml`, `replay-plan.json`,
+`source-integrity.json`, and `comparison.json`. `red-team/summary.json` indexes the
 surface runs; each `<surface-id>/` contains `taxonomy.json`,
 `output-items.json` (or the framework's native JSONL/CSV form), and
 `summary.json`. An optional Markdown summary is derived from these files and

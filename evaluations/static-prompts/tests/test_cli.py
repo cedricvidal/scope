@@ -9,6 +9,19 @@ from static_prompt_evals import cli
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("arguments,message", [
+    (["--mode", "both", "--source-run", "source"], "requires --mode quality"),
+    (["--mode", "quality", "--source-run", "source", "--smoke"], "cannot use --smoke"),
+    (["--mode", "quality", "--regrade", "family/evaluator"], "requires --source-run"),
+    (["--mode", "quality", "--source-run", "source", "--offline", "--regrade", "family/evaluator"], "without --offline"),
+])
+async def test_invalid_replay_scope_fails_before_creating_run(monkeypatch, arguments, message):
+    monkeypatch.setattr(sys, "argv", ["scope-evals", *arguments])
+    with pytest.raises(ValueError, match=message):
+        await cli.run()
+
+
+@pytest.mark.asyncio
 async def test_both_mode_preserves_independent_track_artifacts(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

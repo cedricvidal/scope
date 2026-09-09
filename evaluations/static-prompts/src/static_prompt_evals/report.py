@@ -1,15 +1,24 @@
-"""Render a human-readable Markdown report from persisted evaluation artifacts."""
+"""Deterministic offline report, rendered from the shared acceptance artifact."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import html
 import json
-from collections import Counter, defaultdict
+import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
+
+from .quality.configuration import historical_configuration, resolve_historical_rubric
+from .quality.decision import build_decision
+from .quality.data import read_jsonl
 
 
 def _load_object(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
@@ -17,246 +26,237 @@ def _load_object(path: Path) -> dict[str, Any]:
 
 
 def _escape(value: object) -> str:
-    if value is None:
-        return ""
-    return str(value).replace("|", "\\|").replace("\n", " ")
+    text = html.escape(str(value)) if value is not None else ""
+    for character in ("\\", "|", "[", "]", "`"):
+        text = text.replace(character, "\\" + character)
+    return text.replace("\n", " ").replace("\r", " ")
 
 
-def _format_score(value: object) -> str:
-    if isinstance(value, float):
-        return f"{value:.2f}".rstrip("0").rstrip(".")
-    return _escape(value)
+def _anchor(row_id: str) -> str:
+    return "evidence-" + hashlib.sha256(row_id.encode()).hexdigest()[:16]
 
 
-def _family_rows(
-    aggregates: list[dict[str, Any]],
-    findings: list[dict[str, Any]],
-) -> list[str]:
-    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for aggregate in aggregates:
-        family = aggregate.get("family")
-        if isinstance(family, str):
-            grouped[family].append(aggregate)
-    finding_counts = Counter(
-        finding.get("family")
-        for finding in findings
-        if isinstance(finding.get("family"), str)
-    )
+def load_decision(run_dir: Path) -> dict[str, Any]:
+    """Read the shared artifact; never infer historical thresholds from today's YAML."""
+    track = run_dir / "quality"
+    decision = _load_object(track / "decision.json")
+    if decision:
+        if decision.get("schemaVersion") != 1:
+            raise ValueError("unsupported decision artifact version")
+        return decision
+    summary = _load_object(track / "summary.json")
+    manifest = _load_object(run_dir / "manifest.json")
+    root = Path(__file__).resolve().parents[2]
+    content = resolve_historical_rubric(track, root, summary.get("rubricSha256"))
+    thresholds = {}
+    coverage = None
+    version = None
+    if content is not None:
+        configuration = historical_configuration(content, track / "rubric-snapshot.yaml")
+        thresholds = {f: configuration.thresholds(f) for f in configuration.families}
+        version = configuration.defaults.get("policyVersion", "historical")
+        if (track / "normalized-rows.jsonl").is_file():
+            from .quality.models import NormalizedRow
+            from .quality.runner import gate_coverage
 
-    rows: list[str] = []
-    for family in sorted(grouped):
-        values = grouped[family]
-        case_count = max(
-            (
-                item.get("caseCount", 0)
-                for item in values
-                if isinstance(item.get("caseCount"), int)
-            ),
-            default=0,
-        )
-        pass_rates = [
-            float(item["passRate"])
-            for item in values
-            if isinstance(item.get("passRate"), int | float)
-        ]
-        mean_pass_rate = (
-            sum(pass_rates) / len(pass_rates) if pass_rates else 0.0
-        )
-        infrastructure_errors = sum(
-            int(item.get("infrastructureErrorCount", 0))
-            for item in values
-            if isinstance(item.get("infrastructureErrorCount", 0), int)
-        )
-        rows.append(
-            "| "
-            f"{_escape(family)} | {case_count} | {len(values)} | "
-            f"{mean_pass_rate:.0%} | {finding_counts[family]} | "
-            f"{infrastructure_errors} |"
-        )
-    return rows
-
-
-def _finding_rows(findings: list[dict[str, Any]]) -> list[str]:
-    rows: list[str] = []
-    for index, finding in enumerate(findings, start=1):
-        observed = finding.get("observed")
-        observed_object = observed if isinstance(observed, dict) else {}
-        score = observed_object.get("meanScore", "")
-        pass_count = observed_object.get("passCount", "")
-        sample_count = observed_object.get("sampleCount", "")
-        passing = (
-            f"{pass_count}/{sample_count}"
-            if pass_count != "" and sample_count != ""
-            else ""
-        )
-        reason = finding.get("reason", "")
-        samples = finding.get("samples")
-        sample_reason = ""
-        if isinstance(samples, list):
-            sample_reason = next(
-                (
-                    str(sample.get("reason"))
-                    for sample in samples
-                    if isinstance(sample, dict) and sample.get("reason")
-                ),
-                "",
+            coverage = gate_coverage(
+                [NormalizedRow(**r) for r in read_jsonl(track / "normalized-rows.jsonl")], configuration,
             )
-        if sample_reason and sample_reason != reason:
-            reason = f"{reason}: {sample_reason}" if reason else sample_reason
-        rows.append(
-            "| "
-            f"{index} | {_escape(finding.get('family', ''))} | "
-            f"{_escape(finding.get('variant', ''))} | "
-            f"{_escape(finding.get('evaluator', ''))} | "
-            f"{_escape(finding.get('kind', ''))} | "
-            f"{_format_score(score)} | {_escape(passing)} | "
-            f"{_escape(reason)} |"
-        )
-    return rows
+    execution = (
+        "running" if manifest.get("status") == "running"
+        else "incomplete" if not summary or summary.get("phase") or summary.get("status") == "infrastructure-failed"
+        else "completed"
+    )
+    decision = build_decision(
+        summary.get("caseResults", []), thresholds, execution=execution,
+        coverage=coverage,
+        policy={"known": content is not None, "sha256": summary.get("rubricSha256"), "version": version},
+        pass_rate_cap=0.8 if version == "aggregate-pass-rate-cap-v1" else None,
+    )
+    decision["caveats"].append("Legacy view uses saved observations; it does not retroactively repair historical grader output.")
+    if content is None:
+        # Unknown is not a measured zero; clients must not present guessed totals.
+        decision["totals"] = {key: None for key in decision["totals"]}
+    return decision
+
+
+def _rate(gate: dict[str, Any]) -> str:
+    if gate["passRate"] is None:
+        return "not evaluated"
+    return f'{gate["passed"]}/{gate["evaluated"]} ({gate["passRate"]:.2%})'
+
+
+def _requirement(gate: dict[str, Any]) -> str:
+    requirement = gate["requirements"]
+    parts = []
+    if requirement.get("effectiveMinPassRate") is not None:
+        parts.append(f'pass rate ≥ {requirement["effectiveMinPassRate"]:.2%}')
+    if requirement.get("minMeanScore") is not None:
+        parts.append(f'mean score ≥ {requirement["minMeanScore"]:g}')
+    if requirement.get("uncappedMinPassRate") != requirement.get("effectiveMinPassRate"):
+        parts.append(f'capped from {requirement["uncappedMinPassRate"]:.2%}')
+    return "; ".join(parts)
 
 
 def render_quality_report(run_dir: Path) -> str:
     manifest = _load_object(run_dir / "manifest.json")
-    summary = _load_object(run_dir / "quality" / "summary.json")
-    findings_payload = _load_object(run_dir / "quality" / "findings.json")
-    raw_findings = findings_payload.get("findings", [])
-    findings = (
-        [item for item in raw_findings if isinstance(item, dict)]
-        if isinstance(raw_findings, list)
-        else []
-    )
-    aggregates_payload = summary.get("aggregates")
-    aggregates_object = (
-        aggregates_payload if isinstance(aggregates_payload, dict) else {}
-    )
-    raw_family_aggregates = aggregates_object.get("byFamily", [])
-    family_aggregates = (
-        [item for item in raw_family_aggregates if isinstance(item, dict)]
-        if isinstance(raw_family_aggregates, list)
-        else []
-    )
-
+    summary = _load_object(run_dir / "quality/summary.json")
+    decision = load_decision(run_dir)
     smoke = summary.get("smoke") is True
-    offline = summary.get("offline") is True
-    run_kind = (
-        "offline smoke"
-        if smoke and offline
-        else "real Azure smoke"
-        if smoke
-        else "full offline"
-        if offline
-        else "full Azure"
-    )
-    infrastructure_errors = sum(
-        int(item.get("infrastructureErrorCount", 0))
-        for item in family_aggregates
-        if isinstance(item.get("infrastructureErrorCount", 0), int)
-    )
-    status_note = (
-        "The run completed without evaluator infrastructure errors, but its "
-        "policy thresholds failed."
-        if infrastructure_errors == 0 and summary.get("policyStatus") == "failed"
-        else "Consult the findings and infrastructure error counts below."
-    )
-    scope_note = (
-        "This is a smoke baseline: it sampled one curated case per prompt "
-        "family and should not be treated as a full-dataset regression baseline."
-        if smoke
-        else "This run used the configured non-smoke dataset selection."
-    )
-
+    kind = ("offline" if summary.get("offline") else "real Azure") + (" smoke" if smoke else " full")
+    if summary.get("replay"):
+        kind = ("offline native-result replay (no model calls)" if summary.get("replayOffline")
+                else "source-response replay (no generation)")
+    counts = {key: "unknown" if value is None else value for key, value in decision["totals"].items()}
     lines = [
-        f"# Static Prompt Evaluation Report: {_escape(manifest.get('runId', run_dir.name))}",
-        "",
-        f"> **Run type:** {run_kind}. {scope_note}",
-        "",
-        f"> **Outcome:** {status_note}",
-        "",
-        "## Run summary",
-        "",
-        "| Field | Value |",
-        "|---|---|",
-        f"| Run ID | `{_escape(manifest.get('runId', run_dir.name))}` |",
-        f"| Mode | {_escape(manifest.get('mode', ''))} |",
-        f"| Run status | **{_escape(manifest.get('status', ''))}** |",
-        f"| Quality status | **{_escape(summary.get('status', ''))}** |",
-        f"| Policy status | **{_escape(summary.get('policyStatus', ''))}** |",
-        f"| Started | {_escape(manifest.get('startedAt', ''))} |",
-        f"| Completed | {_escape(manifest.get('completedAt', ''))} |",
-        f"| Cases | {_escape(summary.get('caseCount', ''))} |",
-        f"| Generated rows | {_escape(summary.get('generatedRowCount', ''))} |",
-        f"| Samples per case | {_escape(summary.get('samples', ''))} |",
-        f"| Azure observations | {_escape(summary.get('azureObservationCount', ''))} |",
-        f"| Deterministic observations | {_escape(summary.get('deterministicObservationCount', ''))} |",
-        f"| Findings | {_escape(summary.get('findingCount', len(findings)))} |",
-        f"| Evaluator deployment | `{_escape(summary.get('evaluatorDeployment', ''))}` |",
-        f"| Azure Evaluation SDK | `{_escape(summary.get('azureEvaluationSdkVersion', ''))}` |",
-        f"| Infrastructure errors | {infrastructure_errors} |",
-        "",
-        "## Family overview",
-        "",
-        "The mean evaluator pass rate is descriptive only; it is not the policy "
-        "gate. Each evaluator is checked independently against its configured "
-        "minimum pass rate and optional minimum mean score. Any blocking "
-        "threshold violation fails the run. With one sample per case, an "
-        "evaluator pass rate is effectively either 0% or 100%, so one failed "
-        "sample misses every 67% or 100% minimum.",
-        "",
-        "A failed evaluator commonly creates two finding records: one for the "
-        "case failure and one for the aggregate threshold violation.",
-        "",
-        "| Prompt family | Cases | Evaluators | Mean evaluator pass rate | Finding records | Infrastructure errors |",
-        "|---|---:|---:|---:|---:|---:|",
-        *_family_rows(family_aggregates, findings),
-        "",
-        "## Findings",
-        "",
+        f'# Static Prompt Evaluation Report: {_escape(manifest.get("runId", run_dir.name))}', "",
+        f'> **Run type:** {kind}. ' + (
+            "This smoke selection should not be treated as a full-dataset regression baseline."
+            if smoke else "Uses the recorded case selection."
+        ), "",
+        f'**Execution:** {decision["execution"]} · **Acceptance:** {decision["acceptance"]} · '
+        f'**Evaluator integrity:** {decision["integrity"]}', "",
+        *[f'> {_escape(caveat)}' for caveat in decision["caveats"]], "",
+        "## Acceptance summary", "",
+        f'Blocking gates: **{counts["blockingPassed"]} passed**, **{counts["blockingFailed"]} failed**, '
+        f'**{counts["blockingUnresolved"]} unresolved**, **{counts["blockingNotApplicable"]} not applicable**. '
+        f'Advisory violations: **{counts["advisoryViolations"]}**.', "",
+        f'Unique cases with failed verdicts: {counts["uniqueFailedCases"]}; case/evaluator failure records: '
+        f'{counts["caseFailureRecords"]}. Invalid case/evaluator assessments: {counts["invalidCases"]}; '
+        f'legitimately skipped case/evaluator assessments: {counts["skippedCases"]}.', "",
+        "Any blocking threshold violation fails the run. Invalid grader output is unresolved, not a failed prompt. "
+        "Failure can coexist with incomplete coverage; advisory failures alone do not block acceptance.", "",
+        "## Family overview", "",
+        "| Prompt family | Acceptance | Blocking passed | Failed | Unresolved | Not applicable | Advisory violations |",
+        "|---|---|---:|---:|---:|---:|---:|",
+        *[
+            f'| {_escape(f["family"])} | {f["acceptance"]} | {f["blockingPassed"]} | {f["blockingFailed"]} | '
+            f'{f["blockingUnresolved"]} | {f["blockingNotApplicable"]} | {f["advisoryViolations"]} |'
+            for f in decision["families"]
+        ], "",
+        "## Gate decisions", "",
+        "| Gate | Classification | Decision | Actual passing / evaluated | Required | Actual mean | Applicable / invalid / skipped | Reason |",
+        "|---|---|---|---:|---|---:|---:|---|",
     ]
-    if findings:
-        lines.extend(
-            [
-                "| # | Family | Variant | Evaluator | Kind | Mean score | Passing samples | Reason |",
-                "|---:|---|---|---|---|---:|---:|---|",
-                *_finding_rows(findings),
-            ]
+    gates = sorted(decision["gates"], key=lambda g: (
+        g["classification"] != "blocking", {"failed": 0, "unresolved": 1, "passed": 2, "not-applicable": 3}[g["status"]],
+        g["family"], g["evaluator"],
+    ))
+    for gate in gates:
+        name = _escape(f'{gate["family"]}/{gate["evaluator"]}')
+        lines.append(
+            f'| [{name}](#{gate["id"]}) | {gate["classification"]} | {gate["status"]} | {_rate(gate)} | '
+            f'{_escape(_requirement(gate))} | {gate["meanScore"] if gate["meanScore"] is not None else "—"} | '
+            f'{gate["applicable"]} / {gate["invalid"]} / {gate["skipped"]} | {_escape("; ".join(gate["violations"]))} |'
         )
-    else:
-        lines.append("No policy or case findings were recorded.")
-    lines.extend(
-        [
-            "",
-            "## Source artifacts",
-            "",
-            "- [`manifest.json`](manifest.json)",
-            "- [`quality/summary.json`](quality/summary.json)",
-            "- [`quality/findings.json`](quality/findings.json)",
-            "- [`quality/azure-row-results.jsonl`](quality/azure-row-results.jsonl)",
-            "- [`quality/deterministic-row-results.jsonl`](quality/deterministic-row-results.jsonl)",
-            "- [`quality/production-rows.jsonl`](quality/production-rows.jsonl)",
-            "",
+    lines += [
+        "", "## How to read the decisions", "",
+        "Samples vote within one case using strict majority (ties fail). Cases then contribute one vote each "
+        "to a gate. With one sample each, 20 passing cases out of 25 is 80%, not a binary aggregate: "
+        "20/25 passes an 80% floor; 19/25 fails. Under a historical 100% floor, 24/25 fails. "
+        "Individual schema/security checks remain exact. Mean-score requirements remain independent and must also pass.", "",
+        "The denominator is valid evaluated cases, not samples. Applicable cases also include missing/invalid "
+        "assessments; these prevent a passing gate. Legitimate non-applicable cases are counted separately. "
+        "When coverage is incomplete, an aggregate failure is conclusive only if even all unknown case votes "
+        "passing cannot meet the pass-rate floor. An unweighted cross-evaluator average is never an acceptance gate.", "",
+        "## Gate evidence", "",
+    ]
+    for gate in gates:
+        lines += [
+            f'<a id="{gate["id"]}"></a>',
+            f'### {_escape(gate["family"])} / {_escape(gate["evaluator"])}', "",
+            f'{gate["classification"]}: **{gate["status"]}**; {_rate(gate)}; {_escape(_requirement(gate))}.',
+            "Failed cases: " + (_escape(", ".join(gate["failedCaseIds"])) or "none"),
+            "Invalid cases: " + (_escape(", ".join(gate["invalidCaseIds"])) or "none recorded; consult coverage counts"),
+            "Samples: " + ", ".join(f'[{_escape(i)}](#{_anchor(i)})' for i in gate["caseEvidenceIds"]), "",
         ]
-    )
+        native = Path("quality/azure-native") / gate["family"] / (gate["evaluator"] + ".json")
+        # Only link inside the run, never permit a malicious family to escape it.
+        candidate = (run_dir / native).resolve()
+        if candidate.is_relative_to(run_dir.resolve()) and candidate.is_file():
+            lines += [f'[Native evaluator output]({quote(native.as_posix(), safe="/")})', ""]
+    rows_path = run_dir / "quality/normalized-rows.jsonl"
+    if rows_path.is_file():
+        lines += ["## Case and sample evidence", ""]
+        sample_results = {}
+        for result in summary.get("caseResults", []):
+            for sample in result.get("samples", []):
+                sample_results.setdefault(sample["rowId"], []).append((result, sample))
+        for row in read_jsonl(rows_path):
+            row_id = row["row_id"]
+            lines += [
+                f'<a id="{_anchor(row_id)}"></a>', f'### {_escape(row_id)}',
+                f'Case: {_escape(row["case_id"])} · Family: {_escape(row["family"])} · Sample: {row["sample_index"]}',
+                "[Original responses](quality/production-rows.jsonl) · [Normalized inputs](quality/normalized-rows.jsonl)", "",
+            ]
+            results = sample_results.get(row_id, [])
+            if results:
+                lines += ["| Evaluator | Case verdict | Sample verdict | Score / label | Reason |",
+                          "|---|---|---|---|---|"]
+                for result, sample in results:
+                    lines.append(
+                        f'| {_escape(result["evaluator"])} | {_escape(result["casePassed"])} | '
+                        f'{_escape(sample.get("passed"))} | {_escape(sample.get("score"))} / '
+                        f'{_escape(sample.get("label"))} | {_escape(sample.get("reason"))} |'
+                    )
+                lines.append("")
+    findings = _load_object(run_dir / "quality/findings.json").get("findings", [])
+    lines += ["## Findings and diagnostic reasons", "",
+              "| Case ID | Family | Evaluator | Kind | Reason |", "|---|---|---|---|---|"]
+    for finding in sorted(findings, key=lambda f: (f.get("kind") != "threshold", str(f.get("caseId", "")))):
+        lines.append(f'| {_escape(finding.get("caseId"))} | {_escape(finding.get("family"))} | {_escape(finding.get("evaluator"))} | '
+                     f'{_escape(finding.get("kind"))} | {_escape(finding.get("reason"))} |')
+        for sample in finding.get("samples", []):
+            if sample.get("reason"):
+                lines.append(f'| {_escape(sample.get("rowId"))} | | | sample | {_escape(sample["reason"])} |')
+    lines += [
+        "", "## Run metadata", "",
+        "Raw statuses are retained for compatibility: run status combines independent track exits; "
+        "quality status prioritizes infrastructure failures over policy failures. The decision above "
+        "separates execution, acceptance, and integrity.", "",
+        "| Field | Value |", "|---|---|",
+        f'| Run status | {_escape(manifest.get("status"))} |',
+        f'| Quality status | {_escape(summary.get("status"))} |',
+        f'| Policy status | {_escape(summary.get("policyStatus"))} |',
+        f'| Policy hash | {_escape(decision["policy"].get("sha256"))} |',
+        f'| Cases | {_escape(summary.get("caseCount"))} |',
+        f'| Samples per case | {_escape(summary.get("samples"))} |',
+        f'| Evaluator deployment | {_escape(summary.get("evaluatorDeployment"))} |',
+        *[f'| Track {_escape(name)} | {_escape(track.get("status"))} |'
+          for name, track in sorted(manifest.get("tracks", {}).items())],
+        "", "## Source artifacts", "",
+        "- [Shared decision](quality/decision.json)",
+        "- [Summary](quality/summary.json)",
+        "- [Findings](quality/findings.json)",
+        "- [Run manifest](manifest.json)", "",
+    ]
     return "\n".join(lines)
 
 
 def write_quality_report(run_dir: Path, output: Path | None = None) -> Path:
-    resolved_run_dir = run_dir.resolve()
-    report_path = output.resolve() if output else resolved_run_dir / "REPORT.md"
+    run_dir = run_dir.resolve()
+    report_path = output.resolve() if output else run_dir / "REPORT.md"
+    if report_path.exists() and not (run_dir / "quality/decision.json").exists():
+        raise ValueError("preserve historical REPORT.md; supply a new --output path")
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
-        render_quality_report(resolved_run_dir),
-        encoding="utf-8",
-    )
+    report = render_quality_report(run_dir)
+    if report_path.parent != run_dir:
+        prefix = quote(os.path.relpath(run_dir, report_path.parent), safe="/")
+        report = report.replace("](quality/", f"]({prefix}/quality/")
+        report = report.replace("](manifest.json)", f"]({prefix}/manifest.json)")
+    report_path.write_text(report, encoding="utf-8")
     return report_path
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Generate a Markdown report from a quality evaluation run."
-    )
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dir", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--decision-output", type=Path, help="Export the shared legacy decision to a NEW file")
     args = parser.parse_args()
+    if args.decision_output:
+        with args.decision_output.open("x", encoding="utf-8") as stream:
+            json.dump(load_decision(args.run_dir), stream, indent=2, sort_keys=True)
     print(write_quality_report(args.run_dir, args.output))
 
 

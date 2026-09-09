@@ -80,6 +80,17 @@ def test_new_policy_rejects_above_eighty_percent_but_history_retains_it(tmp_path
     assert historical.thresholds("criteria-authoring")["generation_success"]["minPassRate"] == 1
 
 
+@pytest.mark.parametrize("field,value", [("minMeanScore", float("nan")), ("minPassRate", float("inf")), ("blocking", "false")])
+def test_invalid_policy_values_are_rejected(tmp_path, field, value):
+    source = Path(__file__).resolve().parents[2] / "evaluators/rubrics.yaml"
+    data = yaml.safe_load(source.read_text())
+    data["families"]["criteria-authoring"]["thresholds"]["generation_success"][field] = value
+    path = tmp_path / "invalid.yaml"
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(QualityConfigurationError):
+        load_quality_configuration(path)
+
+
 def test_quality_dataset_fallback_reads_manifest_files(
     tmp_path: Path,
 ) -> None:

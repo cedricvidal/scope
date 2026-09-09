@@ -18,3 +18,5 @@ class RunConfig:
     samples: int
     smoke: bool
     offline: bool = False
+    source_run: Path | None = None
+    regrade: tuple[str, ...] = ()

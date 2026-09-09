@@ -8,6 +8,7 @@ from statistics import fmean
 from typing import Any
 
 from .models import EvaluatorRunOutcome, MetricObservation
+from .decision import build_decision
 
 
 def strict_majority(votes: Sequence[bool]) -> bool:
@@ -123,6 +124,10 @@ def aggregate_quality(
     family_thresholds: Mapping[str, Mapping[str, Mapping[str, Any]]],
     azure_outcomes: Sequence[EvaluatorRunOutcome] = (),
     model: str | None = None,
+    coverage: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
+    execution: str = "completed",
+    policy: Mapping[str, Any] | None = None,
+    pass_rate_cap: float | None = 0.8,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
     case_results = _case_results(observations)
     by_family = _dimension_aggregates(case_results, ("family", "evaluator"))
@@ -186,68 +191,32 @@ def aggregate_quality(
                     }
                 )
 
-    for aggregate in by_family:
-        family = str(aggregate["family"])
-        evaluator = str(aggregate["evaluator"])
-        threshold = family_thresholds.get(family, {}).get(evaluator)
-        if threshold is None:
-            continue
-        blocking = bool(threshold.get("blocking", True))
-        violations: list[str] = []
-        pass_rate = aggregate["passRate"]
-        minimum_pass_rate = threshold.get("minPassRate")
-        if (
-            minimum_pass_rate is not None
-            and pass_rate is not None
-            and pass_rate < float(minimum_pass_rate)
-        ):
-            violations.append(
-                f"pass rate {pass_rate:.3f} is below {float(minimum_pass_rate):.3f}"
-            )
-        mean_score = aggregate["meanScore"]
-        minimum_mean_score = threshold.get("minMeanScore")
-        if (
-            minimum_mean_score is not None
-            and mean_score is not None
-            and mean_score < float(minimum_mean_score)
-        ):
-            violations.append(
-                f"mean score {mean_score:.3f} is below {float(minimum_mean_score):.3f}"
-            )
-        baseline_pass_rate = threshold.get("baselinePassRate")
-        max_regression = threshold.get("maxRegression")
-        if (
-            baseline_pass_rate is not None
-            and max_regression is not None
-            and pass_rate is not None
-            and pass_rate
-            < float(baseline_pass_rate) - float(max_regression)
-        ):
-            violations.append(
-                f"pass rate {pass_rate:.3f} regressed more than "
-                f"{float(max_regression):.3f} from baseline "
-                f"{float(baseline_pass_rate):.3f}"
-            )
-        if violations:
+    decision = build_decision(
+        case_results, family_thresholds, coverage=coverage, execution=execution,
+        policy=policy, pass_rate_cap=pass_rate_cap,
+    )
+    for gate in decision["gates"]:
+        if gate["violations"]:
+            blocking = gate["classification"] == "blocking"
             policy_failed = policy_failed or blocking
             findings.append(
                 {
                     "kind": "threshold",
                     "severity": "failure" if blocking else "warning",
-                    "family": family,
+                    "family": gate["family"],
                     "caseId": None,
                     "variant": None,
-                    "evaluator": evaluator,
+                    "evaluator": gate["evaluator"],
                     "observed": {
-                        "passRate": pass_rate,
-                        "meanScore": mean_score,
+                        "passRate": gate["passRate"],
+                        "meanScore": gate["meanScore"],
                     },
-                    "threshold": dict(threshold),
-                    "reason": "; ".join(violations),
+                    "threshold": gate["requirements"],
+                    "reason": "; ".join(gate["violations"]),
                 }
             )
 
-    if infrastructure_failed:
+    if infrastructure_failed or decision["totals"]["blockingUnresolved"] or execution != "completed":
         status = "infrastructure-failed"
     elif policy_failed:
         status = "failed"
@@ -256,6 +225,7 @@ def aggregate_quality(
 
     summary = {
         "status": status,
+        "decision": decision,
         "model": model,
         "caseResults": case_results,
         "aggregates": {

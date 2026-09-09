@@ -20,11 +20,39 @@ from .azure import (
     EvaluateCallable,
     load_azure_runtime,
     run_azure_evaluations,
+    applicable_rows,
 )
 from .configuration import QualityConfiguration, load_quality_configuration
 from .data import normalize_rows, read_jsonl, read_quality_cases, write_jsonl
 from .deterministic import evaluate_deterministic
 from .models import EvaluatorRunOutcome
+from .decision import build_decision
+
+
+def gate_coverage(rows, configuration, outcomes=()):
+    coverage = {}
+    outcomes_by_key = {(o.family, o.evaluator): o for o in outcomes}
+    for family in configuration.families:
+        family_rows = [r for r in rows if r.family == family]
+        family_ids = {r.case_id for r in family_rows}
+        specs = {s["name"]: s for s in configuration.evaluator_specs(family)}
+        for evaluator in configuration.thresholds(family):
+            spec = specs.get(evaluator)
+            selected = applicable_rows(family_rows, spec) if spec else family_rows
+            applicable_ids = {r.case_id for r in selected}
+            optional = evaluator == "suggested_feature_novelty"
+            # Missing recorded tool history cannot be called an intentional skip.
+            missing = not optional and len(selected) != len(family_rows)
+            outcome = outcomes_by_key.get((family, evaluator))
+            coverage[(family, evaluator)] = {
+                "applicable": len(applicable_ids) if optional else len(family_ids),
+                "applicableCaseIds": sorted(applicable_ids if optional else family_ids),
+                "rowIds": sorted(r.row_id for r in (selected if optional else family_rows)),
+                "skipped": len(family_ids - applicable_ids) if optional else 0,
+                "notApplicable": not family_rows or optional and not selected,
+                "unresolved": missing or bool(outcome and outcome.status == "infrastructure-failed"),
+            }
+    return coverage
 
 GeneratorCallable = Callable[[Path, Path, int, bool], None]
 
@@ -192,6 +220,13 @@ def _write_early_failure(
         "rubricVersion": configuration.version if configuration else None,
         "rubricSha256": configuration.sha256 if configuration else None,
     }
+    decision = build_decision(
+        [], {f: configuration.thresholds(f) for f in configuration.families} if configuration else {},
+        execution="incomplete", policy={"known": configuration is not None,
+                                       "sha256": configuration.sha256 if configuration else None},
+    )
+    summary["decision"] = decision
+    write_json(track_dir / "decision.json", decision)
     write_json(track_dir / "findings.json", {"findings": [finding]})
     write_json(track_dir / "summary.json", summary)
     return summary
@@ -205,6 +240,10 @@ def run_quality_engine(
     evaluate_callable: EvaluateCallable | None = None,
     azure_runtime: AzureRuntime | None = None,
 ) -> dict[str, Any]:
+    if config.source_run is not None:
+        from .replay import run_source_replay
+
+        return run_source_replay(config, track_dir, evaluate_callable=evaluate_callable, azure_runtime=azure_runtime)
     rubric_path = config.package_root / "evaluators" / "rubrics.yaml"
     try:
         quality_config = load_quality_configuration(
@@ -214,6 +253,8 @@ def run_quality_engine(
         return _write_early_failure(
             track_dir, phase="configuration", error=error
         )
+    track_dir.mkdir(parents=True, exist_ok=True)
+    (track_dir / "rubric-snapshot.yaml").write_bytes(rubric_path.read_bytes())
 
     try:
         cases = _select_cases(
@@ -325,10 +366,15 @@ def run_quality_engine(
         family_thresholds=thresholds,
         azure_outcomes=azure_outcomes,
         model=model,
+        coverage=gate_coverage(normalized_rows, quality_config, azure_outcomes),
+        policy={"known": True, "version": quality_config.defaults.get("policyVersion"),
+                "sha256": quality_config.sha256},
     )
     policy_status = status
-    if config.offline and status == "failed":
+    if config.offline:
         status = "succeeded"
+        summary["decision"]["acceptance"] = "not-evaluated"
+        summary["decision"]["caveats"].append("Offline fake generation is not a production quality assessment.")
     summary.update(
         {
             "status": status,
@@ -364,6 +410,7 @@ def run_quality_engine(
     )
     write_json(track_dir / "findings.json", {"findings": findings})
     write_json(track_dir / "summary.json", summary)
+    write_json(track_dir / "decision.json", summary["decision"])
     return summary
 
 

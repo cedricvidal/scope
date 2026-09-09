@@ -26,6 +26,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--samples", type=int, default=3)
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--source-run", type=Path, help="Reuse this run's exact cases and responses; never generate")
+    parser.add_argument("--regrade", action="append", default=[], metavar="FAMILY/EVALUATOR",
+                        help="Explicitly rerun an affected grader; repeat for multiple graders")
     parser.add_argument(
         "--offline",
         action="store_true",
@@ -98,6 +101,10 @@ async def run() -> int:
     args = parse_args()
     if args.samples < 1:
         raise ValueError("--samples must be at least 1")
+    if args.source_run and (args.mode != "quality" or args.smoke):
+        raise ValueError("--source-run requires --mode quality and cannot use --smoke")
+    if args.regrade and (not args.source_run or args.offline):
+        raise ValueError("--regrade requires --source-run without --offline")
 
     package_root = Path(__file__).resolve().parents[2]
     repo_root = package_root.parents[1]
@@ -114,6 +121,8 @@ async def run() -> int:
         samples=args.samples,
         smoke=args.smoke,
         offline=args.offline,
+        source_run=args.source_run.resolve() if args.source_run else None,
+        regrade=tuple(args.regrade),
     )
     manifest: dict[str, Any] = {
         "schemaVersion": 1,

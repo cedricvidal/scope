@@ -82,13 +82,63 @@ returns success when the framework itself completes.
 
 The Azure AI Evaluation SDK does not provide a native Markdown report
 exporter. The package report command renders `REPORT.md` from the persisted
-manifest, summary, aggregate, and finding artifacts. Reports remain inside the
+shared `quality/decision.json`, summary, and finding artifacts. Reports lead
+with execution, acceptance, and evaluator integrity, then blocking gate
+violations—not an unweighted average. Reports remain inside the
 ignored run directory unless `--output` explicitly selects another path.
+Existing historical reports cannot be overwritten: provide a new `--output`.
+For a legacy canvas/client, `--decision-output NEW_PATH` exports the same
+hash-verified historical decision without changing source artifacts.
 
 The unified runner accepts `--samples N`, `--smoke`, `--results-dir PATH`,
 `--dataset PATH`, `--surface-profiles PATH`, and `--red-team-config PATH`.
 Surface selection and remote-resource preservation use the environment
 variables documented below rather than CLI flags.
+
+### Replay original responses without regeneration
+
+Run these commands from this package directory. Always use explicit absolute
+source/new-run paths rather than selecting the latest directory.
+
+```bash
+# No credentials or paid calls: reparse native output and list affected graders.
+uv run python -m static_prompt_evals.cli --mode quality \
+  --source-run /absolute/path/to/results/SOURCE_RUN --offline
+
+# Review NEW_RUN/quality/replay-plan.json, then explicitly select affected graders.
+# This command may make paid Azure calls, but makes ZERO generator calls.
+uv run python -m static_prompt_evals.cli --mode quality \
+  --source-run /absolute/path/to/results/SOURCE_RUN \
+  --regrade parent-dependency-suggestion/relevance \
+  --regrade parent-dependency-suggestion/dependency_direction
+
+uv run python -m static_prompt_evals.report /absolute/path/to/results/NEW_RUN
+```
+
+Selections are repeatable, exact `family/evaluator` keys. Unselected affected
+graders remain unresolved; no automatic scope growth occurs. Native output is
+reused only when mapped inputs and resolved grader specifications match and
+the source configuration hash can be verified. Regrading requires the original
+evaluator deployment and SDK version. All original case IDs, sample indices,
+inputs, responses, and model metadata are retained. The current dataset and
+sample flags do not change source selection. `--source-run` is quality-only and
+cannot combine with `--smoke`.
+
+Each replay creates a new ignored run. `replay-plan.json` records affected
+graders, per-grader provenance and hashes; `source-integrity.json` verifies
+the original run stayed unchanged and zero generator calls occurred;
+`comparison.json` distinguishes policy-only changes from parser corrections
+and newly graded outcomes. Unknown historical generator revisions/models and
+missing tool traces remain explicit limitations, not invented coverage.
+The plan also supplies `regradeArgv` and shell-quoted `regradeCommand` for
+reviewed execution of the complete affected set.
+
+Required aggregate pass-rate floors cannot exceed 80%; lower floors remain
+unchanged. Individual schema/security checks and minimum mean scores are still
+exact. For 25 cases, 20 passing meets 80%, whereas 19 fails. Native malformed
+labels/scores are invalid assessments, not failed prompt votes. Old runs use
+their original hash-matched policy, including former 100% floors. See the
+architecture guide for the full decision schema and incomplete-coverage math.
 
 The harvester defaults to the integration base URL, `Default Project`, dataset
 version `v1`, seed `scope-static-prompts-v1`, and this package's `datasets/`
@@ -209,6 +259,13 @@ results/<run-id>/
         <evaluator>.json
     findings.json
     summary.json
+    decision.json
+    rubric-snapshot.yaml
+    # Source-replay runs also include:
+    replay-plan.json
+    source-integrity.json
+    source-rubric-snapshot.yaml
+    comparison.json
   red-team/
     summary.json
     <surface-id>/
@@ -226,7 +283,7 @@ For focused quality-engine validation:
 
 ```bash
 cd evaluations/static-prompts
-uv run pytest tests/quality -q
+uv run pytest tests/quality tests/test_report.py tests/test_cli.py --basetemp=results/test-work -q
 uv run python -m static_prompt_evals.cli --mode quality
 ```
 
