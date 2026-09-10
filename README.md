@@ -11,7 +11,6 @@
   </p>
 
   <p>
-    <a href="https://github.com/growth-ecosystems/scope-core/actions/workflows/ci.yml"><img src="https://github.com/growth-ecosystems/scope-core/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
     <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22-339933?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js 22" /></a>
     <a href="https://pnpm.io/"><img src="https://img.shields.io/badge/pnpm-10.29.1-F69220?style=flat-square&amp;logo=pnpm&amp;logoColor=white" alt="pnpm 10.29.1" /></a>
     <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript" /></a>

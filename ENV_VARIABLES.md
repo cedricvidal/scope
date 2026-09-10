@@ -10,6 +10,33 @@ The sophisticated criteria system can be configured via environment variables in
 
 Base URL of the Scope API used by all CLI commands. Override this to point the CLI at a remote or Docker-hosted API instance.
 
+## Agent Target Validation
+
+### SCOPE_STRICT_AGENT_CAPABILITIES
+**Default:** `false`
+**Type:** boolean (`true` to enable)
+
+When enabled on the API, run and profile writes reject requested reasoning
+effort, MCP servers, skills, or extensions unless the selected registry agent
+explicitly advertises the corresponding capability. The exact keys are
+`supportsReasoningEffort`, `supportsMcpServers`, `supportsSkills`, and
+`supportsExtensions`; omitted keys mean unsupported.
+
+This is a temporary rollout switch for capability compatibility only. Unknown,
+deleted, unavailable, versionless, inactive-version, and missing-queue targets
+are rejected regardless of this setting.
+
+### SCOPE_AGENT_VERSION
+**Default:** worker-specific installed agent version
+**Type:** non-empty string
+
+Worker runtime identity override. Either this value or
+`WorkerProcessor.getAgentVersion()` must provide the exact active registry
+`agentVersion` advertised for that deployment; queue processor startup fails if
+neither does. Queue consumers use this identity together with `WORKER_NAME` to
+defer messages for another target when multiple workers or versions share a
+queue. Local Compose sets it to the checked-in development manifest version.
+
 ## LLM Configuration (Portal AI Features)
 
 The portal's AI features — criteria prompt generation, prompt-feature
@@ -55,8 +82,8 @@ verify which provider served a given AI call:
 [llm-token] inference provider: source=azure-ai-foundry via=azure-ai-foundry-env endpoint=https://<resource>.services.ai.azure.com/models model=gpt-4.1-mini
 ```
 
-> **Local dev with Docker Compose:** the three Foundry-related variables
-> (`AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_AI_INFERENCE_API_KEY`, `LLM_MODEL`)
+> **Local dev with Docker Compose:** the Foundry-related variables
+> (`AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_AI_INFERENCE_API_KEY`, and `LLM_MODEL`)
 > must live in **`.env.local`** at the repo root, **not** `.env`. The `.env`
 > file is auto-generated per worktree by `worktree-env` and will overwrite
 > manual edits. `.env.local` is gitignored and is loaded into the `api`
@@ -134,7 +161,11 @@ the api service's `env_file`.
 
 Model name / deployment name used by both backends. For Foundry, this must
 match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
-`gpt-4o`, `gpt-4.1-mini`. Put in `.env.local` (see note above).
+`gpt-4o`, `gpt-4.1-mini`, `gpt-5.4-mini`. Put in `.env.local` (see note above).
+The API discovers supported token-limit and sampling parameters from structured
+inference errors at runtime. Learned compatibility is cached in each API
+process by endpoint and deployment name. It is relearned after a process
+restart or when Azure rejects a previously accepted request shape.
 
 ## Prompt Evaluation Configuration
 
@@ -620,6 +651,21 @@ Where MSAL persists its token cache.
 
 Base URL for the public Scope docs site that in-app help tooltips link to. Unlike `VITE_*` flags (which Vite inlines into the bundle at build time), this is read at **container start**: the portal's entrypoint regenerates `/config.js` from this variable and the frontend reads it via `window.__SCOPE_CONFIG__.docsBaseUrl`. This means a single built image can be promoted across environments and still point at the correct docs deployment without a rebuild — set or override it via the portal's Kubernetes Deployment env. In local Vite development the static `apps/portal/public/config.js` provides the default.
 
+## Docker Build Configuration
+
+### NPM_REGISTRY
+**Default:** `https://registry.npmjs.org/`
+**Type:** URL string
+**Scope:** Node image builds
+
+Registry used to install pnpm and workspace dependencies in every Node Docker
+image. Docker Compose forwards this value to all Node service builds, including
+services behind optional profiles. For example:
+
+```bash
+NPM_REGISTRY=https://packagefeedproxy.microsoft.io/npm/ docker compose build api
+```
+
 ## Setting Variables
 
 ### Docker Compose
@@ -701,6 +747,29 @@ Git commit hash embedded in reporter metadata. Automatically set during CI/CD bu
 **Type:** integer (milliseconds)
 
 How often the request scheduler polls MongoDB for pending requests to dispatch to coder workers. Applies to all worker types. Lower values reduce queue latency; higher values save RUs.
+
+The scheduler refreshes agents and versions from the registry on every poll.
+There is no `SCHEDULER_WORKER_TYPES` allowlist.
+
+### SCHEDULER_QUEUE_RECONCILIATION_INTERVAL_MS
+**Default:** `30000`
+**Type:** positive integer (milliseconds, minimum 1000)
+
+How often the scheduler aggregates queued requests in MongoDB to detect stale
+queue assignments and refresh its queued-request counts. The scheduler caches
+those counts between reconciliations and increments them when it dispatches, so
+the two-second dispatch loop does not repeat the RU-consuming aggregate.
+
+### SCHEDULER_TARGET_QUEUE_DEPTH
+**Default:** `5`
+**Type:** positive integer
+
+Maximum queued-request depth for each exact worker/version target discovered
+from active `AgentVersion.queueName` records. The scheduler never derives a
+queue name from the worker ID. Each active target must own a distinct physical
+queue; a newer same-agent registration takes over its queue, registry writes reject
+cross-agent queue reuse, and the scheduler fails legacy
+conflicts closed.
 
 ### SCHEDULER_PP_POLL_INTERVAL_MS
 **Default:** `30000`

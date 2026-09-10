@@ -380,21 +380,50 @@ which wraps the per-gate `runMultiTurnLoop`. See the full
 
 ## Queue Pattern
 
-Each worker type has a dedicated Azure Storage Queue. The API resolves the target queue via **version-aware routing**: when a run is submitted, the API looks up the selected (or latest active) agent version and uses its registered `queueName` to route the message.
+The agent registry is the sole source of truth for runnable workers. An agent is
+runnable only when it is not deleted, has `available: true`, and has an active
+version with a non-empty `AgentVersion.queueName`. Display names, capabilities,
+versions, and queue names all come from the same registry document; platform
+services do not maintain worker allowlists or derive queue names.
 
 ```
-AgentVersion.queueName  →  Azure Storage Queue  →  Worker pods (0→N via KEDA)
+Agent registry → pending request → scheduler → AgentVersion.queueName → worker pods
 ```
 
-Currently all versions of an agent share a single queue (e.g., `queue-coder-acp-copilot`). When multi-version deployments are introduced, each version will have its own queue, and KEDA will scale each version independently.
+Multiple agents or versions may advertise the same queue. The scheduler
+deduplicates that queue and claims requests only for the exact registered
+`workerType` + `agentVersion` targets mapped to it.
+
+Capabilities are explicit opt-ins. The supported keys are
+`supportsReasoningEffort`, `supportsMcpServers`, `supportsSkills`, and
+`supportsExtensions`; an omitted or false key means unsupported.
+`SCOPE_STRICT_AGENT_CAPABILITIES=false` temporarily permits capability-bearing
+requests for agents that have not opted in, but agent existence, deletion,
+availability, active-version, and queue validation are always enforced.
+`GET /api/v1/version` exposes the current mode as
+`strictAgentCapabilities`; Portal controls remain in compatibility mode unless
+that property is `true`.
+
+Profile-pinned `agentVersion` values take precedence over request-level version
+values and must still be active with a non-empty advertised queue. Legacy
+agent-version records may omit `queueName`; registry readers treat missing,
+blank, and whitespace-only values as unavailable rather than throwing. New
+registrations continue to require a non-empty queue.
 
 ### Run submission flow
 
 1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**, a **codebase** selection, and/or a per-gate **`gates`** configuration (see [Gates](#gates--multi-phase-evaluation-pipeline))
-2. API resolves `agentVersion`: explicit selection → validate active; omitted → latest active by `createdAt`
+2. API rejects unknown, deleted, unavailable, versionless, or explicitly inactive targets and resolves `agentVersion`: explicit selection → validate active; omitted → latest active by `createdAt`
 3. API resolves `model`: explicit → validate against `supportedModels`; omitted → `defaultModel`
-4. API looks up `AgentVersion.queueName` and routes message to that queue
-5. `agentVersion` and `model` are persisted on the `RequestDocument`
+4. API validates requested reasoning effort, MCP servers, skills, and extensions when strict capability enforcement is enabled
+5. `workerType`, `agentVersion`, and `model` are persisted on the pending `RequestDocument`
+6. On every dispatch cycle, the scheduler refreshes the registry and sends the request only to the selected version's advertised queue
+
+Profiles, profile variations, bulk resubmission, and retries use the same target
+resolver. Retries preserve and revalidate the original exact version; bulk
+resubmission resolves a currently active version unless a version is explicitly
+pinned. Invalid historical pending targets stay pending and produce scheduler
+telemetry rather than being sent to a guessed queue.
 
 When a codebase is selected, the API resolves the submitted spec (`codebaseRevisionId`, `{slug}@r{N}`, or bare `{slug}`) before enqueueing. Bare archive slugs resolve to the latest existing revision; bare Git slugs resolve the default branch at submit time and create a new immutable revision. The resolved revision UUID is stored as `RequestDocument.codebaseRevisionId`, and workers seed the workspace from that revision after setup and before skills extraction.
 
@@ -554,6 +583,16 @@ The Portal mirrors the API's fail-fast model: it holds a **selected project** (n
 - **`components/Layout.tsx`** hides project-scoped sidebar entries until a project is in use: with no selection (`hasProject === false`) only the global entries render (Projects, the Platform group of Agents/Models/Secrets, and the footer), while the New Run CTA and the Activity / Library / Resources / Dev groups appear once a project is selected. This keeps the first-run sidebar from advertising links that would only hit the `ProjectGate`. Scoped-vs-global mirrors `App.tsx` (`<ProjectGate>`-wrapped routes are scoped). The **Scope logo** doubles as home: it is a plain link to `/`, so clicking it lands on `HomeRoute`, which does the de-scoping — no click-handler side effect and no open-in-new-tab special-casing.
 - **`pages/Projects.tsx`** (`/projects`, unscoped) manages projects themselves — create / rename / describe / soft-delete. Delete always succeeds (**204**), even for a non-empty project, because it is a reversible soft-delete. A **Show deleted** toggle lists soft-deleted projects (`GET /projects?includeDeleted=true`) and offers a **Restore** action per row (`POST /projects/:id/restore`); deleted projects are not selectable until restored. The same affordances exist in the CLI (`project list --include-deleted`, `project restore <id>`).
 
+### User disclosures
+
+The shared `components/VersionFooter.tsx` tells users that Scope is an AI
+evaluation platform and that they should not attribute human qualities or
+intent to it. The notice also warns that AI-generated content may be inaccurate
+and asks users to review and edit generated output. The footer links to the
+public data collection and privacy document so users can understand what Scope
+handles and why. `components/Layout.tsx` renders this footer on both standard
+and full-bleed routes so the disclosures remain visible throughout the Portal.
+
 ### Hover-preview + navigate badges
 
 Criteria and task prompts appear across many surfaces (Run Detail, Runs list and its
@@ -565,6 +604,7 @@ reusable badge components provide a consistent **hover-to-preview + click-to-nav
 |-----------|--------|----------|---------------|
 | `components/CriteriaBadge.tsx` | Criterion | `/criteria/:id` | Criterion prompt snippet |
 | `components/TaskPromptBadge.tsx` | Task prompt (any type) | `/task-prompts/:id` | Type label, text snippet, list of detected features, created date, **Open details** button |
+| `components/AgentBadge.tsx` | Coding agent | `/agents/:id` | Registry name, internal ID, deleted state, version, **View agent** button |
 
 Both follow the same rules:
 
@@ -587,6 +627,13 @@ Both follow the same rules:
   popup is interactive (hoverable feature badges + a clickable button), its `TooltipContent` is
   wrapped in a Radix `Tooltip.Portal` with `collisionPadding` so it can't be clipped by an
   overflow container (e.g. a table cell) — the same portaling `ShortId` uses.
+- **Agent identity presentation.** `workerType` and `agentId` are stable routing/storage keys, not
+  user-facing labels. Outside the Agents list and Agent detail technical views, the Portal renders
+  the registry `name` through `AgentBadge`; the raw ID is available only in its hover content and
+  route. Filter and selector triggers stay non-linking so selection behavior is preserved, while
+  the hover action still opens Agent detail. A shared React Query catalog request includes
+  soft-deleted records so historical runs keep their saved name and link to a read-only detail
+  view. Missing records render **Unknown agent** without a dead link.
 
 A sibling affordance, `components/ShortId.tsx`, applies the same hoverable-tooltip pattern to
 **identifiers**: the Runs list renders run and submission IDs truncated to 8 chars

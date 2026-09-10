@@ -78,6 +78,13 @@ The workspace is mixed-language by design:
 - `evaluation-manifest.yaml` is the machine-checked inventory joining every
   family or surface to its adapter, cases/profile, assertions, and rubric.
 
+The API's criterion, task-prompt, and prompt-feature callers use the same pure
+request builders exported to the evaluation adapters. Production sends those
+messages and generation settings through `postAdaptiveChatCompletion`, which
+negotiates endpoint/model token-limit and temperature compatibility. Keep that
+transport step outside the builders so evaluation composition stays pure and
+production retains adaptive parameter handling.
+
 ```mermaid
 flowchart TD
     A[Secure developer bootstrap] --> B[Shared schemas, manifests,<br/>package and command contracts]

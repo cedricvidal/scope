@@ -11,12 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { TaskPromptBadge } from "@/components/TaskPromptBadge";
+import { AgentBadge, agentDisplayName, useAgentCatalog } from "@/components/AgentBadge";
 import { GATE_METADATA } from "@/lib/gates";
 import { formatDate, formatId, formatDuration, truncate } from "@/lib/utils";
 
 export function RunPreviewPanel() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { agentById } = useAgentCatalog();
 
   const { data: run, isLoading, error } = useQuery({
     queryKey: ["run", id],
@@ -63,7 +65,11 @@ export function RunPreviewPanel() {
   return (
     <DetailPanel
       title={<span className="truncate font-mono text-sm">{formatId(run._id)}</span>}
-      subtitle={run.scenario?.task ? truncate(run.scenario.task, 80) : run.workerType}
+      subtitle={
+        run.scenario?.task
+          ? truncate(run.scenario.task, 80)
+          : agentDisplayName(run.workerType, agentById)
+      }
       onClose={closePanel}
       headerActions={
         <div className="flex justify-end gap-2">
@@ -170,7 +176,9 @@ export function RunPreviewPanel() {
             <dl className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <dt className="text-xs text-muted-foreground">Worker</dt>
-                <dd className="mt-0.5 font-mono text-xs">{run.workerType}</dd>
+                <dd className="mt-0.5 text-xs">
+                  <AgentBadge agentId={run.workerType} version={run.agentVersion} />
+                </dd>
               </div>
               {run.model && (
                 <div>

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { isUnexpected } from "@azure-rest/ai-inference";
+import { postAdaptiveChatCompletion } from "./adaptive-chat-completions.js";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
 // ---------------------------------------------------------------------------
@@ -149,7 +150,11 @@ export async function generateTaskPrompt(
 ): Promise<GenerateTaskPromptResult> {
   const { description, existingPrompt } = opts;
 
-  const { client: llm, model: foundryModel } = await acquireInferenceClient();
+  const {
+    client: llm,
+    endpoint,
+    model: foundryModel,
+  } = await acquireInferenceClient();
 
   // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
   const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
@@ -160,8 +165,13 @@ export async function generateTaskPrompt(
     modelName,
   );
 
-  const response = await llm.path("/chat/completions").post({
-    body: request,
+  const response = await postAdaptiveChatCompletion({
+    endpoint,
+    model: request.model,
+    messages: request.messages,
+    temperature: request.temperature,
+    maxTokens: request.max_tokens,
+    send: (body) => llm.path("/chat/completions").post({ body }),
   });
 
   if (isUnexpected(response)) {

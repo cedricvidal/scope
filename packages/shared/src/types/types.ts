@@ -218,7 +218,7 @@ export interface AgentVersion {
   gitCommit: string;                     // Short SHA of the build
   buildTime: string;                     // Build timestamp (e.g. "20260318T163740Z")
   imageTag: string;                      // Full image tag (same as workerVersion)
-  queueName: string;                     // Queue this version listens on
+  queueName?: string;                    // Queue this version listens on; legacy records may omit it
   status: "active" | "retired";
   createdAt: Date;
 }
@@ -226,6 +226,9 @@ export interface AgentVersion {
 // Capabilities declared by a coding agent (worker-level features)
 export interface AgentCapabilities {
   supportsReasoningEffort?: boolean;  // Whether the worker can pass reasoning effort to the underlying agent
+  supportsMcpServers?: boolean;       // Whether the worker can configure MCP servers
+  supportsSkills?: boolean;           // Whether the worker can consume installed agent skills
+  supportsExtensions?: boolean;       // Whether the worker can install VS Code extensions
 }
 
 // Coding agent definition stored in MongoDB
@@ -236,7 +239,7 @@ export interface CodingAgentDocument {
   modelProvider?: string;     // Model provider (e.g. "github-copilot", "anthropic") — used by scanners to discover agents
   supportedModels: string[];  // Empty array = model selection disabled
   defaultModel?: string;
-  available?: boolean;        // Whether this agent is available for new submissions (default: true)
+  available?: boolean;        // Only explicit true makes this agent available for new submissions
   capabilities?: AgentCapabilities;  // Worker-level capabilities
   versions?: AgentVersion[];  // Registered agent versions (embedded array)
   createdAt: Date;
@@ -368,6 +371,9 @@ export interface RunState {
   _id: string;                              // Unique per attempt
   attemptNumber: number;                    // 1, 2, 3…
   status: "pending" | "queued" | "processing" | "paused" | "done";
+  /** Physical queue used for the current dispatch claim. Cleared when the claim
+   * is rolled back or accepted for processing. */
+  queuedQueueName?: string;
   outcome?: "succeeded" | "failed" | "finished";
   result?: string;
   error?: string;
@@ -514,6 +520,9 @@ export interface SetupResult {
 // Worker processor interface - each worker implements this
 export interface WorkerProcessor {
   readonly workerName: string;
+  /** Optional explicit skill layout. Omit to install only to the universal
+   * `.agents/skills` location instead of inferring behavior from the worker ID. */
+  readonly skillAgentType?: "copilot" | "claude-code";
   /** The workspace directory used by this worker for the current run. When set,
    *  the queue processor uses this instead of the WORKSPACE_PATH env var. */
   readonly workspacePath?: string;

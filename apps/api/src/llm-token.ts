@@ -20,7 +20,10 @@
  */
 import ModelClient, { type ModelClient as ModelClientType } from "@azure-rest/ai-inference";
 import { AzureKeyCredential } from "@azure/core-auth";
-import { TokenManagerClient, parseAzureAiFoundrySecret } from "shared";
+import {
+  TokenManagerClient,
+  parseAzureAiFoundrySecret,
+} from "shared";
 
 const GITHUB_MODELS_ENDPOINT = "https://models.inference.ai.azure.com";
 
@@ -223,11 +226,13 @@ export async function acquireInferenceClient(): Promise<InferenceClientHandle> {
   if (isFoundryConfigured()) {
     const endpoint = normalizeFoundryEndpoint(process.env.AZURE_AI_INFERENCE_ENDPOINT!);
     const apiKey = process.env.AZURE_AI_INFERENCE_API_KEY!;
+    const model = process.env.LLM_MODEL || "gpt-4.1";
     const handle: InferenceClientHandle = {
       client: ModelClient(endpoint, new AzureKeyCredential(apiKey)),
       endpoint,
       source: "azure-ai-foundry",
       via: "azure-ai-foundry-env",
+      model,
     };
     logInferenceAcquired(handle);
     return handle;
@@ -236,12 +241,13 @@ export async function acquireInferenceClient(): Promise<InferenceClientHandle> {
   // 2. Azure AI Foundry via the Token Manager — preferred in production.
   const tmFoundry = await tryAcquireFoundryFromTokenManager();
   if (tmFoundry) {
+    const model = tmFoundry.model || process.env.LLM_MODEL || "gpt-4.1";
     const handle: InferenceClientHandle = {
       client: ModelClient(tmFoundry.endpoint, new AzureKeyCredential(tmFoundry.apiKey)),
       endpoint: tmFoundry.endpoint,
       source: "azure-ai-foundry",
       via: "azure-ai-foundry-token-manager",
-      model: tmFoundry.model,
+      model,
     };
     logInferenceAcquired(handle);
     return handle;

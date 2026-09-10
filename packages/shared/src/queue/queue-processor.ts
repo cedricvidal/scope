@@ -46,11 +46,21 @@ import { seedCodebaseToWorkspace } from "../codebases/codebase-seeder.js";
  */
 export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocument> {
   private processor: WorkerProcessor;
+  private readonly runtimeAgentVersion: string;
   private postProcessorQueueClient: QueueClient | null = null;
 
   constructor(config: QueueProcessorConfig, processor: WorkerProcessor) {
     super(config, processor.workerName);
     this.processor = processor;
+    this.runtimeAgentVersion =
+      process.env.SCOPE_AGENT_VERSION?.trim() ||
+      processor.getAgentVersion?.()?.trim() ||
+      "";
+    if (!this.runtimeAgentVersion) {
+      throw new Error(
+        `Worker ${processor.workerName} must provide SCOPE_AGENT_VERSION or getAgentVersion()`,
+      );
+    }
 
     // Create post-processor queue client if configured (event-driven dispatch)
     if (config.postProcessorQueueName) {
@@ -103,12 +113,9 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         arch: os.arch(),
       },
     };
-    const agentVersion = this.processor.getAgentVersion?.();
-    if (agentVersion) {
-      const gitCommit = process.env.GIT_COMMIT || "unknown";
-      const buildTime = process.env.BUILD_TIME || "unknown";
-      fields.workerVersion = `${agentVersion}-${buildTime}-${gitCommit}`;
-    }
+    const gitCommit = process.env.GIT_COMMIT || "unknown";
+    const buildTime = process.env.BUILD_TIME || "unknown";
+    fields.workerVersion = `${this.runtimeAgentVersion}-${buildTime}-${gitCommit}`;
     return fields;
   }
 
@@ -119,6 +126,52 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     payload?: Record<string, unknown>,
   ): Promise<void> {
+    const runtimeAgentVersion = this.runtimeAgentVersion;
+    if (requestDoc.run?.status === "pending") {
+      console.log(
+        `[${this.workerName}] Discarding stale queue message for pending request ${requestDoc._id}`,
+      );
+      await log("info", "Stale queue message discarded after scheduler recovery");
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+    if (
+      requestDoc.run?.queuedQueueName &&
+      requestDoc.run.queuedQueueName !== this.config.queueName
+    ) {
+      console.log(
+        `[${this.workerName}] Discarding stale queue message for ${requestDoc._id} ` +
+          `(queued=${requestDoc.run.queuedQueueName}, current=${this.config.queueName})`,
+      );
+      await log("info", "Stale queue message discarded after queue reassignment", {
+        queuedQueueName: requestDoc.run.queuedQueueName,
+        currentQueueName: this.config.queueName,
+      });
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+    if (
+      requestDoc.workerType !== this.workerName ||
+      requestDoc.agentVersion !== runtimeAgentVersion
+    ) {
+      const popReceipt = heartbeat.stop();
+      console.warn(
+        `[${this.workerName}] Deferring request ${requestDoc._id} for a different target ` +
+          `(requested=${requestDoc.workerType}@${requestDoc.agentVersion ?? "(missing)"}, ` +
+          `runtime=${this.workerName}@${runtimeAgentVersion ?? "(missing)"})`,
+      );
+      await log("warn", "Queue message belongs to a different worker target", {
+        requestedWorkerType: requestDoc.workerType,
+        requestedAgentVersion: requestDoc.agentVersion,
+        runtimeWorkerType: this.workerName,
+        runtimeAgentVersion,
+      });
+      // Release immediately. Queue ownership rules prevent this in new registry
+      // state, but deferral preserves recoverability for legacy/racing records.
+      await this.safeDeferMessage(message.messageId, popReceipt, 0);
+      return;
+    }
+
     // Run-retry-attempts: verify the message targets the request's CURRENT run.
     // If a retry has since started a new attempt, this message is stale and
     // must be discarded so we don't clobber the new run's state.
@@ -284,8 +337,21 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
+
+    const startedAt = await this.claimRunForProcessing(requestDoc);
+    if (!startedAt) {
+      console.log(
+        `[${this.workerName}] Request ${requestDoc._id} could not be claimed — run state changed concurrently; discarding`,
+      );
+      await log("warn", "Run could not be claimed for processing because its state changed concurrently", {
+        runId: requestDoc.run?._id,
+      });
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+
     // Fail fast on a missing project scope. Every downstream resolver below
-    // (MCP servers, skills, secrets, and the report-generator) builds
+    // (MCP servers, skills, extensions, secrets, and the report-generator) builds
     // `?projectId=${encodeURIComponent(projectId)}` URLs, so an absent value
     // would `encodeURIComponent(undefined)` into the literal string
     // "undefined" and silently query a project named "undefined" — a confusing
@@ -365,11 +431,66 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
       const extensionClient = new ExtensionClient(apiBaseUrl);
       await log("info", `Resolving ${requestDoc.extensions.length} extension(s)`, { extensions: requestDoc.extensions });
-      extensionConfigs = await extensionClient.resolveExtensions(requestDoc.extensions);
+      extensionConfigs = await extensionClient.resolveExtensions(requestDoc.projectId, requestDoc.extensions);
       await log("info", `Resolved extensions: ${extensionConfigs.map(e => e.version ? `${e.id}@${e.version}` : e.id).join(", ")}`);
     }
 
-    await this.processMultiTurn(requestDoc, message, heartbeat, log, mcpServerConfigs, skillConfigs, extensionConfigs);
+    await this.processMultiTurn(requestDoc, message, heartbeat, log, startedAt, mcpServerConfigs, skillConfigs, extensionConfigs);
+  }
+
+  /**
+   * Atomically claim the exact queued run before resolving any fallible runtime
+   * resources. This both excludes duplicate execution and guarantees the base
+   * error path can terminalize setup failures against an owned processing run.
+   */
+  private async claimRunForProcessing(requestDoc: RequestDocument): Promise<Date | undefined> {
+    const runId = requestDoc.run?._id;
+    if (!runId) {
+      throw new Error(`Request ${requestDoc._id} has no current run id`);
+    }
+
+    const versionFields = this.getVersionFields();
+    const startedAt = new Date();
+    const result = await withRetry(() => this.collection.updateOne(
+      {
+        _id: requestDoc._id,
+        "run._id": runId,
+        "run.status": "queued",
+        "run.queuedQueueName": this.config.queueName,
+      } as any,
+      {
+        $set: {
+          "run.status": "processing",
+          "run.startedAt": startedAt,
+          "run.updatedAt": startedAt,
+          "run.worker": {
+            instanceId: this.instanceId,
+            ...(this.podName ? { podName: this.podName } : {}),
+          },
+          "run.turns": [],
+          gateSummaries: [],
+          "run.workerVersion": versionFields.workerVersion,
+          "run.os": versionFields.os,
+          updatedAt: startedAt,
+        },
+        $unset: { "run.queuedQueueName": "" },
+      } as any,
+    ));
+
+    if ((result.matchedCount ?? 0) === 0) {
+      return undefined;
+    }
+
+    requestDoc.run!.status = "processing";
+    requestDoc.run!.startedAt = startedAt;
+    requestDoc.run!.worker = {
+      instanceId: this.instanceId,
+      ...(this.podName ? { podName: this.podName } : {}),
+    };
+
+    // Seed liveness immediately so a fast redelivery observes this claim.
+    await this.heartbeatStore.set(runId, startedAt);
+    return startedAt;
   }
 
   /**
@@ -414,9 +535,6 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     if (!apiBaseUrl) return;
 
     const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
-    const agentType = requestDoc.workerType.includes("claude") ? "claude-code"
-      : requestDoc.workerType.includes("copilot") ? "copilot"
-      : undefined;
     const skillClient = new SkillClient(apiBaseUrl);
     const installedPaths = await extractSkillsToWorkspace({
       refs: requestDoc.skillRevisions,
@@ -424,7 +542,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       skillClient,
       projectId: requestDoc.projectId,
       workspacePath,
-      agentType,
+      agentType: this.processor.skillAgentType,
       log: async (msg) => { await log("info", msg); },
     });
     await log("info", `Installed ${installedPaths.length} skill path(s) to workspace`, { installedPaths });
@@ -506,6 +624,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     message: DequeuedMessageItem,
     heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
+    startedAt: Date,
     mcpServerConfigs?: McpServerConfig[],
     skillConfigs?: SkillConfig[],
     extensionConfigs?: ExtensionConfig[]
@@ -534,37 +653,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       throw new Error("JUDGE_SERVICE_URL is not configured but request has criteria to evaluate");
     }
 
-    // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution).
-    // Write to run.* (run-retry-attempts) plus a top-level updatedAt for index freshness.
-    // Stamp run.worker (instance identity) atomically with the status change
-    // so the redelivery handler in another worker can immediately see this
-    // pickup. The accompanying liveness heartbeat is written to Redis (not
-    // Mongo) immediately after to avoid recurring CosmosDB RU cost.
-    const versionFields = this.getVersionFields();
-    const now = new Date();
-    await withRetry(() => this.collection.updateOne(
-      { _id: requestId },
-      {
-        $set: {
-          "run.status": "processing",
-          "run.startedAt": now,
-          "run.updatedAt": now,
-          "run.worker": {
-            instanceId: this.instanceId,
-            ...(this.podName ? { podName: this.podName } : {}),
-          },
-          "run.turns": [],
-          gateSummaries: [],
-          "run.workerVersion": versionFields.workerVersion,
-          "run.os": versionFields.os,
-          updatedAt: now,
-        },
-      }
-    ));
-    // Seed the Redis liveness heartbeat right after pickup so a redelivery
-    // arriving immediately afterwards sees a fresh beat instead of falling
-    // through to the missing-heartbeat guard.
-    await this.heartbeatStore.set(requestDoc.run!._id, now);
+    const now = startedAt;
 
     // Subscribe to instant cancel notifications via Redis Pub/Sub.
     // If a cancel signal arrives, exit immediately — the run is already

@@ -555,14 +555,18 @@ export const api = {
 
   // ─── Agents ─────────────────────────────────────────────────────────────────
 
-  /** List all coding agents */
-  listAgents: (): Promise<CodingAgent[]> => {
-    return request("/agents");
+  /** List coding agents, optionally including soft-deleted historical records. */
+  listAgents: (options?: { includeDeleted?: boolean }): Promise<CodingAgent[]> => {
+    const params = new URLSearchParams();
+    if (options?.includeDeleted) params.set("includeDeleted", "true");
+    const query = params.size > 0 ? `?${params.toString()}` : "";
+    return request(`/agents${query}`);
   },
 
-  /** Get a single coding agent by ID */
-  getAgent: (id: string): Promise<CodingAgent> => {
-    return request(`/agents/${encodeURIComponent(id)}`);
+  /** Get a single coding agent by ID, optionally including a soft-deleted record. */
+  getAgent: (id: string, options?: { includeDeleted?: boolean }): Promise<CodingAgent> => {
+    const query = options?.includeDeleted ? "?includeDeleted=true" : "";
+    return request(`/agents/${encodeURIComponent(id)}${query}`);
   },
 
   /** Update a coding agent */
@@ -794,7 +798,12 @@ export const api = {
   // ─── Version ───────────────────────────────────────────────────────────────
 
   /** Get API version information (commit hash and build time) */
-  getVersion: (): Promise<{ commit: string; buildTime: string; environment?: string }> => {
+  getVersion: (): Promise<{
+    commit: string;
+    buildTime: string;
+    environment?: string;
+    strictAgentCapabilities?: boolean;
+  }> => {
     return request("/version");
   },
 

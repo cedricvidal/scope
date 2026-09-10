@@ -5,3 +5,6 @@ modelProvider: anthropic
 available: true
 capabilities:
   supportsReasoningEffort: true
+  supportsMcpServers: true
+  supportsSkills: true
+  supportsExtensions: false

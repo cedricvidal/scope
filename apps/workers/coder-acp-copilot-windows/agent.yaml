@@ -5,3 +5,6 @@ modelProvider: github-copilot
 available: true
 capabilities:
   supportsReasoningEffort: true
+  supportsMcpServers: false
+  supportsSkills: true
+  supportsExtensions: false

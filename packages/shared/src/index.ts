@@ -21,10 +21,10 @@ export * from "./extensions/index.js";
 export * from "./projects/index.js";
 export * from "./agent-version.js";
 export * from "./resolve-agent-version.js";
+export * from "./resolve-agent-target.js";
 export * from "./devproxy/index.js";
 export * from "./har/index.js";
 export * from "./utils/index.js";
 export * from "./schemas/index.js";
 export * from "./cursor.js";
 export * from "./run-duration.js";
-

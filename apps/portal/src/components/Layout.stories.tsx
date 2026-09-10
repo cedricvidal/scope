@@ -23,6 +23,9 @@ export const Collapsed: Story = {
   play: async ({ canvas }) => {
     localStorage.removeItem("scope:layout:sidebar-expanded");
     await expect(canvas.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+    await expect(
+      canvas.getByText(/This is an AI evaluation platform\./),
+    ).toBeVisible();
   },
 };
 
@@ -53,4 +56,3 @@ export const NoProjectSelected: Story = {
     await expect(canvas.queryByRole("link", { name: "New Run" })).toBeNull();
   },
 };
-

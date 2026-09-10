@@ -49,7 +49,7 @@ run
   .option("-p, --persona <path>", "Path to persona YAML file (provides judge personality)")
   .option("-t, --traits <path>", "Path to traits.yaml (default: config/traits.yaml next to persona)")
   .option("-m, --message <message>", "Message/task to process (overrides scenario task)")
-  .option("-w, --worker <worker>", "Worker to use (coder-acp-claude-code, coder-acp-copilot)", "coder-acp-copilot")
+  .option("-w, --worker <worker>", "Registered worker ID (see `scope agent list`)")
   .option("-c, --criteria <criteria...>", "Evaluation criteria (overrides scenario criteria)")
   .option("--max-iterations <number>", "Max judge iterations for multi-turn mode", parseInt)
   .option("--model <model>", "Model to use for the coding agent")
@@ -178,9 +178,18 @@ run
       if (isVariationSubmit && command.getOptionValueSource("worker") === "cli") {
         console.warn(label("Warning:"), "--worker is ignored in variation mode; worker is derived per-variation from each profile's workerType.");
       }
-      const submitPath = isVariationSubmit
-        ? `/requests`
-        : `/requests?worker=${worker}`;
+      if (!isVariationSubmit && !profileId && !worker) {
+        console.error(
+          errorText(
+            "Error: --worker is required without --profile. Use `scope agent list` to see currently registered workers.",
+          ),
+        );
+        process.exit(1);
+      }
+      const submitPath =
+        isVariationSubmit || !worker
+          ? `/requests`
+          : `/requests?worker=${encodeURIComponent(worker)}`;
 
       const response = await apiFetch(url, submitPath, {
         method: "POST",
