@@ -286,6 +286,15 @@ gates, advisory violations, unique failed cases, and case/evaluator failure
 records. `invalidCases` and `skippedCases` count case/evaluator assessments,
 not unique dataset cases. Unknown historical totals are `null`, not zero.
 
+Review clients can join `selected-cases.jsonl` (`family`, `id`) to
+`production-rows.jsonl` (`family`, `caseId`, `sampleIndex`) and assessment samples.
+The session-scoped review canvas loads this context when a case is expanded or
+a case finding is selected, keeping the input fixture, generated output, and
+evaluator explanation visibly separate. Expandable sections expose the recorded
+AI request, raw model response, reviewed expected result, and normalized grading
+context. Missing artifacts are labeled unavailable, never reconstructed from
+current prompts. These views are read-only and do not modify retained results.
+
 Samples vote within each case by strict majority; cases then vote at the gate.
 Every expected applicable sample must be present before computing that case's
 verdict or mean score. One failing grade with two missing samples is unresolved,
