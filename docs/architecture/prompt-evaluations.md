@@ -308,6 +308,20 @@ schema-fallback output must be regraded, not merely relabeled. Dependency and
 feedback queries use their production-composed task instructions, not a bare
 criterion or the reviewed expected answer. Ground truth stays separate.
 Expected tool calls are never fabricated as actual generation history.
+Tool-call blocks and standalone tool calls use the SDK's flat
+`{type: "tool_call", tool_call_id, name, arguments}` shape, with dictionary
+arguments. The nested OpenAI `tool_call.function` representation does not pass
+the pinned SDK evaluator validators, even when its text-formatting helpers
+accept it. Built-in graders validate and convert their inputs locally before
+any model call.
+
+The SDK can return input-only native rows after evaluator failures while
+printing/logging its actual errors separately. Per-evaluator
+`<evaluator>-diagnostics.json` sidecars retain the SDK's structured run summary,
+redacted batch/per-line errors, and row-ID attribution. The native index exposes
+`diagnosticArtifact`; affected observations carry the SDK error rather than
+only “no usable result”. SDK-native output itself is never rewritten to invent
+missing result fields, and replay carries retained diagnostics forward.
 
 ### Immutable-source replay and selective regrading
 
@@ -447,6 +461,7 @@ versions, and relative paths to every artifact obtained so far.
 `azure-row-results.jsonl`, `azure-native/index.json`, and per-family
 `azure-native/<family>/<evaluator>-input.jsonl` and
 `azure-native/<family>/<evaluator>.json` SDK-native files,
+`azure-native/<family>/<evaluator>-diagnostics.json` diagnostic sidecars,
 `findings.json`, `summary.json`, `decision-summary.json`, and `rubric-snapshot.yaml`.
 Replay runs additionally retain `source-rubric-snapshot.yaml`, `replay-plan.json`,
 `source-integrity.json`, and `comparison.json`. `red-team/summary.json` indexes the

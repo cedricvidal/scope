@@ -185,11 +185,21 @@ def _replay(config, track_dir, source_track, source_hashes, evaluate_callable, a
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(native, destination)
             shutil.copyfile(native.with_name(evaluator + "-input.jsonl"), destination.with_name(evaluator + "-input.jsonl"))
-            observations, skipped = parse_native_result(json.loads(native.read_text()), spec, selected)
+            diagnostic_source = native.with_name(evaluator + "-diagnostics.json")
+            diagnostic_artifact = None
+            diagnostics = None
+            if diagnostic_source.is_file():
+                diagnostic_destination = destination.with_name(evaluator + "-diagnostics.json")
+                shutil.copyfile(diagnostic_source, diagnostic_destination)
+                diagnostics = json.loads(diagnostic_source.read_text())
+                diagnostic_artifact = str(diagnostic_destination.relative_to(track_dir))
+            observations, skipped = parse_native_result(json.loads(native.read_text()), spec, selected, diagnostics)
             outcome = EvaluatorRunOutcome(
                 family=family, evaluator=evaluator,
                 status="infrastructure-failed" if any(o.infrastructure_error for o in observations) else "succeeded",
                 artifact=entry["sourceArtifact"], observations=tuple(observations),
+                error=next((o.reason for o in observations if o.passed is None), None),
+                diagnostic_artifact=diagnostic_artifact,
             )
             entry["provenance"] = "native-reparse"
         elif entry["action"] == "rerun-required":

@@ -66,6 +66,7 @@ class EvaluatorRunOutcome:
     observations: tuple[MetricObservation, ...] = ()
     error: str | None = None
     attempts: int = 1
+    diagnostic_artifact: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)

@@ -265,6 +265,7 @@ results/<run-id>/
       <family>/
         <evaluator>-input.jsonl
         <evaluator>.json
+        <evaluator>-diagnostics.json
     findings.json
     summary.json
     decision-summary.json
@@ -283,6 +284,10 @@ results/<run-id>/
 ```
 
 The runner updates `manifest.json` even on partial or infrastructure failure.
+Native evaluator diagnostics preserve redacted SDK batch/per-row errors even
+when the SDK returns rows without `outputs.*`. The index links their sidecars
+with `diagnosticArtifact`. Local SDK validator/converter preflight rejects
+invalid tool-call message shapes before a paid evaluation call.
 In `both` mode it attempts and records both tracks independently.
 Cloud-native output may be retained as JSONL or CSV instead of
 `output-items.json` when that is the format returned by the SDK.

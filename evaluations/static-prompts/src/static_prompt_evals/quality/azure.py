@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 import json
 import math
+import logging
 import random
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,70 @@ class AzureRuntime:
     deployment: str
     sdk_version: str
     auth_mode: str
+
+
+class _SdkDiagnostics(logging.Handler):
+    """Retain the pinned SDK's run summary, which evaluate() omits from its return."""
+
+    def __init__(self, evaluator: str):
+        super().__init__()
+        self.evaluator = evaluator
+        self.summary: dict[str, Any] = {}
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message = record.getMessage()
+        if not message.startswith("run_summary:"):
+            return
+        try:
+            summaries = json.loads(message.partition(":")[2])
+        except (ValueError, TypeError):
+            return
+        summary = summaries.get(self.evaluator) if isinstance(summaries, dict) else None
+        if isinstance(summary, dict):
+            self.summary = summary
+
+    def payload(self, family: str, rows: Sequence[NormalizedRow], sdk_version: str) -> dict[str, Any]:
+        summary = {key: self.summary.get(key) for key in (
+            "status", "completed_lines", "failed_lines", "error_code",
+        )}
+        message = self.summary.get("error_message")
+        summary["error_message"] = redact_error(RuntimeError(str(message))) if message else None
+        line_errors = self.summary.get("per_line_errors") or {}
+        summary["per_line_errors"] = {
+            str(index): redact_error(RuntimeError(str(error)))
+            for index, error in line_errors.items()
+        } if isinstance(line_errors, Mapping) else {}
+        return {
+            "schemaVersion": 1, "family": family, "evaluator": self.evaluator,
+            "azureEvaluationSdkVersion": sdk_version, "runSummary": summary,
+            "error": summary["error_message"],
+            "rowErrors": {
+                row.row_id: summary["per_line_errors"][str(index)]
+                for index, row in enumerate(rows) if str(index) in summary["per_line_errors"]
+            },
+        }
+
+
+def validate_sdk_input(evaluator: Any, spec: Mapping[str, Any], row: NormalizedRow) -> None:
+    """Run the real SDK validator and converter, without invoking the model."""
+    validator = getattr(evaluator, "_validator", None)
+    if str(spec.get("type") or "builtin") != "builtin" or validator is None:
+        return
+    source = row.to_dict()
+    arguments = {
+        argument: source[column.removeprefix("${data.").removesuffix("}")]
+        for argument, column in evaluator_column_mapping(spec).items()
+    }
+    validator.validate_eval_input(arguments)
+    converter = getattr(evaluator, "_convert_kwargs_to_eval_input", None)
+    if converter is not None:
+        converted = converter(**arguments)
+        for item in converted if isinstance(converted, list) else [converted]:
+            if not isinstance(item, Mapping):
+                raise ValueError("SDK converter returned an invalid input shape")
+            if item.get("error_message"):
+                raise ValueError(str(item["error_message"]))
+            validator.validate_eval_input(item)
 
 
 def _environment(
@@ -493,6 +558,7 @@ def _safe_name(value: str) -> str:
 
 def parse_native_result(
     result: Mapping[str, Any], spec: Mapping[str, Any], selected_rows: Sequence[NormalizedRow],
+    diagnostics: Mapping[str, Any] | None = None,
 ) -> tuple[list[MetricObservation], set[str]]:
     evaluator = str(spec["name"])
     result_rows = result.get("rows")
@@ -516,6 +582,16 @@ def parse_native_result(
         observations.append(observation_from_sdk_row(evaluator, spec, native, source[row_id]))
     for row_id in sorted(source.keys() - seen):
         observations.append(observation_from_sdk_row(evaluator, spec, {}, source[row_id]))
+    if diagnostics:
+        row_errors = diagnostics.get("rowErrors", {})
+        observations = [
+            replace(observation, reason=str(error),
+                    details={**observation.details, "sdkEvaluatorError": True})
+            if observation.passed is None and (
+                error := row_errors.get(observation.row_id) or diagnostics.get("error")
+            ) else observation
+            for observation in observations
+        ]
     return observations, skipped
 
 
@@ -558,6 +634,8 @@ def run_azure_evaluations(
             evaluator_dir = output_dir / _safe_name(family)
             input_path = evaluator_dir / f"{_safe_name(evaluator_name)}-input.jsonl"
             output_path = evaluator_dir / f"{_safe_name(evaluator_name)}.json"
+            diagnostic_path = evaluator_dir / f"{_safe_name(evaluator_name)}-diagnostics.json"
+            diagnostic_artifact = str(diagnostic_path.relative_to(output_dir.parent))
             write_jsonl(input_path, (sdk_row(row) for row in selected_rows))
             evaluator_config = {
                 evaluator_name: {
@@ -581,8 +659,18 @@ def run_azure_evaluations(
                     },
                 )
 
+            sdk_logger = logging.getLogger("azure.ai.evaluation._evaluate._evaluate")
+            previous_level = sdk_logger.level
+            diagnostics = _SdkDiagnostics(evaluator_name)
+            sdk_logger.addHandler(diagnostics)
+            sdk_logger.setLevel(logging.INFO)
             try:
                 evaluator = create_evaluator(spec, runtime)
+                for source_row in selected_rows:
+                    try:
+                        validate_sdk_input(evaluator, spec, source_row)
+                    except Exception as error:
+                        raise ValueError(f"SDK input validation failed for {source_row.row_id}: {error}") from error
                 result, attempts = evaluate_with_retry(
                     operation,
                     max_attempts=max_attempts,
@@ -590,7 +678,10 @@ def run_azure_evaluations(
                 )
                 if not output_path.exists():
                     write_json(output_path, dict(result))
-                observations, skipped = parse_native_result(result, spec, selected_rows)
+                diagnostic_payload = diagnostics.payload(family, selected_rows, runtime.sdk_version)
+                observations, skipped = parse_native_result(result, spec, selected_rows, diagnostic_payload)
+                diagnostic_payload["invalidObservationCount"] = sum(o.passed is None for o in observations)
+                write_json(diagnostic_path, diagnostic_payload)
                 metrics = result.get("metrics")
                 outcomes.append(
                     EvaluatorRunOutcome(
@@ -607,9 +698,14 @@ def run_azure_evaluations(
                         metrics=dict(metrics) if isinstance(metrics, Mapping) else {},
                         observations=tuple(observations),
                         attempts=attempts,
+                        error=next((o.reason for o in observations if o.passed is None), None),
+                        diagnostic_artifact=diagnostic_artifact,
                     )
                 )
             except Exception as error:
+                diagnostic_payload = diagnostics.payload(family, selected_rows, runtime.sdk_version)
+                diagnostic_payload["error"] = redact_error(error)
+                write_json(diagnostic_path, diagnostic_payload)
                 outcomes.append(
                     EvaluatorRunOutcome(
                         family=family,
@@ -622,6 +718,10 @@ def run_azure_evaluations(
                         ),
                         error=redact_error(error),
                         attempts=max_attempts if is_transient_error(error) else 1,
+                        diagnostic_artifact=diagnostic_artifact,
                     )
                 )
+            finally:
+                sdk_logger.removeHandler(diagnostics)
+                sdk_logger.setLevel(previous_level)
     return outcomes

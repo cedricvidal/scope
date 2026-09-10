@@ -181,6 +181,7 @@ def _outcome_index(outcomes: Sequence[EvaluatorRunOutcome]) -> list[dict[str, An
             "metrics": outcome.metrics,
             "error": outcome.error,
             "attempts": outcome.attempts,
+            "diagnosticArtifact": outcome.diagnostic_artifact,
             "rowCount": len(outcome.observations),
         }
         for outcome in outcomes

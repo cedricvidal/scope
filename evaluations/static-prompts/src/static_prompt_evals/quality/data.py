@@ -184,24 +184,34 @@ def sdk_messages(messages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
             ]
         elif not isinstance(content, list):
             raise QualityDataError("conversation content must be text or content blocks")
+        else:
+            item["content"] = [
+                sdk_tool_call(block.get("tool_call", block))
+                if isinstance(block, Mapping) and block.get("type") == "tool_call" else block
+                for block in content
+            ]
         result.append(item)
     return result
+
+
+def sdk_tool_call(call: Mapping[str, Any]) -> dict[str, Any]:
+    function = dict(call.get("function") or {"name": call.get("name"), "arguments": call.get("arguments", {})})
+    if isinstance(function.get("arguments"), str):
+        function["arguments"] = json.loads(function["arguments"])
+    call_id = call.get("tool_call_id") or call.get("id")
+    if not isinstance(call_id, str) or not call_id or not isinstance(function.get("name"), str) or not function["name"] or not isinstance(function.get("arguments"), dict):
+        raise QualityDataError("retained tool call lacks an id, name, or structured arguments")
+    return {"type": "tool_call", "tool_call_id": call_id,
+            "name": function["name"], "arguments": function["arguments"]}
 
 
 def tool_response_messages(calls: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     messages = []
     for call in calls:
-        function = call.get("function") or {"name": call.get("name"), "arguments": call.get("arguments", {})}
-        function = dict(function)
-        if isinstance(function.get("arguments"), str):
-            function["arguments"] = json.loads(function["arguments"])
-        if not call.get("id") or not function.get("name") or not isinstance(function.get("arguments"), dict):
-            raise QualityDataError("retained tool call lacks an id, name, or structured arguments")
-        messages.append({"role": "assistant", "content": [{
-            "type": "tool_call", "tool_call": {"id": call["id"], "type": "function", "function": function},
-        }]})
+        normalized_call = sdk_tool_call(call)
+        messages.append({"role": "assistant", "content": [normalized_call]})
         if "response" in call:
-            messages.append({"role": "tool", "tool_call_id": call["id"], "content": [
+            messages.append({"role": "tool", "tool_call_id": normalized_call["tool_call_id"], "content": [
                 {"type": "tool_result", "tool_result": stable_text(call["response"])}
             ]})
     return messages
@@ -469,6 +479,7 @@ def normalize_rows(
                 response_messages = [*tool_response_messages(tool_calls), *response_messages]
             query_messages = sdk_messages(query_messages)
             response_messages = sdk_messages(response_messages)
+            tool_calls = [sdk_tool_call(call) for call in tool_calls]
             source_category = str(
                 first_path(
                     case,
