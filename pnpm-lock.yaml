@@ -774,6 +774,12 @@ importers:
 
   evaluations/static-prompts:
     dependencies:
+      shared:
+        specifier: workspace:*
+        version: link:../../packages/shared
+      telemetry:
+        specifier: workspace:*
+        version: link:../../packages/telemetry
       yaml:
         specifier: ^2.8.1
         version: 2.8.3

@@ -18,9 +18,14 @@ From the repository root:
 
 ```bash
 pnpm install
+pnpm --filter static-prompt-evals... build
 pnpm --filter static-prompt-evals setup:python
 az login
 ```
+
+The dependency-inclusive build prepares `shared` and `telemetry` before checking
+the production-backed adapters. Both are declared workspace dependencies so
+clean recursive builds use the same ordering without pre-existing `dist` files.
 
 The setup and evaluation commands check for `uv` first. If it is unavailable,
 they stop before execution and print platform-specific installation guidance
