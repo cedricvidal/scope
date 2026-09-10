@@ -287,6 +287,10 @@ records. `invalidCases` and `skippedCases` count case/evaluator assessments,
 not unique dataset cases. Unknown historical totals are `null`, not zero.
 
 Samples vote within each case by strict majority; cases then vote at the gate.
+Every expected applicable sample must be present before computing that case's
+verdict or mean score. One failing grade with two missing samples is unresolved,
+not a failed case. Missing sample counts are retained on case results; explicitly
+case-level metrics such as sample diversity still emit one result per case.
 With one sample per case, 20/25 passes an 80% floor and 19/25 fails. At the old
 100% floor, 24/25 failed. A passing rate with a failing mean score still fails.
 Missing or malformed grades never become failed prompt votes. Required missing
@@ -334,6 +338,10 @@ not use today's dataset manifest, `--samples`, or generation environment.
 families, variants, original inputs/outputs, and raw responses are verified.
 The source's existing generation errors remain recorded; missing rows cannot
 be regenerated.
+The CLI resolves source/results paths, including symlinks, and rejects a
+results directory inside or equal to the source run before creating any run
+directory or manifest. A shared results parent is allowed: the new run is a
+sibling, not a descendant of the source.
 
 `replay-plan.json` lists affected graders before any paid call, projected
 old/new input hashes, spec hashes, native artifact hashes, evaluator deployment

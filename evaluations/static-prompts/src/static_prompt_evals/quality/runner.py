@@ -36,6 +36,11 @@ def gate_coverage(rows, configuration, outcomes=()):
         family_rows = [r for r in rows if r.family == family]
         family_ids = {r.case_id for r in family_rows}
         specs = {s["name"]: s for s in configuration.evaluator_specs(family)}
+        case_metrics = {
+            check.get("metric") or check["check"]
+            for check in configuration.families[family].get("deterministic", [])
+            if check.get("check") == "sample_diversity"
+        }
         for evaluator in configuration.thresholds(family):
             spec = specs.get(evaluator)
             selected = applicable_rows(family_rows, spec) if spec else family_rows
@@ -44,10 +49,17 @@ def gate_coverage(rows, configuration, outcomes=()):
             # Missing recorded tool history cannot be called an intentional skip.
             missing = not optional and len(selected) != len(family_rows)
             outcome = outcomes_by_key.get((family, evaluator))
+            expected_by_case = {}
+            for row in sorted(selected if optional else family_rows, key=lambda r: r.sample_index):
+                expected = expected_by_case.setdefault(row.case_id, [])
+                # Diversity emits one case-level result over all samples.
+                if evaluator not in case_metrics or not expected:
+                    expected.append(row.row_id)
             coverage[(family, evaluator)] = {
                 "applicable": len(applicable_ids) if optional else len(family_ids),
                 "applicableCaseIds": sorted(applicable_ids if optional else family_ids),
                 "rowIds": sorted(r.row_id for r in (selected if optional else family_rows)),
+                "expectedRowIdsByCase": expected_by_case,
                 "skipped": len(family_ids - applicable_ids) if optional else 0,
                 "notApplicable": not family_rows or optional and not selected,
                 "unresolved": missing or bool(outcome and outcome.status == "infrastructure-failed"),

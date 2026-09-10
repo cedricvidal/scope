@@ -105,10 +105,14 @@ async def run() -> int:
         raise ValueError("--source-run requires --mode quality and cannot use --smoke")
     if args.regrade and (not args.source_run or args.offline):
         raise ValueError("--regrade requires --source-run without --offline")
+    source_run = args.source_run.resolve() if args.source_run else None
+    results_dir = args.results_dir.resolve()
+    if source_run is not None and results_dir.is_relative_to(source_run):
+        raise ValueError("--results-dir must not be inside or equal to --source-run")
 
     package_root = Path(__file__).resolve().parents[2]
     repo_root = package_root.parents[1]
-    run_id, run_dir = create_run_directory(args.results_dir.resolve())
+    run_id, run_dir = create_run_directory(results_dir)
     manifest_path = run_dir / "manifest.json"
     config = RunConfig(
         package_root=package_root,
@@ -121,7 +125,7 @@ async def run() -> int:
         samples=args.samples,
         smoke=args.smoke,
         offline=args.offline,
-        source_run=args.source_run.resolve() if args.source_run else None,
+        source_run=source_run,
         regrade=tuple(args.regrade),
     )
     manifest: dict[str, Any] = {

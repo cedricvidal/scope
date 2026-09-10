@@ -6,6 +6,7 @@ from types import ModuleType
 import pytest
 
 from static_prompt_evals import cli
+from static_prompt_evals.quality.replay import file_hashes
 
 
 @pytest.mark.asyncio
@@ -19,6 +20,52 @@ async def test_invalid_replay_scope_fails_before_creating_run(monkeypatch, argum
     monkeypatch.setattr(sys, "argv", ["scope-evals", *arguments])
     with pytest.raises(ValueError, match=message):
         await cli.run()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overlap", ["equal", "child", "results-symlink", "child-through-symlink", "source-symlink"])
+async def test_source_overlap_rejected_before_any_filesystem_write(tmp_path, monkeypatch, overlap):
+    source = tmp_path / "source"
+    (source / "quality").mkdir(parents=True)
+    (source / "manifest.json").write_text('{"runId":"immutable"}\n')
+    (source / "quality/production-rows.jsonl").write_text('{"original":"response"}\n')
+    source_arg = source
+    results = source if overlap == "equal" else source / "new-results"
+    if overlap in {"results-symlink", "child-through-symlink"}:
+        alias = tmp_path / "results-alias"
+        alias.symlink_to(source, target_is_directory=True)
+        results = alias if overlap == "results-symlink" else alias / "new-results"
+    elif overlap == "source-symlink":
+        source_arg = tmp_path / "source-alias"
+        source_arg.symlink_to(source, target_is_directory=True)
+    hashes_before = file_hashes(source)
+    entries_before = {p.relative_to(tmp_path) for p in tmp_path.rglob("*")}
+    monkeypatch.setattr(sys, "argv", [
+        "scope-evals", "--mode", "quality", "--offline",
+        "--source-run", str(source_arg), "--results-dir", str(results),
+    ])
+    with pytest.raises(ValueError, match="must not be inside or equal"):
+        await cli.run()
+    assert file_hashes(source) == hashes_before
+    assert {p.relative_to(tmp_path) for p in tmp_path.rglob("*")} == entries_before
+
+
+@pytest.mark.asyncio
+async def test_source_and_new_run_can_share_results_parent(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "manifest.json").write_text('{"runId":"immutable"}\n')
+    before = file_hashes(source)
+    quality = ModuleType("static_prompt_evals.quality")
+    quality.run_quality = lambda config, track: {"status": "succeeded"}
+    monkeypatch.setitem(sys.modules, "static_prompt_evals.quality", quality)
+    monkeypatch.setattr(sys, "argv", [
+        "scope-evals", "--mode", "quality", "--offline",
+        "--source-run", str(source), "--results-dir", str(tmp_path),
+    ])
+    assert await cli.run() == 0
+    assert file_hashes(source) == before
+    assert len(list(tmp_path.iterdir())) == 2
 
 
 @pytest.mark.asyncio

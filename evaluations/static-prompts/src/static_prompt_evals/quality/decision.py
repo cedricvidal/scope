@@ -11,6 +11,28 @@ def gate_id(family: str, evaluator: str) -> str:
     return "gate-" + hashlib.sha256(f"{family}/{evaluator}".encode()).hexdigest()[:16]
 
 
+def apply_sample_coverage(
+    cases: Sequence[Mapping[str, Any]],
+    coverage: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    results = []
+    for case in cases:
+        result = dict(case)
+        expected_by_case = coverage.get((case["family"], case["evaluator"]), {}).get("expectedRowIdsByCase", {})
+        expected = expected_by_case.get(case["caseId"])
+        if expected is not None:
+            observed = {sample["rowId"] for sample in case.get("samples", [])}
+            missing = set(expected) - observed
+            result["expectedSampleCount"] = len(expected)
+            result["missingSampleCount"] = len(missing)
+            if missing:
+                result.update(casePassed=None, meanScore=None, infrastructureError=True)
+        if result.get("casePassed") is None:
+            result["meanScore"] = None
+        results.append(result)
+    return results
+
+
 def build_decision(
     cases: Sequence[Mapping[str, Any]],
     thresholds: Mapping[str, Mapping[str, Mapping[str, Any]]],
@@ -21,6 +43,7 @@ def build_decision(
 ) -> dict[str, Any]:
     """Invalid/missing cases are unknown, never false prompt grades or passes."""
     coverage = coverage or {}
+    cases = apply_sample_coverage(cases, coverage)
     gates = []
     for family, evaluators in sorted(thresholds.items()):
         for evaluator, threshold in sorted(evaluators.items()):

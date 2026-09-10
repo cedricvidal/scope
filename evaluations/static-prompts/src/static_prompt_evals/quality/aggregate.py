@@ -8,7 +8,7 @@ from statistics import fmean
 from typing import Any
 
 from .models import EvaluatorRunOutcome, MetricObservation
-from .decision import build_decision
+from .decision import apply_sample_coverage, build_decision
 
 
 def strict_majority(votes: Sequence[bool]) -> bool:
@@ -59,7 +59,7 @@ def _case_results(
                 "sampleCount": len(ordered),
                 "passCount": sum(votes),
                 "casePassed": passed,
-                "meanScore": fmean(scores) if scores else None,
+                "meanScore": fmean(scores) if scores and not incomplete else None,
                 "infrastructureError": incomplete,
                 "samples": [
                     {
@@ -128,7 +128,7 @@ def aggregate_quality(
     execution: str = "completed",
     policy: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
-    case_results = _case_results(observations)
+    case_results = apply_sample_coverage(_case_results(observations), coverage or {})
     by_family = _dimension_aggregates(case_results, ("family", "evaluator"))
     by_variant = _dimension_aggregates(
         case_results, ("family", "variant", "evaluator")
