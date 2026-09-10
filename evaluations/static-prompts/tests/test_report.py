@@ -196,3 +196,19 @@ def test_canonical_decision_takes_precedence_over_previous_filename(tmp_path):
     _write_json(tmp_path / "quality/decision-summary.json", canonical)
     _write_json(tmp_path / "quality/decision.json", old)
     assert load_decision(tmp_path) == canonical
+
+
+def test_gate_table_explains_unresolved_coverage_and_formats_scores(tmp_path):
+    decision = build_decision(
+        [{"family": "family", "evaluator": "quality", "caseId": "case-1",
+          "casePassed": True, "meanScore": 4.333333333333333,
+          "samples": [{"rowId": "case-1::sample-0"}]}],
+        {"family": {"quality": {"minPassRate": 0.8}}},
+    )
+    gate = decision["gates"][0]
+    gate.update(status="unresolved", coverageComplete=False, invalid=1, applicable=2)
+    _write_json(tmp_path / "quality/decision-summary.json", decision)
+    report = render_quality_report(tmp_path)
+    assert "4.333 |" in report
+    assert "4.333333333333333" not in report
+    assert "Incomplete coverage: 1 invalid or missing case assessments" in report

@@ -108,6 +108,27 @@ def _requirement(gate: dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
+def _score(value: Any) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".") if isinstance(value, (int, float)) else "—"
+
+
+def _gate_reason(gate: dict[str, Any]) -> str:
+    reasons = list(gate["violations"])
+    if gate.get("coverageComplete") is False:
+        reasons.append(
+            f'Incomplete coverage: {gate["invalid"]} invalid or missing case assessments; '
+            "a passing result cannot be established"
+        )
+    if not reasons:
+        if gate["status"] == "passed":
+            reasons.append("All configured requirements met")
+        elif gate["status"] == "not-applicable":
+            reasons.append("No applicable cases")
+        elif gate["status"] == "unresolved":
+            reasons.append("Required assessment or policy information is unavailable")
+    return "; ".join(reasons)
+
+
 def render_quality_report(run_dir: Path) -> str:
     manifest = _load_object(run_dir / "manifest.json")
     summary = _load_object(run_dir / "quality/summary.json")
@@ -156,8 +177,8 @@ def render_quality_report(run_dir: Path) -> str:
         name = _escape(f'{gate["family"]}/{gate["evaluator"]}')
         lines.append(
             f'| [{name}](#{gate["id"]}) | {gate["classification"]} | {gate["status"]} | {_rate(gate)} | '
-            f'{_escape(_requirement(gate))} | {gate["meanScore"] if gate["meanScore"] is not None else "—"} | '
-            f'{gate["applicable"]} / {gate["invalid"]} / {gate["skipped"]} | {_escape("; ".join(gate["violations"]))} |'
+            f'{_escape(_requirement(gate))} | {_score(gate["meanScore"])} | '
+            f'{gate["applicable"]} / {gate["invalid"]} / {gate["skipped"]} | {_escape(_gate_reason(gate))} |'
         )
     lines += [
         "", "## How to read the decisions", "",

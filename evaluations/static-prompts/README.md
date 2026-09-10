@@ -86,6 +86,8 @@ shared `quality/decision-summary.json`, summary, and finding artifacts. Reports 
 with execution, acceptance, and evaluator integrity, then blocking gate
 violations—not an unweighted average. Reports remain inside the
 ignored run directory unless `--output` explicitly selects another path.
+Gate rows explain incomplete coverage even when every evaluated case passed.
+Displayed mean scores are rounded for readability; decisions use unrounded values.
 Existing historical reports cannot be overwritten: provide a new `--output`.
 For a legacy canvas/client, `--decision-output NEW_PATH --decision-only` exports the same
 hash-verified historical decision without changing source artifacts.
