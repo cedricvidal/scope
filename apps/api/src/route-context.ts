@@ -3,9 +3,9 @@
 
 import type { z } from "zod";
 import type { Collection, Db } from "mongodb";
-import type { QueueClient } from "@azure/storage-queue";
 import type { Express } from "express";
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import type { QueueClient } from "@azure/storage-queue";
 import type { BlobStorage } from "shared";
 import type { HeartbeatStore } from "shared";
 import type {
@@ -65,12 +65,7 @@ export type ReportTemplateDocument = Omit<z.infer<typeof ReportTemplateResponseS
 export type RequestDocument = z.infer<typeof RequestResponseSchema>;
 export type RunHistoryDocument = z.infer<typeof RunHistoryDocumentSchema>;
 
-export const VALID_WORKERS = [
-  "coder-acp-claude-code",
-  "coder-acp-copilot",
-  "coder-acp-copilot-windows"
-] as const;
-export type WorkerType = (typeof VALID_WORKERS)[number];
+export type WorkerType = string;
 
 // ─── RouteContext ────────────────────────────────────────────────────────────
 
@@ -118,11 +113,6 @@ export interface RouteContext {
   // Token Manager client (null when TOKEN_MANAGER_URL not set)
   mcpSecretClient: McpSecretClient | null;
 
-  // Queue
-  queueClients: Map<WorkerType, QueueClient>;
-  reportQueueClient: QueueClient;
-  getOrCreateQueueClient: (queueName: string) => QueueClient;
-
   // Blob storage (log persistence + snapshots)
   blobStorage: BlobStorage;
 
@@ -130,8 +120,12 @@ export interface RouteContext {
   // routes to enrich `processing` responses with `run.lastHeartbeatAt`.
   heartbeatStore: HeartbeatStore;
 
+  // Report generation remains an API-owned queue. Coding-agent queues are
+  // discovered and owned by the scheduler from the agent registry.
+  reportQueueClient: QueueClient;
+
   // Config
-  validWorkers: readonly string[];
+  strictAgentCapabilities: boolean;
   storageConnectionString: string;
   storageAccountName: string;
 }

@@ -202,10 +202,6 @@ export function createAllMockDependencies() {
   const reportQueueClient = createMockQueueClient();
   const blobStorage = createMockBlobStorage();
 
-  const queueClients = new Map<string, ReturnType<typeof createMockQueueClient>>();
-  queueClients.set("coder-acp-claude-code", createMockQueueClient());
-  queueClients.set("coder-acp-copilot", createMockQueueClient());
-
   return {
     db,
     collection,
@@ -227,7 +223,6 @@ export function createAllMockDependencies() {
     taskPromptStore,
     skillRevisionStore,
     skillResolver,
-    queueClients,
     reportQueueClient,
     blobStorage,
   } as unknown as TestDependencies & {
@@ -252,7 +247,6 @@ export function createAllMockDependencies() {
     taskPromptStore: ReturnType<typeof createMockTaskPromptStore>;
     skillRevisionStore: ReturnType<typeof createMockSkillRevisionStore>;
     skillResolver: ReturnType<typeof createMockSkillResolver>;
-    queueClients: Map<string, ReturnType<typeof createMockQueueClient>>;
     reportQueueClient: ReturnType<typeof createMockQueueClient>;
     blobStorage: ReturnType<typeof createMockBlobStorage>;
   };

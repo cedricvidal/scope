@@ -22,8 +22,7 @@ const msalInstance = new PublicClientApplication({
 });
 
 // The portal defines these build-time constants via Vite `define`; the root
-// Vitest run doesn't apply that config, so stub them for the routes (e.g. "/")
-// where <VersionFooter /> renders (non-full-bleed).
+// Vitest run doesn't apply that config, so stub them for <VersionFooter />.
 beforeAll(() => {
   vi.stubGlobal("__GIT_COMMIT__", "test-commit");
   vi.stubGlobal("__BUILD_TIME__", "1970-01-01T00:00:00Z");
@@ -78,6 +77,17 @@ afterEach(() => {
 });
 
 describe("Layout", () => {
+  it("shows the disclosure footer on full-bleed routes", () => {
+    renderLayout("/runs");
+
+    expect(
+      screen.getByText(/This is an AI evaluation platform\./),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "Data collection and privacy" }),
+    ).toBeTruthy();
+  });
+
   it("expands the desktop sidebar to show navigation labels", () => {
     renderLayout();
 

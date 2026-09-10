@@ -11,7 +11,6 @@
   </p>
 
   <p>
-    <a href="https://github.com/growth-ecosystems/scope-core/actions/workflows/ci.yml"><img src="https://github.com/growth-ecosystems/scope-core/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
     <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22-339933?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js 22" /></a>
     <a href="https://pnpm.io/"><img src="https://img.shields.io/badge/pnpm-10.29.1-F69220?style=flat-square&amp;logo=pnpm&amp;logoColor=white" alt="pnpm 10.29.1" /></a>
     <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript" /></a>
@@ -144,6 +143,7 @@ The default Portal address is `http://localhost:5100`. In a Git worktree,
 | Discover available run commands | `pnpm cli run --help` |
 | Start all available workers locally | `pnpm docker:dev:all` |
 | Run unit tests | `pnpm test` |
+| Evaluate Scope prompts | `pnpm eval:prompts -- --mode quality\|red-team\|both` |
 | Configure Portal AI assistance | [Environment variables](./ENV_VARIABLES.md#llm-configuration-portal-ai-features) |
 
 ## Shape the benchmark
@@ -171,6 +171,7 @@ model together.
 apps/       API, Portal, CLI, scheduler, Judge, gateway, token manager, workers
 packages/   Shared types, storage clients, migrations, auth, model scanning, evaluation
 config/     Portable examples for scenarios, personas, criteria, and prompt features
+evaluations/ Developer-run static prompt quality and cloud red-team tooling
 docs/       Architecture, operations, research, and design documentation
 ```
 
@@ -182,6 +183,7 @@ docs/       Architecture, operations, research, and design documentation
 | API, domain models, and project boundaries | [Application design](./docs/architecture/app-design.md) |
 | Queue priority, recovery, and scaling | [Queue scheduler](./docs/architecture/queue-scheduler.md) |
 | Criteria DAGs and evaluation providers | [Criteria provider](./docs/architecture/criteria-provider.md) |
+| Static prompt quality and red teaming | [Prompt evaluations](./docs/architecture/prompt-evaluations.md) |
 | Writing and delivering agent skills | [Skills architecture](./docs/architecture/skills.md) |
 | CLI installation and automation | [CLI distribution](./docs/architecture/cli-distribution.md) |
 | Environment settings | [Environment variable reference](./ENV_VARIABLES.md) |

@@ -8,7 +8,6 @@ import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
 import { TaskPromptStore, SkillRevisionStore, SkillResolver, CodebaseStore, CodebaseRevisionStore, CodebaseResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore, ProjectStore } from "shared";
 import { initTelemetry } from "telemetry";
@@ -43,7 +42,6 @@ import { registerSecretsRoutes } from "./routes/secrets.js";
 import { registerProfilesRoutes } from "./routes/profiles.js";
 import { registerProjectsRoutes } from "./routes/projects.js";
 import { ProjectScopeError } from "./utils/project-scope.js";
-import { VALID_WORKERS } from "./route-context.js";
 import type { RouteContext } from "./route-context.js";
 import type {
   CriteriaDocument,
@@ -58,7 +56,6 @@ import type {
   McpServerDocument,
   ExtensionDocument,
   FeatureFlagDocument,
-  WorkerType,
 } from "./route-context.js";
 
 dotenv.config();
@@ -82,9 +79,9 @@ const mongoDatabase = process.env.MONGO_DATABASE || "requests-db";
 const mongoCollection = process.env.MONGO_COLLECTION || "requests";
 const storageAccountName = process.env.AZURE_STORAGE_ACCOUNT_NAME || "";
 const storageConnectionString = process.env.STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_CONNECTION_STRING || "";
-const queueWorker1 = process.env.AZURE_STORAGE_QUEUE_WORKER_1 || "queue-coder-acp-claude-code";
-const queueWorker2 = process.env.AZURE_STORAGE_QUEUE_WORKER_2 || "queue-coder-acp-copilot";
 const queueReport = process.env.AZURE_STORAGE_QUEUE_REPORT || "report-queue";
+const strictAgentCapabilities =
+  process.env.SCOPE_STRICT_AGENT_CAPABILITIES?.toLowerCase() === "true";
 const port = parseInt(process.env.PORT || "3000", 10);
 
 // MongoDB clients
@@ -119,7 +116,6 @@ let codebaseRevisionStore: CodebaseRevisionStore;
 let codebaseResolver: CodebaseResolver;
 let blobStorage: BlobStorage;
 let heartbeatStore: HeartbeatStore;
-const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
 async function initializeClients(): Promise<void> {
@@ -188,49 +184,20 @@ async function initializeClients(): Promise<void> {
     );
   }
 
-  // Seed default agents (upsert — always updates name and modelProvider, preserves existing models)
-  const defaultAgents: Array<{ _id: string; name: string; modelProvider?: string }> = [
-    { _id: "coder-acp-claude-code", name: "Claude Code CLI", modelProvider: "anthropic" },
-    { _id: "coder-acp-copilot", name: "GitHub Copilot CLI", modelProvider: "github-copilot" },
-  ];
-  for (const agent of defaultAgents) {
-    await agentCollection.updateOne(
-      { _id: agent._id },
-      {
-        $set: { name: agent.name, ...(agent.modelProvider ? { modelProvider: agent.modelProvider } : {}) },
-        $setOnInsert: { supportedModels: [], createdAt: new Date() },
-      },
-      { upsert: true }
-    );
-  }
-  console.log(`Ensured ${defaultAgents.length} default agents exist`);
-  
   console.log(`Connected to MongoDB: ${mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
 
-  // Initialize queue clients
+  // Coding-agent queues are initialized by the scheduler from registry version
+  // manifests. The API only owns the report-generation queue.
   if (storageConnectionString) {
-    // Connection string auth (local Azurite or Azure with connection string)
-    queueClients.set("coder-acp-claude-code", new QueueClient(storageConnectionString, queueWorker1));
-    queueClients.set("coder-acp-copilot", new QueueClient(storageConnectionString, queueWorker2));
     reportQueueClient = new QueueClient(storageConnectionString, queueReport);
   } else {
-    // Azure with DefaultAzureCredential
     const credential = new DefaultAzureCredential();
     const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
-    queueClients.set("coder-acp-claude-code", new QueueClient(`${queueUrl}/${queueWorker1}`, credential));
-    queueClients.set("coder-acp-copilot", new QueueClient(`${queueUrl}/${queueWorker2}`, credential));
     reportQueueClient = new QueueClient(`${queueUrl}/${queueReport}`, credential);
   }
 
-  // Ensure queues exist (creates them in Azurite on first run)
-  for (const [name, client] of queueClients) {
-    await client.createIfNotExists();
-    console.log(`Ensured queue exists: ${name}`);
-  }
   await reportQueueClient.createIfNotExists();
   console.log(`Ensured queue exists: ${queueReport}`);
-
-  console.log(`Initialized Queue clients for workers: ${Array.from(queueClients.keys()).join(", ")}, report`);
 
   // Initialize blob storage (used for log persistence and snapshots).
   // Already constructed above for the task-prompt store; reassign to keep the
@@ -284,12 +251,10 @@ const routeCtx: RouteContext = {
   get codebaseRevisionStore() { return codebaseRevisionStore; },
   get codebaseResolver() { return codebaseResolver; },
   get projectStore() { return projectStore; },
-  get queueClients() { return queueClients; },
   get reportQueueClient() { return reportQueueClient; },
   get blobStorage() { return blobStorage; },
   get heartbeatStore() { return heartbeatStore; },
-  getOrCreateQueueClient: createQueueClientFactory(storageConnectionString, storageAccountName),
-  validWorkers: VALID_WORKERS,
+  strictAgentCapabilities,
   storageConnectionString,
   storageAccountName,
 };
@@ -383,7 +348,6 @@ export interface TestDependencies {
   codebaseStore?: CodebaseStore;
   codebaseRevisionStore?: CodebaseRevisionStore;
   codebaseResolver?: CodebaseResolver;
-  queueClients?: Map<WorkerType, QueueClient>;
   reportQueueClient?: QueueClient;
   blobStorage?: BlobStorage;
 }
@@ -415,7 +379,6 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.codebaseStore) codebaseStore = deps.codebaseStore;
   if (deps.codebaseRevisionStore) codebaseRevisionStore = deps.codebaseRevisionStore;
   if (deps.codebaseResolver) codebaseResolver = deps.codebaseResolver;
-  if (deps.queueClients) queueClients.clear(), deps.queueClients.forEach((v, k) => queueClients.set(k, v));
   if (deps.reportQueueClient) reportQueueClient = deps.reportQueueClient;
   if (deps.blobStorage) blobStorage = deps.blobStorage;
 }

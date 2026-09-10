@@ -17,7 +17,16 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       },
       "AgentCapabilities": {
         "properties": {
+          "supportsExtensions": {
+            "type": "boolean",
+          },
+          "supportsMcpServers": {
+            "type": "boolean",
+          },
           "supportsReasoningEffort": {
+            "type": "boolean",
+          },
+          "supportsSkills": {
             "type": "boolean",
           },
         },
@@ -91,9 +100,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       "AgentVersion": {
         "properties": {
           "agentVersion": {
+            "minLength": 1,
             "type": "string",
           },
           "buildTime": {
+            "minLength": 1,
             "type": "string",
           },
           "components": {
@@ -110,9 +121,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             ],
           },
           "gitCommit": {
+            "minLength": 1,
             "type": "string",
           },
           "imageTag": {
+            "minLength": 1,
             "type": "string",
           },
           "queueName": {
@@ -126,6 +139,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "workerVersion": {
+            "minLength": 1,
             "type": "string",
           },
         },
@@ -136,7 +150,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "gitCommit",
           "buildTime",
           "imageTag",
-          "queueName",
           "status",
           "createdAt",
         ],
@@ -236,6 +249,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "overrides": {
             "properties": {
+              "agentVersion": {
+                "type": "string",
+              },
               "extensions": {
                 "items": {
                   "type": "string",
@@ -603,6 +619,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       "CreateAgentInput": {
         "properties": {
           "_id": {
+            "minLength": 1,
             "type": "string",
           },
           "available": {
@@ -621,6 +638,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "name": {
+            "minLength": 1,
             "type": "string",
           },
           "supportedModels": {
@@ -2177,9 +2195,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       "RegisterAgentVersionInput": {
         "properties": {
           "agentVersion": {
+            "minLength": 1,
             "type": "string",
           },
           "buildTime": {
+            "minLength": 1,
             "type": "string",
           },
           "components": {
@@ -2189,15 +2209,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "object",
           },
           "gitCommit": {
+            "minLength": 1,
             "type": "string",
           },
           "imageTag": {
+            "minLength": 1,
             "type": "string",
           },
           "queueName": {
+            "minLength": 1,
             "type": "string",
           },
           "workerVersion": {
+            "minLength": 1,
             "type": "string",
           },
         },
@@ -2837,6 +2861,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "string",
               "null",
             ],
+          },
+          "queuedQueueName": {
+            "type": "string",
           },
           "rawChatFormat": {
             "type": "string",
@@ -3757,6 +3784,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -3801,6 +3840,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "400": {
             "description": "Validation error",
+          },
+          "409": {
+            "description": "Restored agent versions conflict with an active queue owner",
           },
         },
         "summary": "Create or update agent (upsert)",
@@ -3856,6 +3898,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
               "type": "string",
             },
           },
@@ -4004,6 +4058,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "404": {
             "description": "Agent not found",
           },
+          "409": {
+            "description": "Queue is assigned to another agent",
+          },
+          "503": {
+            "description": "Concurrent registration did not stabilize",
+          },
         },
         "summary": "Register agent version (upsert)",
         "tags": [
@@ -4056,6 +4116,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "404": {
             "description": "Agent or version not found",
+          },
+          "409": {
+            "description": "Queue is assigned to another agent",
+          },
+          "503": {
+            "description": "Concurrent activation did not stabilize",
           },
         },
         "summary": "Patch agent version",
@@ -10995,11 +11061,15 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "environment": {
                       "type": "string",
                     },
+                    "strictAgentCapabilities": {
+                      "type": "boolean",
+                    },
                   },
                   "required": [
                     "commit",
                     "buildTime",
                     "environment",
+                    "strictAgentCapabilities",
                   ],
                   "type": "object",
                 },

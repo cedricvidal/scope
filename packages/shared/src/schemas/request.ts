@@ -106,14 +106,6 @@ export const RequestOutcomeSchema = z.enum([
   "finished",
 ]);
 
-export const VALID_WORKERS = [
-  "coder-acp-claude-code",
-  "coder-acp-copilot",
-  "coder-acp-copilot-windows"
-] as const;
-
-export const WorkerTypeSchema = z.enum(VALID_WORKERS);
-
 export const CreateRequestInputSchema = z
   .object({
     scenario: ScenarioSchema,
@@ -196,6 +188,7 @@ export const RunStateSchema = z
     _id: z.string(),                                     // Unique per attempt
     attemptNumber: z.number().int().min(1),              // 1, 2, 3…
     status: RequestStatusSchema,
+    queuedQueueName: z.string().optional(),
     outcome: RequestOutcomeSchema.optional(),
     result: z.string().optional(),
     error: z.string().optional(),
@@ -330,8 +323,8 @@ export const AggregateStatsSchema = z
 export const GroupUniformValuesSchema = z
   .object({
     workerType: z.string().optional(),
-    model: z.string().optional(),
     agentVersion: z.string().optional(),
+    model: z.string().optional(),
     platform: z.string().optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
@@ -398,6 +391,7 @@ export const BulkResubmitInputSchema = z
       .object({
         profileId: z.string().nullable().optional(),
         workerType: z.string().optional(),
+        agentVersion: z.string().optional(),
         model: z.string().nullable().optional(),
         reasoningEffort: z.string().nullable().optional(),
         maxIterations: z.number().nullable().optional(),

@@ -30,6 +30,7 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { TaskPromptBadge } from "@/components/TaskPromptBadge";
+import { AgentBadge } from "@/components/AgentBadge";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
 import { formatDate, formatId, formatDuration, cn } from "@/lib/utils";
 import {
@@ -617,7 +618,10 @@ export function RunDetail() {
 
             {/* Tier 2 — labeled configuration + metrics */}
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              <MetaItem label="Worker" value={<span className="font-mono">{run.workerType}</span>} />
+              <MetaItem
+                label="Worker"
+                value={<AgentBadge agentId={run.workerType} version={run.agentVersion} />}
+              />
               {run.model && (
                 <MetaItem
                   label="Model"
@@ -1306,8 +1310,12 @@ export function RunDetail() {
                     </div>
                   )}
                   <div>
-                    <span className="text-muted-foreground">Worker Type:</span>{" "}
-                    <span className="font-mono font-medium">{run.workerType}</span>
+                    <span className="text-muted-foreground">Worker:</span>{" "}
+                    <AgentBadge
+                      agentId={run.workerType}
+                      version={run.agentVersion}
+                      className="font-medium"
+                    />
                   </div>
                   {run.model && (
                     <div>

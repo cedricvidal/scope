@@ -25,12 +25,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { parseSkillSpec } from "@/components/SkillPicker";
 import { KbdBadge } from "@/components/KbdBadge";
+import { AgentBadge, agentDisplayName, useAgentCatalog } from "@/components/AgentBadge";
 import { toast } from "sonner";
 
 export function ProfileDetail() {
   const { profileId, version: versionParam } = useParams<{ profileId: string; version?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { agentById } = useAgentCatalog();
 
   const isSpecificVersion = !!versionParam;
   const versionNumber = versionParam ? parseInt(versionParam, 10) : undefined;
@@ -142,9 +144,12 @@ export function ProfileDetail() {
                   onClick={() => {
                     const parts: string[] = [];
                     const descParts: string[] = [];
-                    const w = displayVersion.workerType;
-                    if (w) {
-                      const label = displayVersion.agentVersion ? `${w}@${displayVersion.agentVersion}` : w;
+                    const workerId = displayVersion.workerType;
+                    if (workerId) {
+                      const workerName = agentDisplayName(workerId, agentById);
+                      const label = displayVersion.agentVersion
+                        ? `${workerName}@${displayVersion.agentVersion}`
+                        : workerName;
                       parts.push(label);
                       descParts.push(label);
                     }
@@ -294,7 +299,12 @@ export function ProfileDetail() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <FieldLabel>Worker</FieldLabel>
-                    <p className="font-mono text-sm">{displayVersion.workerType}</p>
+                    <p className="text-sm">
+                      <AgentBadge
+                        agentId={displayVersion.workerType}
+                        version={displayVersion.agentVersion}
+                      />
+                    </p>
                   </div>
                   <div>
                     <FieldLabel>Model</FieldLabel>

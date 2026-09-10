@@ -126,6 +126,7 @@ export default defineConfig({
 					label: 'Resources',
 					items: [
 						{ label: 'FAQ', slug: 'resources/faq' },
+						{ label: 'Data collection and privacy', slug: 'resources/data-collection' },
 						{ label: 'Troubleshooting', slug: 'resources/troubleshooting' },
 						{ label: 'Glossary', slug: 'resources/glossary' },
 					],
