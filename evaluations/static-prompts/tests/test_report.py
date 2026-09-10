@@ -170,14 +170,15 @@ def test_report_output_elsewhere_keeps_artifact_links_pointing_to_source(tmp_pat
     assert "](source/quality/summary.json)" in output.read_text()
 
 
-def test_decision_only_exports_legacy_without_touching_source(tmp_path, monkeypatch):
-    source = tmp_path / "source"
+@pytest.mark.parametrize("separator", [[], ["--"]], ids=["direct-python", "pnpm-forwarded-separator"])
+def test_decision_only_exports_legacy_without_touching_source(tmp_path, monkeypatch, separator):
+    source = tmp_path / "source--run"
     source.mkdir()
     (source / "REPORT.md").write_text("immutable original report")
     _write_json(source / "quality/summary.json", {"status": "failed", "rubricSha256": "unknown"})
     before = {p.relative_to(source): p.read_bytes() for p in source.rglob("*") if p.is_file()}
     output = tmp_path / "external/quality/decision-summary.json"
-    monkeypatch.setattr(sys, "argv", ["report", str(source), "--decision-output", str(output), "--decision-only"])
+    monkeypatch.setattr(sys, "argv", ["report", *separator, str(source), "--decision-output", str(output), "--decision-only"])
     main()
     decision = json.loads(output.read_text())
     assert decision["integrity"] == "unknown"

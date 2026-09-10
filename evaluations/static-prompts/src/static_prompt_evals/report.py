@@ -7,6 +7,7 @@ import hashlib
 import html
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -286,7 +287,7 @@ def main() -> None:
     parser.add_argument("--decision-output", type=Path, help="Export the shared legacy decision to a NEW file")
     parser.add_argument("--decision-only", action="store_true",
                         help="Only export --decision-output; do not create or modify REPORT.md")
-    args = parser.parse_args()
+    args = parser.parse_args([argument for argument in sys.argv[1:] if argument != "--"])
     if args.decision_only and (not args.decision_output or args.output):
         parser.error("--decision-only requires --decision-output and cannot combine with --output")
     if args.decision_output:
