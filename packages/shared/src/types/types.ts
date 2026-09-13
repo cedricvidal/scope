@@ -4,6 +4,7 @@
 import type { McpServerConfig } from './mcp.js';
 import type { SkillConfig } from './skill.js';
 import type { ExtensionConfig } from './extension.js';
+import type { ResourceConfig } from './resource.js';
 import type { ToolCall } from '../har/types.js';
 
 // Re-export ToolCall so consumers can import from types
@@ -473,6 +474,10 @@ export interface WorkerProcessorOptions {
    *  per-project skill revisions (by ref) hit the right project's copy. */
   projectId?: string;
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
+  /** Resolved resources to provision before the agent starts and release after
+   *  it finishes. Their setup phases publish connection details that are
+   *  interpolated into MCP server config and merged into the agent's env. */
+  resourceConfigs?: ResourceConfig[];
   skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
   extensionConfigs?: ExtensionConfig[];  // Resolved VS Code extension configurations for runtime installation
   /** Current iteration number (1-based) for multi-turn runs. Used by the
