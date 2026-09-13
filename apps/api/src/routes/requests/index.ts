@@ -301,7 +301,7 @@ apiRoute(ctx.app, ctx.registry, {
   successStatus: 201,
   handler: async (req, res) => {
     const projectId = getQueryProjectId(req);
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId, resources: resourceSpecs } = req.body;
     let worker = req.query.worker as string | undefined;
 
     // AGENTS.md body + lineage (for any caller that wants to attach an
@@ -351,6 +351,48 @@ apiRoute(ctx.app, ctx.registry, {
           return;
         }
         resolvedCodebaseRevisionId = result.revisionId;
+      }
+    }
+
+    // Resolve resource specs to pinned revision ids. Pinning at submit time is
+    // what keeps a run explainable after the resource is edited: the run records
+    // the exact revision it ran, not a slug whose latest has since moved on.
+    // Resolved once here and shared by every variation in a grouped submission,
+    // so each profile gets an identical environment.
+    let resolvedResourceRevisionIds: string[] | undefined;
+    {
+      const specs: string[] = Array.isArray(resourceSpecs)
+        ? resourceSpecs.filter((s: unknown): s is string => typeof s === "string" && s.trim() !== "")
+        : [];
+      if (specs.length > 0) {
+        const ids: string[] = [];
+        for (const raw of specs) {
+          const spec = raw.trim();
+          const at = spec.lastIndexOf("@r");
+          const slug = at > 0 ? spec.slice(0, at) : spec;
+          const revisionNumber = at > 0 ? Number(spec.slice(at + 2)) : undefined;
+
+          let revision = null;
+          if (revisionNumber !== undefined && Number.isInteger(revisionNumber) && revisionNumber > 0) {
+            const resource = await ctx.resourceStore.getBySlug(projectId, slug);
+            revision = resource
+              ? await ctx.resourceRevisionStore.getByNumber(resource._id, revisionNumber)
+              : null;
+          } else {
+            // A bare spec is a slug or a revision id; try both before failing.
+            const resource = await ctx.resourceStore.getBySlug(projectId, spec);
+            revision = resource
+              ? await ctx.resourceRevisionStore.getLatest(resource._id)
+              : await ctx.resourceRevisionStore.get(spec);
+          }
+
+          if (!revision) {
+            res.status(400).json({ error: `Resource '${spec}' not found in this project` });
+            return;
+          }
+          ids.push(revision._id);
+        }
+        resolvedResourceRevisionIds = ids;
       }
     }
 
@@ -650,6 +692,7 @@ apiRoute(ctx.app, ctx.registry, {
             ...(r.mcpServers ? { mcpServers: r.mcpServers } : {}),
             ...(r.skillRevisions ? { skillRevisions: r.skillRevisions } : {}),
             ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
+            ...(resolvedResourceRevisionIds ? { resourceRevisionIds: resolvedResourceRevisionIds } : {}),
             ...(r.extensions ? { extensions: r.extensions } : {}),
             agentVersion: r.agentVersion,
             profileId: r.profile._id,
@@ -1048,6 +1091,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
+            ...(resolvedResourceRevisionIds ? { resourceRevisionIds: resolvedResourceRevisionIds } : {}),
           ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
           agentVersion: resolvedAgentVersion,
           ...(profileId ? { profileId } : {}),
@@ -1109,6 +1153,7 @@ apiRoute(ctx.app, ctx.registry, {
       ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
       ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
+            ...(resolvedResourceRevisionIds ? { resourceRevisionIds: resolvedResourceRevisionIds } : {}),
       ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
       ...(profileId ? { profileId } : {}),

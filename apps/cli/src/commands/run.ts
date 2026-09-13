@@ -57,6 +57,7 @@ run
   .option("--mcp-servers <slugs...>", "MCP server slugs to use for this run")
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--codebase <ref>", "Codebase revision id, ref (slug@rN), or slug to use for this run")
+  .option("--resources <specs...>", "Resources to provision for this run (slug, slug@rN, or revision id), in setup order")
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
   .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
   .option("--profile <id>", "Saved profile to apply (supplies worker, model, extensions, etc.)")
@@ -68,7 +69,7 @@ run
   .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options, command) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption, agentsMd: agentsMdInput } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, resources: resourceSpecs, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption, agentsMd: agentsMdInput } = options;
     // `--profile` is the documented flag; `--base-profile` is kept as a hidden
     // back-compat alias. Both resolve to the same request `profileId`.
     const profileId = profile ?? baseProfile;
@@ -129,6 +130,9 @@ run
       }
       if (skillSlugs && skillSlugs.length > 0) {
         body.skills = skillSlugs;
+      }
+      if (resourceSpecs && resourceSpecs.length > 0) {
+        body.resources = resourceSpecs;
       }
       if (codebaseRef) {
         body.codebase = codebaseRef;
