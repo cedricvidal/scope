@@ -157,3 +157,39 @@ exists so PowerShell support for the Windows worker is additive rather than
 breaking. A resource referenced by a run on a platform it has no body for fails
 the run loudly — silently skipping setup would produce a run that looks valid but
 has no resource.
+
+## Leaked resources, and why there is no blanket sweep
+
+If a worker dies between setup and teardown — SIGKILL, OOM, node eviction — the
+resource's teardown never runs and whatever it created survives.
+
+On Kubernetes this is largely handled: kubedock purges containers from previous
+runs at worker setup, and reaps them on its own timeout. **Under local Docker
+Compose there is no equivalent, and there deliberately cannot be a general one.**
+`KubedockClient.isEnabled()` requires `KUBEDOCK_ENABLED=true` precisely because
+Compose mounts the *host* Docker socket, where a blanket `purgeContainers()`
+would delete the entire development stack — the database, the API, the gateway,
+everything.
+
+So cleanup of leaked resources is the **resource author's responsibility**, and a
+setup phase must be written to be idempotent:
+
+```sh
+# A previous run that died between setup and teardown leaves these behind,
+# and they hold the fixed ports this resource needs.
+docker rm -f github-sim github-mcp >/dev/null 2>&1 || true
+```
+
+Removing by explicit name is safe in both environments: it is scoped to the
+containers this resource owns, and cannot touch the surrounding stack. It also
+fixes the practical symptom of a leak, which is a fixed published port still held
+by a container from an earlier run.
+
+Two corollaries worth stating:
+
+- **Prefer fixed, resource-specific container names** over generated ones, since
+  a name is the only handle a later run has on an orphan.
+- **An externally provisioned resource — a cloud database, a SaaS sandbox — has
+  no equivalent safety net.** A leak there costs money and no purge reclaims it.
+  Such a resource should provision something with a server-side expiry, or tag
+  what it creates so a separate reaper can find it.
