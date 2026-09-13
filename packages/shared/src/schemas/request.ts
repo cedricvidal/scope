@@ -8,6 +8,20 @@ import { GateIdSchema } from "./criteria.js";
 
 extendZodWithOpenApi(z);
 
+/** Outcome of one resource's lifecycle within a run. */
+export const ResourceRunOutcomeSchema = z
+  .object({
+    ref: z.string(),
+    slug: z.string(),
+    revisionId: z.string(),
+    setupSucceeded: z.boolean(),
+    published: z.array(z.string()),
+    setupDurationMs: z.number().optional(),
+    error: z.string().optional(),
+    teardownRan: z.boolean().optional(),
+  })
+  .openapi("ResourceRunOutcome");
+
 export const GateConfigSchema = z
   .object({
     gate: GateIdSchema,
@@ -220,6 +234,12 @@ export const RunStateSchema = z
     setupVideoUrls: z.array(z.string()).optional(),
     tokenUsage: TokenUsageSchema.optional(),
     aiCallCount: z.number().optional(),
+    /** Per-resource lifecycle outcomes, so a run that ended up without the
+     *  environment it asked for is distinguishable after the fact. */
+    resources: z.array(ResourceRunOutcomeSchema).optional(),
+    /** Whether MCP servers were actually registered with the gateway. False
+     *  alongside a non-empty `mcpServers` means the run had no tools. */
+    mcpRegistered: z.boolean().optional(),
     rawChatUrl: z.string().optional(),
     rawChatFormat: z.string().optional(),
     pausedAt: z.coerce.date().optional(),

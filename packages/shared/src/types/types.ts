@@ -4,7 +4,7 @@
 import type { McpServerConfig } from './mcp.js';
 import type { SkillConfig } from './skill.js';
 import type { ExtensionConfig } from './extension.js';
-import type { ResourceConfig } from './resource.js';
+import type { ResourceConfig, ResourceRunOutcome } from './resource.js';
 import type { ToolCall } from '../har/types.js';
 
 // Re-export ToolCall so consumers can import from types
@@ -398,6 +398,18 @@ export interface RunState {
   /** When this run was last resumed from paused state */
   resumedAt?: Date;
   turns?: ConversationTurn[];
+  /** Outcome of each resource this run provisioned, in setup order.
+   *
+   *  Recorded so a run that ended up without the environment it asked for is
+   *  visibly different from one that had it. The dangerous failure mode this
+   *  guards against is a run that completes, looks valid, and silently had no
+   *  MCP tools — a comparison against such a run is meaningless, so it must be
+   *  distinguishable after the fact rather than only in the live log. */
+  resources?: ResourceRunOutcome[];
+  /** Whether MCP servers were actually registered with the gateway for this
+   *  run. `false` with a non-empty `mcpServers` on the request means the profile
+   *  ran without the tools it was configured with. */
+  mcpRegistered?: boolean;
   workerVersion?: string;
   os?: OsInfo;
   /** Wall-clock time of the last heartbeat written by the worker actively
@@ -543,6 +555,10 @@ export interface WorkerProcessor {
   setup?(log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<SetupResult | void>;
   /** Called once after the last processMessage in a run. Always called if setup() was called, even on error. */
   teardown?(log: WorkerLogFn): Promise<void>;
+  /** Lifecycle observations to persist on the run record. Read after teardown so
+   *  a run that ended up without the environment or tools it asked for is
+   *  distinguishable after the fact, not only in the live log. */
+  getRunObservations?(): { resources?: ResourceRunOutcome[]; mcpRegistered?: boolean };
 }
 
 // Base configuration for queue processors

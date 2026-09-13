@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, KubedockClient, createFreshWorkspace, cleanupWorkspaces, type ResourceConfig, runResourceSetups, runResourceTeardowns, interpolateMcpServerConfigs, referencedPlaceholders } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, KubedockClient, createFreshWorkspace, cleanupWorkspaces, type ResourceConfig, type ResourceRunOutcome, runResourceSetups, runResourceTeardowns, interpolateMcpServerConfigs, referencedPlaceholders } from "shared";
 import { initTelemetry, trackMetric, trackTrace, trackEvent } from "telemetry";
 import { runACPSession } from "./acp-client.js";
 import { access, constants as fsConstants } from "node:fs/promises";
@@ -136,6 +136,15 @@ class CopilotProcessor implements WorkerProcessor {
   private provisionedResources: ResourceConfig[] = [];
   /** Connection details published by this run's resources. */
   private resourceEnv: Record<string, string> = {};
+  /** Per-resource lifecycle outcomes, surfaced on the run record. */
+  private resourceOutcomes: ResourceRunOutcome[] = [];
+  /** Whether MCP servers were actually registered with the gateway. */
+  private mcpRegistered = false;
+
+  /** Lifecycle observability for the run record, read after setup/teardown. */
+  getRunObservations(): { resources: ResourceRunOutcome[]; mcpRegistered: boolean } {
+    return { resources: this.resourceOutcomes, mcpRegistered: this.mcpRegistered };
+  }
 
   getAgentVersion(): string {
     return AGENT_VERSION;
@@ -182,11 +191,29 @@ class CopilotProcessor implements WorkerProcessor {
         });
         this.provisionedResources = provisioned;
         this.resourceEnv = values;
+        this.resourceOutcomes = provisioned.map((r) => ({
+          ref: r.ref,
+          slug: r.slug,
+          revisionId: r.revisionId,
+          setupSucceeded: true,
+          published: r.exports,
+        }));
         await log("info", "Resources provisioned", {
           count: provisioned.length,
           published: Object.keys(values).sort(),
         });
       } catch (err) {
+        // Record which resources were attempted before unwinding, so a failed
+        // run still shows what environment it was trying to stand up.
+        const message = err instanceof Error ? err.message : String(err);
+        this.resourceOutcomes = this.resourceConfigs.map((r) => ({
+          ref: r.ref,
+          slug: r.slug,
+          revisionId: r.revisionId,
+          setupSucceeded: false,
+          published: [],
+          ...(message.includes(`'${r.slug}'`) ? { error: message } : {}),
+        }));
         // Unwind whatever already came up before failing the run; a partially
         // provisioned environment would otherwise leak into the next run.
         await this.releaseResources(log);
@@ -211,6 +238,7 @@ class CopilotProcessor implements WorkerProcessor {
       await log("info", "Registering MCP servers with gateway", { count: configs.length, servers: configs.map((s) => s.name) });
       await this.gateway.purgeAll();
       for (const config of configs) await this.gateway.registerServer(config);
+      this.mcpRegistered = true;
     }
   }
 
@@ -247,6 +275,9 @@ class CopilotProcessor implements WorkerProcessor {
     if (this.provisionedResources.length === 0) return;
     const toRelease = this.provisionedResources;
     this.provisionedResources = [];
+    for (const o of this.resourceOutcomes) {
+      if (toRelease.some((r) => r.revisionId === o.revisionId)) o.teardownRan = true;
+    }
     await runResourceTeardowns(toRelease, {
       cwd: this.workspacePath ?? process.cwd(),
       env: { ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}) },

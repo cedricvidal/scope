@@ -124,3 +124,26 @@ export interface ResourceConfig {
   teardown?: ResourceScript;
   exports: string[];
 }
+
+/**
+ * Outcome of one resource's lifecycle within a run.
+ *
+ * Persisted on the run so that a run which ended up without the environment it
+ * asked for is distinguishable after the fact, not only in the live log.
+ */
+export interface ResourceRunOutcome {
+  /** Revision ref the run was pinned to, e.g. "github-simulator@r2". */
+  ref: string;
+  slug: string;
+  revisionId: string;
+  /** Whether the setup phase completed and published its declared exports. */
+  setupSucceeded: boolean;
+  /** Names actually published. Empty when setup failed before publishing. */
+  published: string[];
+  setupDurationMs?: number;
+  /** Present when setup failed; the message the run failed with. */
+  error?: string;
+  /** Whether a teardown phase ran. Teardown is best-effort, so a false here
+   *  with a teardown body defined means cleanup did not complete. */
+  teardownRan?: boolean;
+}

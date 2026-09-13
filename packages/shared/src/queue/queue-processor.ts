@@ -833,6 +833,22 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       if (this.processor.teardown) {
         await this.processor.teardown(log);
       }
+      // Persist lifecycle observations AFTER teardown so teardownRan is accurate.
+      // Best-effort: failing to record observability must not change the run's
+      // outcome, which is the thing the run actually exists to report.
+      if (this.processor.getRunObservations) {
+        try {
+          const obs = this.processor.getRunObservations();
+          const fields: Record<string, unknown> = { "run.updatedAt": new Date(), updatedAt: new Date() };
+          if (obs.resources && obs.resources.length > 0) fields["run.resources"] = obs.resources;
+          if (obs.mcpRegistered !== undefined) fields["run.mcpRegistered"] = obs.mcpRegistered;
+          if (Object.keys(fields).length > 2) {
+            await withRetry(() => this.collection.updateOne({ _id: requestId }, { $set: fields } as any));
+          }
+        } catch (err) {
+          await log("warn", `Failed to record run observations: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
       // Unsubscribe from cancel notifications — normal completion path
       unsubCancel();
     }
