@@ -300,6 +300,9 @@ export interface RequestDocument {
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
   codebaseRevisionId?: string;    // FK → CodebaseRevisionDocument._id — seeds the workspace before the agent starts
+  /** FK → ResourceRevisionDocument._id, in setup order. Pinned at submit time so
+   *  the run stays reproducible after the resource is edited. */
+  resourceRevisionIds?: string[];
   extensions?: string[];           // VS Code extension IDs selected for this run (e.g. "ms-python.python")
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)

@@ -37,6 +37,8 @@ import { PromptClient } from "../task-prompts/prompt-client.js";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CodebaseClient } from "../codebases/codebase-client.js";
+import { ResourceClient } from "../resources/resource-client.js";
+import type { ResourceConfig } from "../types/resource.js";
 import { seedCodebaseToWorkspace } from "../codebases/codebase-seeder.js";
 
 /**
@@ -435,7 +437,22 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolved extensions: ${extensionConfigs.map(e => e.version ? `${e.id}@${e.version}` : e.id).join(", ")}`);
     }
 
-    await this.processMultiTurn(requestDoc, message, heartbeat, log, startedAt, mcpServerConfigs, skillConfigs, extensionConfigs);
+    // Resolve resource revisions to configs via API. Resolved here rather than
+    // inside the worker so a failure to find a resource fails the run before any
+    // setup work happens.
+    let resourceConfigs: ResourceConfig[] | undefined;
+    if (requestDoc.resourceRevisionIds && requestDoc.resourceRevisionIds.length > 0) {
+      const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+      if (!apiBaseUrl) {
+        throw new Error("Resources requested but SCOPE_MT_API_URL is not configured");
+      }
+      const resourceClient = new ResourceClient(apiBaseUrl);
+      await log("info", `Resolving ${requestDoc.resourceRevisionIds.length} resource(s)`, { resources: requestDoc.resourceRevisionIds });
+      resourceConfigs = await resourceClient.resolveResources(requestDoc.projectId, requestDoc.resourceRevisionIds);
+      await log("info", `Resolved resources: ${resourceConfigs.map(r => r.ref).join(", ")}`);
+    }
+
+    await this.processMultiTurn(requestDoc, message, heartbeat, log, startedAt, mcpServerConfigs, skillConfigs, extensionConfigs, resourceConfigs);
   }
 
   /**
@@ -627,7 +644,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     startedAt: Date,
     mcpServerConfigs?: McpServerConfig[],
     skillConfigs?: SkillConfig[],
-    extensionConfigs?: ExtensionConfig[]
+    extensionConfigs?: ExtensionConfig[],
+    resourceConfigs?: ResourceConfig[]
   ): Promise<void> {
     const requestId = requestDoc._id;
     // Resolve the runId for blob paths. New requests always have run._id;
@@ -687,7 +705,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Setup: create workspace, extract skills, upload setup videos
     if (this.processor.setup) {
-      const setupResult = await this.processor.setup(log, { model: requestDoc.model, projectId: requestDoc.projectId, mcpServerConfigs, skillConfigs, extensionConfigs });
+      const setupResult = await this.processor.setup(log, { model: requestDoc.model, projectId: requestDoc.projectId, mcpServerConfigs, skillConfigs, extensionConfigs, resourceConfigs });
 
       if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
         try {

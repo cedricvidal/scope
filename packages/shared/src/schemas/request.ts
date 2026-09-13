@@ -117,6 +117,11 @@ export const CreateRequestInputSchema = z
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
     codebaseRevisionId: z.string().optional(),
+    /** Resource specs (slug, `slug@rN`, or revision id) to provision for this
+     *  run, in setup order. Resolved at submit time and shared by every
+     *  variation in a grouped submission, so each profile gets an identical
+     *  environment. */
+    resources: z.array(z.string()).optional(),
     extensions: z.array(z.string()).optional(),
     profileId: z.string().optional(),
     profileVariations: z.array(z.string()).optional(),
