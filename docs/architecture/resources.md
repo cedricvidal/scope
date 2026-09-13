@@ -2,6 +2,22 @@
 
 Resources are first-class lifecycle definitions that make external dependencies available to a run (for example, a simulator container). They mirror codebases: a mutable `resources` identity document owns an immutable, sequential `resource-revisions` history. Runtime execution is pinned to revision ids so historical runs remain explainable after the resource changes.
 
+## A note on the name
+
+"Resource" is a loaded word in this codebase's neighbourhood — Kubernetes
+resources, Azure resources, and container `resources:` limits all appear in the
+deploy manifests. It was still chosen deliberately, because the entity describes
+*what a run needs to exist*, independent of how it is produced: a container
+started through the Docker socket and an externally provisioned cloud database
+are the same thing from the run's point of view, and only the script bodies
+differ.
+
+One collision is worth knowing about: the portal already has a **nav group**
+named "Resources" (`apps/portal/src/components/Layout.tsx`), described as
+"project-scoped integrations you wire up (MCP, extensions)". This entity belongs
+in that group semantically, so the nav label is disambiguated there rather than
+the entity being renamed.
+
 ## Data model
 
 - **Resource** — `_id` UUID, immutable `projectId`, project-scoped `slug`, display `name`, optional `description`, `revisionCounter`, `latestRevisionId` / `latestRevisionNumber`, creator/timestamps, and optional `deletedAt`.
