@@ -236,6 +236,29 @@ run
       }
 
       const result = await response.json();
+
+      // A variation submit creates one request per profile and returns
+      // { ids, variations, submissionId, ... } with no `id` or `workerType`.
+      // Printing it through the single-request path rendered `undefined` and
+      // then crashed in chalk, so the whole submission looked like it failed
+      // when in fact every request had been created.
+      if (Array.isArray(result.ids) && result.ids.length > 0 && !result.id) {
+        console.log(`${successText('Submitted:')} ${value(String(result.count ?? result.ids.length))} request(s) across ${value(String(result.variationCount ?? result.ids.length))} profile(s)`);
+        if (result.submissionId) console.log(`${label('Submission:')} ${value(result.submissionId)}`);
+        for (const variation of (result.variations ?? [])) {
+          const ids: string[] = variation.ids ?? (variation.id ? [variation.id] : []);
+          const name = variation.label ?? variation.profileName ?? variation.profileId ?? 'variation';
+          console.log(`  ${label(String(name))} ${value(ids.join(', '))}`);
+        }
+        console.log(`${label('Status:')} ${value(result.status)}`);
+        for (const warning of (Array.isArray(result.warnings) ? result.warnings : [])) {
+          console.log(`${errorText('⚠ Warning:')} ${warning}`);
+        }
+        // Streaming follows a single request; a submission has several.
+        printFollowUpCommands(result.ids[0]);
+        return;
+      }
+
       console.log(`${successText('Request submitted:')} ${value(result.id)}`);
       if (result.submissionId) console.log(`${label('Submission:')} ${value(result.submissionId)}`);
       console.log(`${label('Worker:')} ${value(result.workerType)}`);
