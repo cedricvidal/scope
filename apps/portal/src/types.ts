@@ -138,7 +138,7 @@ export interface Run {
   skills?: string[];
   skillRevisions?: string[];
   codebaseRevisionId?: string;
-  resourceRevisionIds?: string[];
+  resources?: ResourceBinding[];
   extensions?: string[];
   priority?: number;
   submissionId?: string;
@@ -961,6 +961,28 @@ export type ResourceInterpreter = "sh";
 
 export type ResourceScript = Partial<Record<ResourceInterpreter, string>>;
 
+/** One input a resource revision's lifecycle scripts read from the environment. */
+export interface ResourceParameter {
+  name: string;
+  description?: string;
+  required: boolean;
+  default?: string;
+  example?: string;
+}
+
+/** A resource reference before submit-time revision and parameter resolution. */
+export interface ResourceBindingSpec {
+  ref: string;
+  params?: Record<string, string>;
+}
+
+/** Resolved, pinned resource binding persisted on a request. */
+export interface ResourceBinding {
+  ref: string;
+  revisionId: string;
+  params: Record<string, string>;
+}
+
 /** A first-class resource entity (mutable pointer/metadata). */
 export interface ResourceDocument {
   _id: string;
@@ -988,6 +1010,7 @@ export interface ResourceRevisionDocument {
   setup: ResourceScript;
   teardown?: ResourceScript;
   exports: string[];
+  parameters?: ResourceParameter[];
   contentSha256: string;
   creator?: string;
   createdAt: string;
@@ -1006,12 +1029,14 @@ export interface CreateResourceBody {
   setup: ResourceScript;
   teardown?: ResourceScript;
   exports: string[];
+  parameters?: ResourceParameter[];
 }
 
 export interface CreateResourceRevisionBody {
   setup: ResourceScript;
   teardown?: ResourceScript;
   exports: string[];
+  parameters?: ResourceParameter[];
 }
 
 export interface ResourceRunOutcome {
@@ -1020,6 +1045,7 @@ export interface ResourceRunOutcome {
   revisionId: string;
   setupSucceeded: boolean;
   published: string[];
+  params?: Record<string, string>;
   setupDurationMs?: number;
   error?: string;
   teardownRan?: boolean;
@@ -1095,6 +1121,7 @@ export interface ProfileVersionDocument {
   agentVersion?: string;
   mcpServers?: string[];
   skillRevisions?: string[];
+  resources?: ResourceBindingSpec[];
   extensions?: string[];
   createdAt: string;
 }

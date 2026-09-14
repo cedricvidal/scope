@@ -123,21 +123,54 @@ export function ResourceDetail() {
                 <ScriptBlock title="Setup" body={selectedRevision.setup.sh} required />
                 <ScriptBlock title="Teardown" body={selectedRevision.teardown?.sh} />
 
-                <section className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-medium">Exports</h2>
-                    <Badge variant="outline" className="text-[10px]">{selectedRevision.exports.length}</Badge>
-                  </div>
-                  {selectedRevision.exports.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedRevision.exports.map((name) => (
-                        <Badge key={name} variant="secondary" className="font-mono text-[11px]">{name}</Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">This revision does not declare exported values.</p>
-                  )}
-                </section>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <InterfacePanel
+                    title="Parameters"
+                    description="Inputs supplied before setup starts."
+                    count={selectedRevision.parameters?.length ?? 0}
+                  >
+                    {selectedRevision.parameters?.length ? (
+                      <div className="space-y-2">
+                        {selectedRevision.parameters.map((parameter) => (
+                          <div key={parameter.name} className="rounded-md border bg-background p-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-mono text-xs font-medium">{parameter.name}</span>
+                              {parameter.required ? (
+                                <Badge variant="destructive" className="text-[10px]">required</Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[10px]">optional</Badge>
+                              )}
+                              {parameter.default !== undefined && (
+                                <Badge variant="secondary" className="font-mono text-[10px]">default: {parameter.default}</Badge>
+                              )}
+                            </div>
+                            {parameter.description && (
+                              <p className="mt-1 text-xs text-muted-foreground">{parameter.description}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">This revision does not declare parameter inputs.</p>
+                    )}
+                  </InterfacePanel>
+
+                  <InterfacePanel
+                    title="Exports"
+                    description="Outputs published after setup completes."
+                    count={selectedRevision.exports.length}
+                  >
+                    {selectedRevision.exports.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedRevision.exports.map((name) => (
+                          <Badge key={name} variant="secondary" className="font-mono text-[11px]">{name}</Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">This revision does not declare exported values.</p>
+                    )}
+                  </InterfacePanel>
+                </div>
               </div>
             )}
           </CardContent>
@@ -195,6 +228,31 @@ export function ResourceDetail() {
 
 function Detail({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return <div className={className}><span className="text-xs text-muted-foreground">{label}</span><div className="break-all">{children}</div></div>;
+}
+
+function InterfacePanel({
+  title,
+  description,
+  count,
+  children,
+}: {
+  title: string;
+  description: string;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-2 rounded-md border bg-muted/20 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-medium">{title}</h2>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+        <Badge variant="outline" className="text-[10px]">{count}</Badge>
+      </div>
+      {children}
+    </section>
+  );
 }
 
 function ScriptBlock({ title, body, required = false }: { title: string; body?: string; required?: boolean }) {
