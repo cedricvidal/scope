@@ -26,6 +26,7 @@ import {
   GitBranch,
   Plug,
   Puzzle,
+  Boxes,
   SlidersHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
@@ -117,6 +118,7 @@ const navGroups: NavGroup[] = [
     label: "Resources",
     scoped: true,
     items: [
+      { to: "/resources", label: "Lifecycle", icon: Boxes },
       { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
       { to: "/extensions", label: "Extensions", icon: Puzzle, featureKey: "extensions" },
     ],
@@ -158,6 +160,7 @@ const FULL_BLEED_ROUTE_PATTERNS = [
   "/task-prompts",
   "/criteria",
   "/insights",
+  "/resources",
   "/mcp-servers",
   "/skills",
   "/extensions",
