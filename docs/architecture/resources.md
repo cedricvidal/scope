@@ -50,6 +50,51 @@ Routes live in `apps/api/src/routes/resources.ts`:
 
 No PATCH, PUT, or DELETE route exists for revisions. The CLI exposes `scope resource list|get|create|update|delete|revisions` and forwards `projectId` on every API call.
 
+`scope resource revisions <slug>` does double duty: it lists revisions, or creates one when
+`--setup-sh`/`--setup-file` is supplied. A create whose content matches the latest revision is
+deduplicated, and the CLI says so explicitly — `No changes — reused existing resource revision:` —
+printing the same `Content SHA` as the revision it reused. That identical hash is the
+user-visible face of the content addressing described above.
+
+## Portal
+
+Pages live under `apps/portal/src/pages/Resource*.tsx`, with `ResourcePicker` in `components/`,
+mirroring the codebase catalog: a list with preview panel, a detail page, a create form, and a
+picker wired into run submission.
+
+The detail page is where immutability becomes legible. Selecting an older revision swaps the whole
+pane — setup body, teardown body, exports, and `Content SHA` — to exactly what that revision
+declared, rather than showing the latest with a version label. Reviewers can therefore confirm the
+immutability claim by clicking, without querying the database.
+
+In the sidebar the entity sits under **Integrations** (formerly "Resources"). The group was
+renamed rather than the item: its siblings, MCP and Extensions, name *things*, so naming this item
+anything other than Resources would have hidden it from anyone looking for it.
+
+Run detail surfaces `run.resources` and `run.mcpRegistered` (see
+[Run observability](#run-observability)), falling back to the top-level `resourceRevisionIds`
+for runs recorded before those fields existed.
+
+## Run observability
+
+Two fields are written back after teardown:
+
+| Field | Meaning |
+|-------|---------|
+| `run.resources[]` | Per resource: `ref`, `slug`, `revisionId`, `setupSucceeded`, `published[]`, `teardownRan` |
+| `run.mcpRegistered` | Whether any MCP server was registered for the run |
+
+Both are nested under `run`, **not** at the document root; `resourceRevisionIds` is the top-level
+field, written at submit time. Consumers must tolerate their absence, since runs predating the
+feature carry only the pinned revision ids.
+
+`mcpRegistered: false` is a legitimate value, not a defect — a run using the `gh` CLI surface
+registers no MCP server. It is, however, the fastest way to detect a *mis-submitted* run: a run
+whose task instructs the agent to use MCP tools but which reports `mcpRegistered: false` never had
+those tools, and any conclusion drawn from it is void. Registering an MCP server requires passing
+it explicitly (`--mcp-servers <slug>`); attaching only the resource that publishes its URL is not
+enough, and fails silently rather than loudly.
+
 ## Indexes
 
 Migration `029-create-resource-indexes.ts` creates:
