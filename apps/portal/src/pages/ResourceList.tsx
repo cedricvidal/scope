@@ -194,7 +194,9 @@ export function ResourceList() {
           onSearchChange={state.setSearch}
           searchPlaceholder="Search resources…"
           footer={<div className="flex items-center justify-between gap-2"><ClearFiltersLink onClick={state.clearFilters} disabled={!state.hasActiveFilters} /><CustomizeColumnsLink onClick={() => setCustomizeOpen(true)} /></div>}
-        />
+        >
+          <></>
+        </FilterRail>
       )}
       secondaryPanel={customizeOpen ? <CustomizeColumnsPanel columns={COLUMN_DEFS} hidden={columnVisibility.hidden} onToggle={columnVisibility.toggle} onSetHidden={columnVisibility.setHidden} onReset={columnVisibility.reset} onClose={() => setCustomizeOpen(false)} /> : undefined}
       onSecondaryClose={() => setCustomizeOpen(false)}
