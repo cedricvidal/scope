@@ -31,7 +31,7 @@ import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { TaskPromptBadge } from "@/components/TaskPromptBadge";
 import { AgentBadge } from "@/components/AgentBadge";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X, Boxes } from "lucide-react";
 import { formatDate, formatId, formatDuration, cn } from "@/lib/utils";
 import {
   GATE_METADATA,
@@ -43,7 +43,7 @@ import {
 } from "@/lib/gates";
 import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { toast } from "sonner";
-import type { RunState, LogEvent } from "@/types";
+import type { RunState, LogEvent, ResourceRunOutcome } from "@/types";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { getRetryButtonState } from "@/components/RetryButton";
 
@@ -71,6 +71,37 @@ function ResourceLinks({ label, items, hrefBase }: { label: string; items: strin
           >
             {slug}
           </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RunResourceLinks({ outcomes, revisionIds }: { outcomes: ResourceRunOutcome[]; revisionIds: string[] }) {
+  const outcomeRevisionIds = new Set(outcomes.map((resource) => resource.revisionId));
+  const rawRevisionIds = revisionIds.filter((revisionId) => !outcomeRevisionIds.has(revisionId));
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">Resources</span>
+      <div className="flex flex-wrap items-center gap-1">
+        {outcomes.map((resource) => (
+          <Link
+            key={resource.revisionId}
+            to={`/resources/${resource.slug}`}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-mono transition-colors hover:bg-accent",
+              resource.setupSucceeded ? "border-emerald-500/40" : "border-destructive/50",
+            )}
+          >
+            {resource.ref}
+            {resource.setupSucceeded ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <XCircle className="h-3 w-3 text-destructive" />}
+          </Link>
+        ))}
+        {rawRevisionIds.map((revisionId) => (
+          <span key={revisionId} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono">
+            {formatId(revisionId)}
+          </span>
         ))}
       </div>
     </div>
@@ -510,6 +541,9 @@ export function RunDetail() {
    const skillIds = skillIdsFromRevisions.length > 0
      ? skillIdsFromRevisions
      : (run.skills ?? []);
+  const runResourceOutcomes = run.resources ?? [];
+  const runResourceRevisionIds = run.resourceRevisionIds ?? [];
+  const hasRunResources = runResourceOutcomes.length > 0 || runResourceRevisionIds.length > 0;
 
   const gateSummaries = (run.gateSummaries ?? []) as GateRunSummary[];
   const gateSummaryById = new Map(gateSummaries.map((summary) => [summary.gate, summary]));
@@ -674,6 +708,7 @@ export function RunDetail() {
             {/* Tier 3 — resource attachments */}
             {((run.mcpServers && run.mcpServers.length > 0) ||
               (run.skills && run.skills.length > 0) ||
+              hasRunResources ||
               (run.extensions && run.extensions.length > 0)) && (
               <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
                 {run.mcpServers && run.mcpServers.length > 0 && (
@@ -684,6 +719,9 @@ export function RunDetail() {
                 )}
                 {run.extensions && run.extensions.length > 0 && (
                   <ResourceLinks label="Extensions" items={run.extensions} hrefBase="/extensions" />
+                )}
+                {hasRunResources && (
+                  <RunResourceLinks outcomes={runResourceOutcomes} revisionIds={runResourceRevisionIds} />
                 )}
               </div>
             )}
@@ -1384,6 +1422,51 @@ export function RunDetail() {
                       );
                     })}
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Resources card */}
+            {hasRunResources && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Boxes className="h-4 w-4" /> Resources ({Math.max(runResourceOutcomes.length, runResourceRevisionIds.length)})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {runResourceOutcomes.length > 0 ? (
+                    runResourceOutcomes.map((resource) => (
+                      <div key={resource.revisionId} className="rounded-md border p-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link to={`/resources/${resource.slug}`} className="font-mono text-xs text-primary hover:underline">{resource.ref}</Link>
+                          {resource.setupSucceeded ? (
+                            <Badge variant="success" className="gap-1"><CheckCircle2 className="h-3 w-3" /> setup ok</Badge>
+                          ) : (
+                            <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" /> setup failed</Badge>
+                          )}
+                          {resource.teardownRan !== undefined && (
+                            <Badge variant="outline" className="text-xs">teardown {resource.teardownRan ? "ran" : "not run"}</Badge>
+                          )}
+                        </div>
+                        {resource.error && <p className="mt-2 text-xs text-destructive">{resource.error}</p>}
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs text-muted-foreground">Published:</span>
+                          {resource.published.length > 0 ? (
+                            resource.published.map((name) => <Badge key={name} variant="secondary" className="font-mono text-xs">{name}</Badge>)
+                          ) : (
+                            <span className="text-xs text-muted-foreground">none</span>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {runResourceRevisionIds.map((revisionId) => (
+                        <Badge key={revisionId} variant="secondary" className="font-mono text-xs">{revisionId}</Badge>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
