@@ -700,6 +700,19 @@ export function RunDetail() {
                   value={<span className="font-mono">{run.agentVersion}</span>}
                 />
               )}
+              {run.profileId && (
+                <MetaItem
+                  label="Profile"
+                  value={(
+                    <Link to={`/profiles/${run.profileId}`} className="text-primary hover:underline">
+                      {profile?.name ?? <Skeleton className="inline-block h-4 w-24 align-middle" />}
+                      {run.profileVersionId?.split("@")[1] && (
+                        <span className="ml-1 font-mono text-muted-foreground">v{run.profileVersionId.split("@")[1]}</span>
+                      )}
+                    </Link>
+                  )}
+                />
+              )}
               <MetaItem label="Created" value={formatDate(run.createdAt)} />
               {run.maxIterations && <MetaItem label="Max iterations" value={run.maxIterations} />}
               {(() => {
