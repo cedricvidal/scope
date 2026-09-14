@@ -245,6 +245,23 @@ the Docker socket instead of configuring itself. Parameters are also merged per 
 rather than into shared phase options, so one resource's values cannot leak into the next
 one's script.
 
+### Parameterize scenario-specific facts too, not just obvious inputs
+
+A resource stops being reusable at the first fact it asserts about one particular scenario,
+and that fact is easy to miss because it is usually a *good* check.
+
+The GitHub simulator's setup verified that issue #11 existed before declaring itself ready —
+a deliberate fail-fast, since a simulator serving an empty seed looks healthy but has nothing
+to work on. Once the repository became a parameter, that assertion was the thing that broke:
+the first run against a different repository failed inside setup rather than in the import,
+for a reason that had nothing to do with the repository being wrong.
+
+The fix is not to drop the check but to parameterize it. `ASSERT_ISSUE` is optional; left
+unset the assertion is skipped and only reachability is required, and the comparison profiles
+pin it to `11`. The general rule: when parameterizing a resource, audit the lifecycle for
+constants that describe the *scenario* rather than the *resource*, because those are what the
+new parameters will collide with.
+
 ### Parameters are not a credential channel
 
 Resolved values are stored in plaintext on the request document and shown in the portal.
