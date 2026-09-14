@@ -19,6 +19,7 @@ import { normalizeUrl, printFollowUpCommands, withOutputOption, withProjectOptio
 import { requireProjectId } from "../utils/config.js";
 import { apiFetch, getApiBasePath } from "../utils/api-client.js";
 import { parseGatesOption } from "../utils/gates.js";
+import { buildResourceBindingSpecs, collectRepeatable } from "../utils/resources.js";
 
 /**
  * Resolve a CLI option that may be either a literal string or a `@path`
@@ -30,6 +31,30 @@ function resolveTextOrFile(input: string): string {
     return readFileSync(resolve(input.slice(1)), "utf8");
   }
   return input;
+}
+
+interface ApiErrorBody {
+  error?: unknown;
+  errors?: unknown;
+  conflicts?: unknown;
+}
+
+function formatApiErrorBody(body: ApiErrorBody): string {
+  const lines: string[] = [];
+  if (typeof body.error === "string") {
+    lines.push(body.error);
+  } else if (body.error !== undefined) {
+    lines.push(JSON.stringify(body.error));
+  }
+  if (Array.isArray(body.errors) && body.errors.length > 0) {
+    lines.push("Errors:");
+    lines.push(...body.errors.map((item) => `  - ${String(item)}`));
+  }
+  if (Array.isArray(body.conflicts) && body.conflicts.length > 0) {
+    lines.push("Conflicts:");
+    lines.push(...body.conflicts.map((item) => `  - ${String(item)}`));
+  }
+  return lines.length > 0 ? lines.join("\n") : JSON.stringify(body);
 }
 
 export function registerRunCommands(program: Command): void {
@@ -58,6 +83,7 @@ run
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--codebase <ref>", "Codebase revision id, ref (slug@rN), or slug to use for this run")
   .option("--resources <specs...>", "Resources to provision for this run (slug, slug@rN, or revision id), in setup order")
+  .option("--resource-param <slug>:<KEY>=<VALUE>", "Resource parameter value (repeatable); matches a --resources entry or profile resource by slug", collectRepeatable, [])
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
   .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
   .option("--profile <id>", "Saved profile to apply (supplies worker, model, extensions, etc.)")
@@ -69,7 +95,7 @@ run
   .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options, command) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, resources: resourceSpecs, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption, agentsMd: agentsMdInput } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, resources: resourceSpecs, resourceParam: resourceParamOverrides, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption, agentsMd: agentsMdInput } = options;
     // `--profile` is the documented flag; `--base-profile` is kept as a hidden
     // back-compat alias. Both resolve to the same request `profileId`.
     const profileId = profile ?? baseProfile;
@@ -131,8 +157,9 @@ run
       if (skillSlugs && skillSlugs.length > 0) {
         body.skills = skillSlugs;
       }
-      if (resourceSpecs && resourceSpecs.length > 0) {
-        body.resources = resourceSpecs;
+      const resources = buildResourceBindingSpecs(resourceSpecs, resourceParamOverrides);
+      if (resources) {
+        body.resources = resources;
       }
       if (codebaseRef) {
         body.codebase = codebaseRef;
@@ -203,8 +230,8 @@ run
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        console.error(errorText("Error:"), error);
+        const error = (await response.json().catch(() => ({ error: response.statusText }))) as ApiErrorBody;
+        console.error(errorText("Error:"), formatApiErrorBody(error));
         process.exit(1);
       }
 

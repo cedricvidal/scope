@@ -4,7 +4,7 @@
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { Command } from "commander";
-import type { ResourceDocument, ResourceRevisionDocument, ResourceScript } from "shared";
+import type { ResourceDocument, ResourceParameter, ResourceRevisionDocument, ResourceScript } from "shared";
 import { configureHelp } from "../utils/helpFormatter.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { DisplayField, OutputFormat } from "../utils/types.js";
@@ -12,6 +12,7 @@ import { getDefaultApiUrl, withOutputOption, withProjectOption } from "../utils/
 import { requireProjectId } from "../utils/config.js";
 import { apiFetch } from "../utils/api-client.js";
 import { errorText, label, successText, value, warnBanner } from "../utils/style.js";
+import { buildResourceParameters, collectRepeatable, formatParameterContract } from "../utils/resources.js";
 
 type JsonDate = string | Date;
 type ResourceApiDocument = Omit<ResourceDocument, "createdAt" | "updatedAt" | "deletedAt"> & {
@@ -38,6 +39,7 @@ interface LifecycleOptions {
   teardownSh?: string;
   teardownFile?: string;
   exports?: string[];
+  param?: string[];
   creator?: string;
 }
 
@@ -68,6 +70,7 @@ function buildLifecycleBody(options: LifecycleOptions): {
   setup: ResourceScript;
   teardown?: ResourceScript;
   exports?: string[];
+  parameters?: ResourceParameter[];
   creator?: string;
 } {
   if (options.setupSh && options.setupFile) {
@@ -85,6 +88,7 @@ function buildLifecycleBody(options: LifecycleOptions): {
     setup: { sh: setupBody },
     ...(teardownBody ? { teardown: { sh: teardownBody } } : {}),
     ...(options.exports && options.exports.length > 0 ? { exports: options.exports } : {}),
+    ...(options.param && options.param.length > 0 ? { parameters: buildResourceParameters(options.param) } : {}),
     ...(options.creator ? { creator: options.creator } : {}),
   };
 }
@@ -104,6 +108,7 @@ function revisionFields(): DisplayField<ResourceRevisionApiDocument>[] {
     { key: "ref", label: "Ref", tableFormatter: (revision) => value(revision.ref) },
     { key: "revisionNumber", label: "Revision", formatter: (revision) => revision.revisionNumber.toString() },
     { key: "exports", label: "Exports", formatter: (revision) => revision.exports.join(", ") || "—" },
+    { key: "parameters", label: "Parameters", formatter: (revision) => formatParameterContract(revision.parameters) },
     { key: "contentSha256", label: "Content SHA", formatter: (revision) => revision.contentSha256.substring(0, 12) },
     { key: "createdAt", label: "Created", formatter: (revision) => new Date(revision.createdAt).toLocaleString() },
   ];
@@ -126,6 +131,7 @@ function addLifecycleOptions(command: Command): Command {
     .option("--teardown-sh <script>", "Shell teardown script body")
     .option("--teardown-file <path>", "Read shell teardown script body from a file")
     .option("--exports <name...>", "Environment variable names exported by setup")
+    .option("--param <NAME[:default][!]>", "Declare a parameter (repeatable): NAME! is required, NAME:default has a default", collectRepeatable, [])
     .option("--creator <creator>", "Revision creator/provenance");
 }
 

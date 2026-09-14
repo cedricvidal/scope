@@ -49,6 +49,9 @@ Routes live in `apps/api/src/routes/resources.ts`:
 | `GET` | `/api/v1/resources/revisions/:id` | Fetch a revision by UUID |
 
 No PATCH, PUT, or DELETE route exists for revisions. The CLI exposes `scope resource list|get|create|update|delete|revisions` and forwards `projectId` on every API call.
+`scope resource create` and revision creation accept `--param NAME[:default][!]`
+for declaring the revision's parameter contract; `!` marks a required parameter
+and `:default` supplies the optional fallback shown in revision output.
 
 `scope resource revisions <slug>` does double duty: it lists revisions, or creates one when
 `--setup-sh`/`--setup-file` is supplied. A create whose content matches the latest revision is
@@ -120,8 +123,17 @@ On Cosmos DB the unique indexes may degrade to non-unique lookup indexes, so the
 A run references resources by spec (`slug`, `slug@rN`, or a revision id). The API
 **pins each to a concrete revision id at submit time** and stores those on the
 request, so a finished run stays explainable after the resource gains new
-revisions. Resolution happens once, before the profile-variation loop, so every
-variation in a grouped submission provisions an identical environment.
+revisions. Callers can submit either the bare string form or `{ ref, params }`.
+The CLI maps repeated `--resource-param <slug>:<KEY>=<VALUE>` flags into the
+matching `--resources` entry before posting the request.
+
+When a profile version declares `resources`, those bindings provide the resource
+refs and any preset parameters. A run may still fill parameters left unset by the
+profile by sending a matching resource entry at the same position, but a
+different value for a profile-pinned parameter is reported through the same
+profile conflict response used for worker/model/MCP/skills/extensions. Grouped
+profile-variation submissions apply the same positional rule per variation:
+`profileVersion.resources ?? requestedResources`.
 
 The worker then runs the lifecycle in a fixed order. **Each of these orderings is
 load-bearing — moving one reintroduces a specific bug:**
