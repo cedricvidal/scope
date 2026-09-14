@@ -3,7 +3,7 @@
 
 import { useCallback, useMemo, useState, type Key } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Boxes, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -30,6 +30,7 @@ import {
   type CustomizeColumnsOption,
   type DataTableColumn,
 } from "@/components/list-layout";
+import { ResourcePreviewPanel } from "./ResourcePreviewPanel";
 
 const COLUMN_DEFS: CustomizeColumnsOption[] = [
   { id: "slug", label: "Slug", required: true },
@@ -43,6 +44,8 @@ const COLUMN_DEFS: CustomizeColumnsOption[] = [
 export function ResourceList() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const previewId = searchParams.get("preview");
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: [] });
   const columnVisibility = useHiddenColumns({ storageKey: "resources" });
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -124,6 +127,19 @@ export function ResourceList() {
     });
   }, []);
 
+  const navigateToPreview = useCallback((id: string) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("preview", id);
+    navigate({ pathname: "/resources", search: `?${params.toString()}` });
+  }, [navigate]);
+
+  const closePreview = useCallback(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete("preview");
+    const search = params.toString();
+    navigate({ pathname: "/resources", search: search ? `?${search}` : "" });
+  }, [navigate]);
+
   const columns: DataTableColumn<ResourceDocument>[] = [
     {
       id: "slug",
@@ -182,6 +198,8 @@ export function ResourceList() {
       )}
       secondaryPanel={customizeOpen ? <CustomizeColumnsPanel columns={COLUMN_DEFS} hidden={columnVisibility.hidden} onToggle={columnVisibility.toggle} onSetHidden={columnVisibility.setHidden} onReset={columnVisibility.reset} onClose={() => setCustomizeOpen(false)} /> : undefined}
       onSecondaryClose={() => setCustomizeOpen(false)}
+      detail={previewId ? <ResourcePreviewPanel id={previewId} /> : undefined}
+      onDetailClose={closePreview}
     >
       <div className="flex flex-col gap-3">
         <BulkActionBar count={selectedIds.size} onClear={() => setSelectedIds(new Set())} itemLabel="resource">
@@ -191,7 +209,8 @@ export function ResourceList() {
           items={pageItems}
           columns={columns}
           getRowId={(resource) => resource._id}
-          onRowClick={(resource) => navigate(`/resources/${resource.slug}`)}
+          activeId={previewId ?? undefined}
+          onRowClick={(resource) => navigateToPreview(resource.slug)}
           selection={{ selectedIds, onToggle: toggleRow, onToggleAll: toggleAll }}
           sort={state.sort}
           sortDir={state.sortDir}
