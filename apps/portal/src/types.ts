@@ -951,6 +951,67 @@ export interface CodebaseRevisionDocument {
 }
 
 // =============================================================================
+// Resource types
+// =============================================================================
+
+export type ResourceInterpreter = "sh";
+
+export type ResourceScript = Partial<Record<ResourceInterpreter, string>>;
+
+/** A first-class resource entity (mutable pointer/metadata). */
+export interface ResourceDocument {
+  _id: string;
+  projectId: string;
+  slug: string;
+  name: string;
+  description?: string;
+  revisionCounter: number;
+  latestRevisionId?: string;
+  latestRevisionNumber?: number;
+  creator?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** An immutable lifecycle revision for a resource. */
+export interface ResourceRevisionDocument {
+  _id: string;
+  resourceId: string;
+  projectId: string;
+  slug: string;
+  revisionNumber: number;
+  ref: string;
+  setup: ResourceScript;
+  teardown?: ResourceScript;
+  exports: string[];
+  contentSha256: string;
+  creator?: string;
+  createdAt: string;
+  deletedAt?: string;
+  /**
+   * Present only on create responses: true when the latest revision was reused
+   * because the submitted lifecycle content was identical.
+   */
+  deduplicated?: boolean;
+}
+
+export interface CreateResourceBody {
+  name: string;
+  slug?: string;
+  description?: string;
+  setup: ResourceScript;
+  teardown?: ResourceScript;
+  exports: string[];
+}
+
+export interface CreateResourceRevisionBody {
+  setup: ResourceScript;
+  teardown?: ResourceScript;
+  exports: string[];
+}
+
+// =============================================================================
 // VS Code extension types
 // =============================================================================
 
