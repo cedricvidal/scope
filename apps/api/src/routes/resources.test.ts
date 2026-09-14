@@ -199,6 +199,31 @@ describe("resource routes", () => {
     expect(fetchedFirst.body.revisionNumber).toBe(1);
   });
 
+  it("persists revision parameter declarations on create and rejects invalid declarations", async () => {
+    const { app } = buildApp();
+
+    const created = await request(app)
+      .post("/api/v1/resources?projectId=proj-a")
+      .send({
+        ...createBody,
+        parameters: [{ name: "REPO", required: true, example: "octo/api" }],
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.firstRevision.parameters).toEqual([
+      { name: "REPO", required: true, example: "octo/api" },
+    ]);
+
+    const invalid = await request(app)
+      .post("/api/v1/resources/github-simulator/revisions?projectId=proj-a")
+      .send({
+        setup: { sh: "echo URL=http://changed >> $SCOPE_SETUP_ENV" },
+        exports: ["URL"],
+        parameters: [{ name: "URL", required: false }],
+      });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error).toContain("both a parameter and an export");
+  });
+
   it("does not expose mutation routes for immutable revisions", async () => {
     const { app } = buildApp();
     const created = await request(app).post("/api/v1/resources?projectId=proj-a").send(createBody);

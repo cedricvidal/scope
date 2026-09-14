@@ -10,6 +10,8 @@ import {
   ResourceRevisionResponseSchema,
   slugifyResourceName,
   UpdateResourceInputSchema,
+  validateParameterDeclarations,
+  ResourceParameterError,
   type ResourceDocument,
 } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
@@ -73,11 +75,20 @@ export function registerResourcesRoutes(ctx: RouteContext): void {
     handler: async (req, res, next) => {
       try {
         const projectId = getQueryProjectId(req);
-        const { name, slug: requestedSlug, description, setup, teardown, exports: exportedNames, creator } = req.body;
+        const { name, slug: requestedSlug, description, setup, teardown, exports: exportedNames, parameters, creator } = req.body;
         const slug = slugifyResourceName(requestedSlug ?? name);
         if (!slug) {
           res.status(400).json({ error: "Could not derive a valid slug from the resource name" });
           return;
+        }
+        try {
+          validateParameterDeclarations(parameters, exportedNames);
+        } catch (error) {
+          if (error instanceof ResourceParameterError) {
+            res.status(400).json({ error: error.message });
+            return;
+          }
+          throw error;
         }
 
         // Cosmos DB degrades the project-scoped unique index to non-unique, so
@@ -109,6 +120,7 @@ export function registerResourcesRoutes(ctx: RouteContext): void {
               setup,
               ...(teardown ? { teardown } : {}),
               ...(exportedNames ? { exports: exportedNames } : {}),
+              ...(parameters ? { parameters } : {}),
               ...(creator ? { creator } : {}),
             },
             ctx.resourceRevisionStore
@@ -272,13 +284,23 @@ export function registerResourcesRoutes(ctx: RouteContext): void {
           return;
         }
 
-        const { setup, teardown, exports: exportedNames, creator } = req.body;
+        const { setup, teardown, exports: exportedNames, parameters, creator } = req.body;
+        try {
+          validateParameterDeclarations(parameters, exportedNames);
+        } catch (error) {
+          if (error instanceof ResourceParameterError) {
+            res.status(400).json({ error: error.message });
+            return;
+          }
+          throw error;
+        }
         const result = await ctx.resourceResolver.createRevision(
           resource,
           {
             setup,
             ...(teardown ? { teardown } : {}),
             ...(exportedNames ? { exports: exportedNames } : {}),
+            ...(parameters ? { parameters } : {}),
             ...(creator ? { creator } : {}),
           },
           ctx.resourceRevisionStore

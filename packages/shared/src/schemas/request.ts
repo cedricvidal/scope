@@ -4,8 +4,7 @@
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { ScenarioSchema, PersonaSchema } from "./scenario.js";
-import { ResourceBindingSpecSchema } from "./resource.js";
-import { ResourceBindingSchema } from "./resource.js";
+import { ResourceBindingSchema, ResourceBindingSpecSchema } from "./resource.js";
 import { GateIdSchema } from "./criteria.js";
 
 extendZodWithOpenApi(z);
