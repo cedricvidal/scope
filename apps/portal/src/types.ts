@@ -102,6 +102,8 @@ export interface RunState {
   harUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];
+  resources?: ResourceRunOutcome[];
+  mcpRegistered?: boolean;
   tokenUsage?: TokenUsage;
   aiCallCount?: number;
   rawChatUrl?: string;
@@ -137,7 +139,6 @@ export interface Run {
   skillRevisions?: string[];
   codebaseRevisionId?: string;
   resourceRevisionIds?: string[];
-  resources?: ResourceRunOutcome[];
   extensions?: string[];
   priority?: number;
   submissionId?: string;

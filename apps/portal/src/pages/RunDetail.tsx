@@ -541,7 +541,7 @@ export function RunDetail() {
    const skillIds = skillIdsFromRevisions.length > 0
      ? skillIdsFromRevisions
      : (run.skills ?? []);
-  const runResourceOutcomes = run.resources ?? [];
+  const runResourceOutcomes = activeRun?.resources ?? [];
   const runResourceRevisionIds = run.resourceRevisionIds ?? [];
   const hasRunResources = runResourceOutcomes.length > 0 || runResourceRevisionIds.length > 0;
 
@@ -701,6 +701,18 @@ export function RunDetail() {
                   label="LLM calls"
                   title="LLM completion calls"
                   value={<span className="font-mono">{activeRun?.aiCallCount}</span>}
+                />
+              )}
+              {activeRun?.mcpRegistered !== undefined && (
+                <MetaItem
+                  label="MCP registered"
+                  title="Whether MCP server registration completed for this attempt"
+                  value={(
+                    <Badge variant={activeRun.mcpRegistered ? "success" : "secondary"} className="gap-1">
+                      {activeRun.mcpRegistered ? <CheckCircle2 className="h-3 w-3" /> : <MinusCircle className="h-3 w-3" />}
+                      {activeRun.mcpRegistered ? "Yes" : "No"}
+                    </Badge>
+                  )}
                 />
               )}
             </div>

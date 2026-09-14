@@ -558,7 +558,7 @@ export function SubmitRun() {
     }
     const resources = run.resourceRevisionIds && run.resourceRevisionIds.length > 0
       ? run.resourceRevisionIds
-      : (run.resources ?? []).map((resource) => resource.ref);
+      : (run.run?.resources ?? []).map((resource) => resource.ref);
     if (resources.length > 0) {
       setSelectedResourceSpecs(resources);
       setResourcesOpen(true);
