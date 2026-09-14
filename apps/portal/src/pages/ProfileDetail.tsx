@@ -342,38 +342,6 @@ export function ProfileDetail() {
                   </>
                 )}
 
-                {displayVersion.resources && displayVersion.resources.length > 0 && (
-                  <>
-                    <Separator />
-                    <div>
-                      <FieldLabel>Resources</FieldLabel>
-                      <div className="flex flex-col gap-2 mt-1">
-                        {displayVersion.resources.map((binding) => {
-                          const ref = typeof binding === "string" ? binding : binding.ref;
-                          const params = typeof binding === "string" ? undefined : binding.params;
-                          return (
-                            <div key={ref} className="flex flex-wrap items-center gap-1">
-                              <Badge variant="outline" className="font-mono text-xs">{ref}</Badge>
-                              {params && Object.keys(params).length > 0 && (
-                                <>
-                                  {/* Preset values are what a run cannot override, so they
-                                      belong on the profile page rather than only in the picker. */}
-                                  <span className="text-muted-foreground text-xs">pins</span>
-                                  {Object.entries(params).map(([key, value]) => (
-                                    <Badge key={key} variant="secondary" className="font-mono text-xs">
-                                      {key}={value}
-                                    </Badge>
-                                  ))}
-                                </>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </>
-                )}
-
                 {displayVersion.skillRevisions && displayVersion.skillRevisions.length > 0 && (
                   <>
                     <Separator />
