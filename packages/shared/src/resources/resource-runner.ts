@@ -34,11 +34,32 @@ export interface RunPhaseOptions {
   log?: LogFn;
   /** Abort in-flight execution (worker shutdown). */
   signal?: AbortSignal;
+  /**
+   * Path to the run-scoped concealed store, exposed to scripts as
+   * `$SCOPE_CONCEALED_ENV`.
+   *
+   * `$SCOPE_SETUP_ENV` and `$SCOPE_CONCEALED_ENV` are both channels a script
+   * publishes to; they differ only in who can see the result. Values written to
+   * `$SCOPE_SETUP_ENV` reach the agent's environment, values written here do
+   * not — they are for the platform (MCP server interpolation), for later
+   * resources, and for tooling wrappers that read them at call time.
+   *
+   * Unlike `$SCOPE_SETUP_ENV`, which is a fresh per-phase temp file, this one is
+   * run-scoped and accumulates, so a resource can read what earlier resources
+   * published. The caller owns its lifetime: it must outlive setup, because the
+   * agent runs between setup and teardown.
+   */
+  concealedEnvPath?: string;
 }
 
 export interface PhaseResult {
   /** Values the phase published via `$SCOPE_SETUP_ENV`. Empty for teardown. */
   values: Record<string, string>;
+  /**
+   * Everything in the concealed store after this phase. The store accumulates,
+   * so this is the running total rather than this phase's contribution.
+   */
+  concealed: Record<string, string>;
   exitCode: number;
   durationMs: number;
 }
@@ -88,7 +109,7 @@ async function runScript(
   body: string,
   options: RunPhaseOptions,
 ): Promise<PhaseResult> {
-  const { cwd, env = {}, timeoutMs = DEFAULT_PHASE_TIMEOUT_MS, log, signal } = options;
+  const { cwd, env = {}, timeoutMs = DEFAULT_PHASE_TIMEOUT_MS, log, signal, concealedEnvPath } = options;
   const started = Date.now();
 
   const dir = await mkdtemp(join(tmpdir(), `scope-resource-${slug}-`));
@@ -104,7 +125,14 @@ async function runScript(
       // half-provisioned state that looks successful.
       const child = spawn("sh", ["-e", scriptPath], {
         cwd,
-        env: { ...process.env, ...env, SCOPE_SETUP_ENV: envPath },
+        env: {
+          ...process.env,
+          ...env,
+          SCOPE_SETUP_ENV: envPath,
+          // Set after the spreads for the same reason as SCOPE_SETUP_ENV: a
+          // resource parameter must not be able to redirect the store.
+          ...(concealedEnvPath ? { SCOPE_CONCEALED_ENV: concealedEnvPath } : {}),
+        },
         stdio: ["ignore", "pipe", "pipe"],
         signal,
       });
@@ -143,7 +171,23 @@ async function runScript(
       throw new ResourcePhaseError(slug, phase, exitCode, `malformed $SCOPE_SETUP_ENV — ${detail}`);
     }
 
-    return { values, exitCode, durationMs: Date.now() - started };
+    let concealed: Record<string, string> = {};
+    if (concealedEnvPath) {
+      const concealedContents = await readFile(concealedEnvPath, "utf-8").catch(() => "");
+      const parsed = parseResourceEnv(concealedContents);
+      if (parsed.errors.length > 0) {
+        const detail = parsed.errors.map((e) => `line ${e.line}: ${e.reason}`).join("; ");
+        throw new ResourcePhaseError(
+          slug,
+          phase,
+          exitCode,
+          `malformed $SCOPE_CONCEALED_ENV — ${detail}`,
+        );
+      }
+      concealed = parsed.values;
+    }
+
+    return { values, concealed, exitCode, durationMs: Date.now() - started };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
@@ -168,6 +212,30 @@ function withParams(options: RunPhaseOptions, resource: ResourceConfig): RunPhas
 }
 
 /**
+ * Create the run-scoped concealed store.
+ *
+ * Separate from `runResourceSetups` because its lifetime spans the whole run:
+ * setup writes it, the agent's tooling wrappers read it while the agent works,
+ * and teardown still needs it. The caller disposes of it once teardown is done.
+ *
+ * Mode 0600 is honest housekeeping rather than isolation — the agent runs as the
+ * same uid as resource setup, so POSIX cannot hide it from that process. What the
+ * store buys is that the values are absent from the agent's *environment*, which
+ * is where tooling looks first.
+ */
+export async function createConcealedStore(): Promise<{ path: string; dispose: () => Promise<void> }> {
+  const dir = await mkdtemp(join(tmpdir(), "scope-concealed-"));
+  const path = join(dir, "concealed.env");
+  await writeFile(path, "", { encoding: "utf-8", mode: 0o600 });
+  return {
+    path,
+    dispose: async () => {
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    },
+  };
+}
+
+/**
  * Provision every resource, in reference order.
  *
  * Returns the merged published values. On failure, the caller is responsible for
@@ -177,8 +245,13 @@ function withParams(options: RunPhaseOptions, resource: ResourceConfig): RunPhas
 export async function runResourceSetups(
   resources: ResourceConfig[],
   options: RunPhaseOptions,
-): Promise<{ values: Record<string, string>; provisioned: ResourceConfig[] }> {
+): Promise<{
+  values: Record<string, string>;
+  concealed: Record<string, string>;
+  provisioned: ResourceConfig[];
+}> {
   const values: Record<string, string> = {};
+  let concealed: Record<string, string> = {};
   const provisioned: ResourceConfig[] = [];
 
   for (const resource of resources) {
@@ -204,6 +277,9 @@ export async function runResourceSetups(
     }
 
     Object.assign(values, result.values);
+    // The store accumulates, so this is the running total rather than a merge of
+    // one resource's contribution.
+    concealed = result.concealed;
     void options.log?.(
       "info",
       `Resource '${resource.slug}' ready in ${result.durationMs}ms` +
@@ -211,7 +287,7 @@ export async function runResourceSetups(
     );
   }
 
-  return { values, provisioned };
+  return { values, concealed, provisioned };
 }
 
 /**

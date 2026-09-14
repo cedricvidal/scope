@@ -8,6 +8,7 @@ import {
   runResourceTeardowns,
   selectPhaseBody,
   ResourcePhaseError,
+  createConcealedStore,
 } from "./resource-runner.js";
 import type { ResourceConfig } from "../types/resource.js";
 
@@ -250,5 +251,57 @@ describe("resource parameters in the phase environment", () => {
     // A non-zero exit would be logged as a teardown warning; silence means the
     // parameter was present.
     expect(published).toEqual([]);
+  });
+});
+
+describe("concealed store", () => {
+  it("exposes SCOPE_CONCEALED_ENV and keeps its values out of the published values", async () => {
+    const store = await createConcealedStore();
+    try {
+      const result = await runResourceSetups(
+        [
+          {
+            slug: "sim",
+            ref: "sim@r1",
+            revisionId: "r1",
+            exports: ["VISIBLE"],
+            setup: { sh: 'echo "VISIBLE=yes" >> "$SCOPE_SETUP_ENV"\necho "HIDDEN=secret" >> "$SCOPE_CONCEALED_ENV"' },
+          } as never,
+        ],
+        { cwd: process.cwd(), concealedEnvPath: store.path },
+      );
+      expect(result.values).toEqual({ VISIBLE: "yes" });
+      expect(result.concealed).toEqual({ HIDDEN: "secret" });
+    } finally {
+      await store.dispose();
+    }
+  });
+
+  it("lets a later resource read what an earlier one concealed", async () => {
+    const store = await createConcealedStore();
+    try {
+      const result = await runResourceSetups(
+        [
+          {
+            slug: "first",
+            ref: "first@r1",
+            revisionId: "r1",
+            exports: [],
+            setup: { sh: 'echo "ENDPOINT=http://sim" >> "$SCOPE_CONCEALED_ENV"' },
+          } as never,
+          {
+            slug: "second",
+            ref: "second@r1",
+            revisionId: "r2",
+            exports: ["SAW"],
+            setup: { sh: '. "$SCOPE_CONCEALED_ENV"\necho "SAW=$ENDPOINT" >> "$SCOPE_SETUP_ENV"' },
+          } as never,
+        ],
+        { cwd: process.cwd(), concealedEnvPath: store.path },
+      );
+      expect(result.values.SAW).toBe("http://sim");
+    } finally {
+      await store.dispose();
+    }
   });
 });

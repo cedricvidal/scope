@@ -59,6 +59,34 @@ describe("buildSubprocessEnv", () => {
     });
   });
 
+  describe("concealed resource values", () => {
+    const resourceEnv = { PUBLIC_URL: "http://visible", SECRET_URL: "http://hidden", SECRET_TOKEN: "ghp_x" };
+
+    it("passes resource values through when nothing is concealed", () => {
+      const env = buildSubprocessEnv(token, false, undefined, undefined, undefined, undefined, resourceEnv);
+      expect(env.PUBLIC_URL).toBe("http://visible");
+      expect(env.SECRET_URL).toBe("http://hidden");
+    });
+
+    it("omits concealed names from the agent's environment", () => {
+      const env = buildSubprocessEnv(token, false, undefined, undefined, undefined, undefined, resourceEnv, [
+        "SECRET_URL",
+        "SECRET_TOKEN",
+      ]);
+      expect(env).not.toHaveProperty("SECRET_URL");
+      expect(env).not.toHaveProperty("SECRET_TOKEN");
+      expect(env.PUBLIC_URL).toBe("http://visible");
+    });
+
+    it("keeps the fixed keys intact while concealing", () => {
+      const env = buildSubprocessEnv(token, false, undefined, undefined, undefined, undefined, resourceEnv, [
+        "SECRET_URL",
+      ]);
+      expect(env.GITHUB_TOKEN).toBe(token);
+      expect(env.COPILOT_AUTO_UPDATE).toBe("false");
+    });
+  });
+
   describe("when DevProxy is disabled", () => {
     it("clears all proxy env vars", () => {
       const env = buildSubprocessEnv(token, false);

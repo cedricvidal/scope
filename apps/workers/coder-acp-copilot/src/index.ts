@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, KubedockClient, createFreshWorkspace, cleanupWorkspaces, type ResourceConfig, type ResourceRunOutcome, runResourceSetups, runResourceTeardowns, interpolateMcpServerConfigs, referencedPlaceholders } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, KubedockClient, createFreshWorkspace, cleanupWorkspaces, type ResourceConfig, type ResourceRunOutcome, runResourceSetups, runResourceTeardowns, createConcealedStore, interpolateMcpServerConfigs, referencedPlaceholders } from "shared";
 import { initTelemetry, trackMetric, trackTrace, trackEvent } from "telemetry";
 import { runACPSession } from "./acp-client.js";
 import { access, constants as fsConstants } from "node:fs/promises";
@@ -66,8 +66,15 @@ export function buildSubprocessEnv(
   proxyUrl?: string,
   certPath?: string,
   resourceEnv?: Record<string, string>,
+  concealedNames?: string[],
 ): Record<string, string> {
   const gatewayHost = gatewayUrl ? new URL(gatewayUrl).hostname : null;
+  // Values a resource published to the concealed store are for the platform and
+  // for tooling wrappers, not for the agent. They stay in `resourceEnv` because
+  // MCP server interpolation needs them; this is where they stop.
+  const visibleResourceEnv = Object.fromEntries(
+    Object.entries(resourceEnv ?? {}).filter(([name]) => !(concealedNames ?? []).includes(name)),
+  );
   const noProxy = [
     "localhost",
     "127.0.0.1",
@@ -86,7 +93,7 @@ export function buildSubprocessEnv(
     // Spread FIRST so the fixed keys below win. A resource must not be able to
     // shadow GITHUB_TOKEN — that is the CLI's own auth, not the simulator's —
     // nor the proxy settings, which are what route model traffic for capture.
-    ...(resourceEnv ?? {}),
+    ...visibleResourceEnv,
     GITHUB_TOKEN: githubToken,
     // Disable the Copilot CLI in-session auto-updater. In headless --acp --yolo
     // mode it downloads a newer binary mid-run, logs "restart to update", and then
@@ -136,6 +143,14 @@ class CopilotProcessor implements WorkerProcessor {
   private provisionedResources: ResourceConfig[] = [];
   /** Connection details published by this run's resources. */
   private resourceEnv: Record<string, string> = {};
+  /**
+   * Names published to the concealed store rather than to `$SCOPE_SETUP_ENV`.
+   * They stay in `resourceEnv` because MCP server interpolation needs them, and
+   * are subtracted when the agent's environment is built.
+   */
+  private concealedNames: string[] = [];
+  /** Run-scoped concealed store; must outlive setup, since the agent runs after it. */
+  private concealedStore: { path: string; dispose: () => Promise<void> } | null = null;
   /** Per-resource lifecycle outcomes, surfaced on the run record. */
   private resourceOutcomes: ResourceRunOutcome[] = [];
   /** Whether MCP servers were actually registered with the gateway. */
@@ -186,6 +201,7 @@ class CopilotProcessor implements WorkerProcessor {
     this.mcpRegistered = false;
     this.resourceOutcomes = [];
     this.resourceEnv = {};
+    this.concealedNames = [];
 
     // Provision resources before registering MCP servers. This ordering is the
     // whole point of the feature: registration opens a live connection to the
@@ -193,14 +209,19 @@ class CopilotProcessor implements WorkerProcessor {
     // to has to exist first.
     if (this.resourceConfigs.length > 0) {
       await this.preflightDockerSocket(log);
+      this.concealedStore = await createConcealedStore();
       try {
-        const { values, provisioned } = await runResourceSetups(this.resourceConfigs, {
+        const { values, concealed, provisioned } = await runResourceSetups(this.resourceConfigs, {
           cwd: this.workspacePath,
           env: { ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}) },
           log: (level, message) => void log(level, message),
+          concealedEnvPath: this.concealedStore?.path,
         });
         this.provisionedResources = provisioned;
-        this.resourceEnv = values;
+        // Concealed values join resourceEnv so MCP server interpolation keeps
+        // working; they are subtracted again when the agent's env is built.
+        this.resourceEnv = { ...values, ...concealed };
+        this.concealedNames = Object.keys(concealed);
         this.resourceOutcomes = provisioned.map((r) => ({
           ref: r.ref,
           slug: r.slug,
@@ -284,17 +305,29 @@ class CopilotProcessor implements WorkerProcessor {
 
   /** Release provisioned resources in reverse order. Safe to call twice. */
   private async releaseResources(log: WorkerLogFn): Promise<void> {
-    if (this.provisionedResources.length === 0) return;
+    if (this.provisionedResources.length === 0) {
+      // Setup may have failed before provisioning anything, so the store is
+      // still disposed of here rather than only on the happy path.
+      await this.concealedStore?.dispose();
+      this.concealedStore = null;
+      return;
+    }
     const toRelease = this.provisionedResources;
     this.provisionedResources = [];
     for (const o of this.resourceOutcomes) {
       if (toRelease.some((r) => r.revisionId === o.revisionId)) o.teardownRan = true;
     }
-    await runResourceTeardowns(toRelease, {
-      cwd: this.workspacePath ?? process.cwd(),
-      env: { ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}) },
-      log: (level, message) => void log(level, message),
-    });
+    try {
+      await runResourceTeardowns(toRelease, {
+        cwd: this.workspacePath ?? process.cwd(),
+        env: { ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}) },
+        log: (level, message) => void log(level, message),
+        concealedEnvPath: this.concealedStore?.path,
+      });
+    } finally {
+      await this.concealedStore?.dispose();
+      this.concealedStore = null;
+    }
   }
 
   async teardown(log: WorkerLogFn): Promise<void> {
@@ -429,7 +462,7 @@ class CopilotProcessor implements WorkerProcessor {
       const result = await runACPSession(message, {
         command: "copilot",
         args,
-        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl, caCertBundlePath, this.resourceEnv),
+        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl, caCertBundlePath, this.resourceEnv, this.concealedNames),
         cwd: this.workspacePath!,
         onLog: async (msg) => {
           lastProtocolEventTime = Date.now();
