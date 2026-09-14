@@ -176,6 +176,16 @@ class CopilotProcessor implements WorkerProcessor {
 
     this.mcpConfigs = options?.mcpServerConfigs ?? [];
     this.resourceConfigs = options?.resourceConfigs ?? [];
+    // Reset per-run observations here rather than in teardown. The processor
+    // instance is reused across messages, and teardown cleared mcpConfigs but
+    // left mcpRegistered set -- so once any run registered a server, every later
+    // run on the same worker reported mcpRegistered: true regardless of its own
+    // configuration. Registration itself was correctly skipped, so this was a
+    // false report rather than a leak of tools, which makes it worse: the field
+    // exists precisely to show which surface a run was given.
+    this.mcpRegistered = false;
+    this.resourceOutcomes = [];
+    this.resourceEnv = {};
 
     // Provision resources before registering MCP servers. This ordering is the
     // whole point of the feature: registration opens a live connection to the

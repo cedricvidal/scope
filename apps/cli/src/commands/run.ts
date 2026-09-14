@@ -93,9 +93,10 @@ run
   .option("--gates <jsonOrFile>", "GateConfig[] JSON or path/@path to a JSON file for gated runs")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
+  .option("--count <number>", "Submit this run N times (1-10). With --profile-variations-file, N runs per profile — repetition is how you separate a real difference between profiles from model variance", (v: string) => Number.parseInt(v, 10))
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options, command) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, resources: resourceSpecs, resourceParam: resourceParamOverrides, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption, agentsMd: agentsMdInput } = options;
+    const { scenario, persona, traits, worker, url, stream, count, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, resources: resourceSpecs, resourceParam: resourceParamOverrides, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption, agentsMd: agentsMdInput } = options;
     // `--profile` is the documented flag; `--base-profile` is kept as a hidden
     // back-compat alias. Both resolve to the same request `profileId`.
     const profileId = profile ?? baseProfile;
@@ -136,6 +137,13 @@ run
           criteria: criteria || [],
         },
       };
+      if (count !== undefined) {
+        if (!Number.isInteger(count) || count < 1 || count > 10) {
+          console.error(errorText("Error: --count must be an integer between 1 and 10."));
+          process.exit(1);
+        }
+        body.count = count;
+      }
       if (maxIterations) {
         body.maxIterations = maxIterations;
       }
