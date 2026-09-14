@@ -441,14 +441,27 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // inside the worker so a failure to find a resource fails the run before any
     // setup work happens.
     let resourceConfigs: ResourceConfig[] | undefined;
-    if (requestDoc.resourceRevisionIds && requestDoc.resourceRevisionIds.length > 0) {
+    if (requestDoc.resources && requestDoc.resources.length > 0) {
       const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
       if (!apiBaseUrl) {
         throw new Error("Resources requested but SCOPE_MT_API_URL is not configured");
       }
+      const bindings = requestDoc.resources;
       const resourceClient = new ResourceClient(apiBaseUrl);
-      await log("info", `Resolving ${requestDoc.resourceRevisionIds.length} resource(s)`, { resources: requestDoc.resourceRevisionIds });
-      resourceConfigs = await resourceClient.resolveResources(requestDoc.projectId, requestDoc.resourceRevisionIds);
+      await log("info", `Resolving ${bindings.length} resource(s)`, { resources: bindings.map(b => b.ref) });
+      const resolved = await resourceClient.resolveResources(
+        requestDoc.projectId,
+        bindings.map(b => b.revisionId)
+      );
+      // Re-attach each binding's resolved parameter values to its config. Matched
+      // by revisionId rather than by position, so a resolver that reorders or
+      // dedupes cannot silently pair a resource with another's parameters.
+      resourceConfigs = resolved.map((config) => {
+        const binding = bindings.find(b => b.revisionId === config.revisionId);
+        return binding && Object.keys(binding.params ?? {}).length > 0
+          ? { ...config, params: binding.params }
+          : config;
+      });
       await log("info", `Resolved resources: ${resourceConfigs.map(r => r.ref).join(", ")}`);
     }
 

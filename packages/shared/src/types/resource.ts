@@ -22,6 +22,59 @@ export type ResourceInterpreter = "sh";
 export type ResourceScript = Partial<Record<ResourceInterpreter, string>>;
 
 /**
+ * One input a revision's lifecycle scripts read from the environment.
+ *
+ * Parameters are the mirror image of `exports`: parameters are the inputs a run
+ * supplies *before* setup runs, exports are the values setup publishes *after*.
+ * Declaring them makes a resource reusable — the GitHub simulator's lifecycle is
+ * identical for every repository, so the repository is a parameter rather than a
+ * reason to create a second resource.
+ *
+ * Declarations live on the revision and are folded into `contentSha256`, so
+ * changing the parameter contract creates a new revision. A setup body and the
+ * parameters it reads must move together or the pairing rots.
+ */
+export interface ResourceParameter {
+  /** Environment variable name the scripts read, e.g. "REPO". */
+  name: string;
+  description?: string;
+  /** When true, submit fails unless a value is supplied or a default exists. */
+  required: boolean;
+  /** Used when neither the profile nor the run supplies a value. */
+  default?: string;
+  /** Illustrative value for UI/help text. Never used as a fallback. */
+  example?: string;
+}
+
+/**
+ * A request to use a resource, before resolution.
+ *
+ * Accepted from run submissions and stored on profiles. `ref` may be a slug
+ * ("github-simulator"), a pinned ref ("github-simulator@r3"), or a revision id.
+ */
+export interface ResourceBindingSpec {
+  ref: string;
+  /** Values for the revision's declared parameters. */
+  params?: Record<string, string>;
+}
+
+/**
+ * A resolved, pinned resource binding as persisted on a request.
+ *
+ * Unlike {@link ResourceBindingSpec}, the revision is resolved to a concrete id
+ * and `params` is complete: defaults merged under profile presets merged under
+ * run-supplied values.
+ */
+export interface ResourceBinding {
+  /** Canonical display ref at resolution time, e.g. "github-simulator@r3". */
+  ref: string;
+  /** FK → ResourceRevisionDocument._id. Pinned; never a moving pointer. */
+  revisionId: string;
+  /** Fully resolved parameter values. */
+  params: Record<string, string>;
+}
+
+/**
  * Resource reference document stored in MongoDB (`resources` collection).
  *
  * A **mutable** pointer/metadata record for a first-class resource entity: a
@@ -90,6 +143,14 @@ export interface ResourceRevisionDocument {
   exports: string[];
 
   /**
+   * Inputs this revision's lifecycle scripts read from the environment.
+   *
+   * Part of `contentSha256` — editing the contract produces a new revision, so a
+   * run pinned to an older revision keeps the parameter set it was written for.
+   */
+  parameters?: ResourceParameter[];
+
+  /**
    * SHA-256 over the normalized script bodies and exports. Provenance, and the
    * key used to detect that a save is identical to the current latest revision.
    * Not part of the ref or `_id`.
@@ -123,6 +184,10 @@ export interface ResourceConfig {
   setup: ResourceScript;
   teardown?: ResourceScript;
   exports: string[];
+  /** Declared inputs, from the pinned revision. */
+  parameters?: ResourceParameter[];
+  /** Fully resolved values for those inputs, from the request's binding. */
+  params?: Record<string, string>;
 }
 
 /**
@@ -140,6 +205,13 @@ export interface ResourceRunOutcome {
   setupSucceeded: boolean;
   /** Names actually published. Empty when setup failed before publishing. */
   published: string[];
+  /**
+   * Fully resolved parameter values the lifecycle ran with.
+   *
+   * Echoed onto the run so the detail page can show *why* two runs that pinned
+   * the same revision behaved differently.
+   */
+  params?: Record<string, string>;
   setupDurationMs?: number;
   /** Present when setup failed; the message the run failed with. */
   error?: string;

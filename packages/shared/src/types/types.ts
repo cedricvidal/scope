@@ -4,7 +4,7 @@
 import type { McpServerConfig } from './mcp.js';
 import type { SkillConfig } from './skill.js';
 import type { ExtensionConfig } from './extension.js';
-import type { ResourceConfig, ResourceRunOutcome } from './resource.js';
+import type { ResourceBinding, ResourceConfig, ResourceRunOutcome } from './resource.js';
 import type { ToolCall } from '../har/types.js';
 
 // Re-export ToolCall so consumers can import from types
@@ -300,9 +300,24 @@ export interface RequestDocument {
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
   codebaseRevisionId?: string;    // FK → CodebaseRevisionDocument._id — seeds the workspace before the agent starts
-  /** FK → ResourceRevisionDocument._id, in setup order. Pinned at submit time so
-   *  the run stays reproducible after the resource is edited. */
-  resourceRevisionIds?: string[];
+  /**
+   * Resolved resource bindings, in setup order.
+   *
+   * The revision is pinned at submit time so the run stays reproducible after the
+   * resource is edited, and `params` is stored **fully resolved** (defaults, then
+   * profile presets, then run-supplied values) rather than as a diff — a run must
+   * be explainable from its own document without re-reading a revision whose
+   * defaults may since have been superseded.
+   *
+   * Deliberately one grouped array rather than parallel `resourceRevisionIds` and
+   * `resourceParams` arrays: parallel lists would have to stay the same length and
+   * order forever, an invariant nothing enforces and any future writer can break.
+   *
+   * Shares its name with `RunState.resources`, which records the *outcome* of the
+   * same list keyed by the same `revisionId`. One is what was asked for, the other
+   * is what happened.
+   */
+  resources?: ResourceBinding[];
   extensions?: string[];           // VS Code extension IDs selected for this run (e.g. "ms-python.python")
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)

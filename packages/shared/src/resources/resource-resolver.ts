@@ -5,6 +5,7 @@ import { createHash } from "crypto";
 import type {
   ResourceConfig,
   ResourceDocument,
+  ResourceParameter,
   ResourceRevisionDocument,
   ResourceScript,
 } from "../types/resource.js";
@@ -16,6 +17,7 @@ export interface CreateResourceRevisionInput {
   setup: ResourceScript;
   teardown?: ResourceScript;
   exports?: string[];
+  parameters?: ResourceParameter[];
   creator?: string;
 }
 
@@ -28,6 +30,7 @@ interface NormalizedResourceRevisionContent {
   setup: ResourceScript;
   teardown?: ResourceScript;
   exports: string[];
+  parameters?: ResourceParameter[];
 }
 
 function normalizeScript(script: ResourceScript): ResourceScript {
@@ -37,16 +40,38 @@ function normalizeScript(script: ResourceScript): ResourceScript {
   return Object.fromEntries(entries) as ResourceScript;
 }
 
+/**
+ * Order parameters by name and drop absent optional fields so that two
+ * declarations differing only in key order or in `undefined` vs missing hash
+ * identically. Without this, re-saving an unchanged resource through a client
+ * that serializes keys differently would mint a pointless revision.
+ */
+function normalizeParameters(parameters: ResourceParameter[]): ResourceParameter[] {
+  return [...parameters]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((p) => ({
+      name: p.name,
+      required: p.required,
+      ...(p.description ? { description: p.description } : {}),
+      ...(p.default !== undefined ? { default: p.default } : {}),
+      ...(p.example !== undefined ? { example: p.example } : {}),
+    }));
+}
+
 export function normalizeResourceRevisionContent(
   input: CreateResourceRevisionInput
 ): NormalizedResourceRevisionContent {
   const setup = normalizeScript(input.setup);
   const teardown = input.teardown ? normalizeScript(input.teardown) : undefined;
   const exports = [...new Set(input.exports ?? [])].sort((a, b) => a.localeCompare(b));
+  const parameters = input.parameters?.length ? normalizeParameters(input.parameters) : undefined;
   return {
     setup,
     ...(teardown && Object.keys(teardown).length > 0 ? { teardown } : {}),
     exports,
+    // Omitted entirely when empty so that revisions created before parameters
+    // existed keep hashing to the same value as an equivalent parameterless save.
+    ...(parameters ? { parameters } : {}),
   };
 }
 
@@ -88,6 +113,7 @@ export class ResourceResolver {
       setup: normalized.setup,
       ...(normalized.teardown ? { teardown: normalized.teardown } : {}),
       exports: normalized.exports,
+      ...(normalized.parameters ? { parameters: normalized.parameters } : {}),
       contentSha256,
       ...(input.creator ? { creator: input.creator } : {}),
     });

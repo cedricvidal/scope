@@ -36,6 +36,50 @@ const ExportNameSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, {
 });
 
 /**
+ * A declared input. Same identifier rule as exports, because parameters are
+ * injected into the lifecycle environment the same way.
+ *
+ * Cross-field rules that Zod cannot express here — collision with `exports`, the
+ * reserved `SCOPE_` prefix, duplicates, and `required` together with `default` —
+ * are enforced by `validateParameterDeclarations` in the resources package.
+ */
+export const ResourceParameterSchema = z
+  .object({
+    name: ExportNameSchema,
+    description: z.string().optional(),
+    required: z.boolean().default(false),
+    default: z.string().optional(),
+    example: z.string().optional(),
+  })
+  .openapi("ResourceParameter");
+
+/**
+ * A resource requested by a run or preset on a profile.
+ *
+ * Accepts the bare string shorthand ("github-simulator", "github-simulator@r3",
+ * or a revision id) as well as the object form carrying parameter values, so the
+ * common no-parameter case stays terse.
+ */
+export const ResourceBindingSpecSchema = z
+  .union([
+    z.string(),
+    z.object({
+      ref: z.string(),
+      params: z.record(z.string(), z.string()).optional(),
+    }),
+  ])
+  .openapi("ResourceBindingSpec");
+
+/** A resolved, pinned binding as persisted on a request. */
+export const ResourceBindingSchema = z
+  .object({
+    ref: z.string(),
+    revisionId: z.string(),
+    params: z.record(z.string(), z.string()),
+  })
+  .openapi("ResourceBinding");
+
+/**
  * Create a resource. The first revision is created atomically with it, so a
  * resource can never exist without a lifecycle to run.
  */
@@ -47,6 +91,7 @@ export const CreateResourceInputSchema = z
     setup: ResourceScriptSchema,
     teardown: ResourceScriptSchema.optional(),
     exports: z.array(ExportNameSchema).optional(),
+    parameters: z.array(ResourceParameterSchema).optional(),
     creator: z.string().optional(),
   })
   .openapi("CreateResourceInput");
@@ -77,6 +122,7 @@ export const CreateResourceRevisionInputSchema = z
     setup: ResourceScriptSchema,
     teardown: ResourceScriptSchema.optional(),
     exports: z.array(ExportNameSchema).optional(),
+    parameters: z.array(ResourceParameterSchema).optional(),
     creator: z.string().optional(),
   })
   .openapi("CreateResourceRevisionInput");
@@ -116,6 +162,7 @@ export const ResourceRevisionResponseSchema = z
     setup: ResourceScriptSchema,
     teardown: ResourceScriptSchema.optional(),
     exports: z.array(z.string()),
+    parameters: z.array(ResourceParameterSchema).optional(),
     contentSha256: z.string(),
     creator: z.string().optional(),
     createdAt: z.coerce.date(),

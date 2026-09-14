@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { ScenarioSchema, PersonaSchema } from "./scenario.js";
+import { ResourceBindingSpecSchema } from "./resource.js";
 import { GateIdSchema } from "./criteria.js";
 
 extendZodWithOpenApi(z);
@@ -16,6 +17,7 @@ export const ResourceRunOutcomeSchema = z
     revisionId: z.string(),
     setupSucceeded: z.boolean(),
     published: z.array(z.string()),
+    params: z.record(z.string(), z.string()).optional(),
     setupDurationMs: z.number().optional(),
     error: z.string().optional(),
     teardownRan: z.boolean().optional(),
@@ -131,11 +133,11 @@ export const CreateRequestInputSchema = z
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
     codebaseRevisionId: z.string().optional(),
-    /** Resource specs (slug, `slug@rN`, or revision id) to provision for this
-     *  run, in setup order. Resolved at submit time and shared by every
-     *  variation in a grouped submission, so each profile gets an identical
-     *  environment. */
-    resources: z.array(z.string()).optional(),
+    /** Resources to provision for this run, in setup order. Each entry is a
+     *  bare spec (slug, `slug@rN`, or revision id) or an object carrying
+     *  parameter values. Resolved at submit time and shared by every variation
+     *  in a grouped submission, so each profile gets an identical environment. */
+    resources: z.array(ResourceBindingSpecSchema).optional(),
     extensions: z.array(z.string()).optional(),
     profileId: z.string().optional(),
     profileVariations: z.array(z.string()).optional(),
