@@ -786,6 +786,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "reasoningEffort": {
             "type": "string",
           },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceBindingSpec",
+            },
+            "type": "array",
+          },
           "skillRevisions": {
             "items": {
               "type": "string",
@@ -952,7 +958,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "resources": {
             "items": {
-              "type": "string",
+              "$ref": "#/components/schemas/ResourceBindingSpec",
             },
             "type": "array",
           },
@@ -990,6 +996,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "minLength": 1,
             "type": "string",
           },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceParameter",
+            },
+            "type": "array",
+          },
           "setup": {
             "$ref": "#/components/schemas/ResourceScript",
           },
@@ -1016,6 +1028,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "items": {
               "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
               "type": "string",
+            },
+            "type": "array",
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceParameter",
             },
             "type": "array",
           },
@@ -2065,6 +2083,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "reasoningEffort": {
             "type": "string",
           },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceBindingSpec",
+            },
+            "type": "array",
+          },
           "skillRevisions": {
             "items": {
               "type": "string",
@@ -2687,6 +2711,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "reasoningEffort": {
             "type": "string",
           },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceBinding",
+            },
+            "type": "array",
+          },
           "run": {
             "$ref": "#/components/schemas/RunState",
           },
@@ -2734,6 +2764,77 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
         },
+        "type": "object",
+      },
+      "ResourceBinding": {
+        "properties": {
+          "params": {
+            "additionalProperties": {
+              "type": "string",
+            },
+            "type": "object",
+          },
+          "ref": {
+            "type": "string",
+          },
+          "revisionId": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "ref",
+          "revisionId",
+          "params",
+        ],
+        "type": "object",
+      },
+      "ResourceBindingSpec": {
+        "anyOf": [
+          {
+            "type": "string",
+          },
+          {
+            "properties": {
+              "params": {
+                "additionalProperties": {
+                  "type": "string",
+                },
+                "type": "object",
+              },
+              "ref": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "ref",
+            ],
+            "type": "object",
+          },
+        ],
+      },
+      "ResourceParameter": {
+        "properties": {
+          "default": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "example": {
+            "type": "string",
+          },
+          "name": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "type": "string",
+          },
+          "required": {
+            "default": false,
+            "type": "boolean",
+          },
+        },
+        "required": [
+          "name",
+        ],
         "type": "object",
       },
       "ResourceResponse": {
@@ -2824,6 +2925,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceParameter",
+            },
+            "type": "array",
+          },
           "projectId": {
             "type": "string",
           },
@@ -2857,6 +2964,51 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "contentSha256",
           "createdAt",
           "projectId",
+        ],
+        "type": "object",
+      },
+      "ResourceRunOutcome": {
+        "properties": {
+          "error": {
+            "type": "string",
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string",
+            },
+            "type": "object",
+          },
+          "published": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "ref": {
+            "type": "string",
+          },
+          "revisionId": {
+            "type": "string",
+          },
+          "setupDurationMs": {
+            "type": "number",
+          },
+          "setupSucceeded": {
+            "type": "boolean",
+          },
+          "slug": {
+            "type": "string",
+          },
+          "teardownRan": {
+            "type": "boolean",
+          },
+        },
+        "required": [
+          "ref",
+          "slug",
+          "revisionId",
+          "setupSucceeded",
+          "published",
         ],
         "type": "object",
       },
@@ -3027,6 +3179,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "logsUrl": {
             "type": "string",
           },
+          "mcpRegistered": {
+            "type": "boolean",
+          },
           "os": {
             "properties": {
               "arch": {
@@ -3069,6 +3224,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "rawChatUrl": {
             "type": "string",
+          },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceRunOutcome",
+            },
+            "type": "array",
           },
           "result": {
             "type": "string",
@@ -6917,6 +7078,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   },
                   "reasoningEffort": {
                     "type": "string",
+                  },
+                  "resources": {
+                    "items": {
+                      "$ref": "#/components/schemas/ResourceBindingSpec",
+                    },
+                    "type": "array",
                   },
                   "skillRevisions": {
                     "items": {
