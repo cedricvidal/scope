@@ -71,9 +71,10 @@ In the sidebar the entity sits under **Integrations** (formerly "Resources"). Th
 renamed rather than the item: its siblings, MCP and Extensions, name *things*, so naming this item
 anything other than Resources would have hidden it from anyone looking for it.
 
-Run detail surfaces `run.resources` and `run.mcpRegistered` (see
-[Run observability](#run-observability)), falling back to the top-level `resourceRevisionIds`
-for runs recorded before those fields existed.
+Run detail surfaces the pinned bindings, their resolved parameter values, `run.resources` and
+`run.mcpRegistered` (see [Run observability](#run-observability)). Parameters a profile has
+preset render **locked**, not merely pre-filled — an editable field whose value the API rejects
+at submit would be a lie in the UI.
 
 ## Run observability
 
@@ -81,12 +82,18 @@ Two fields are written back after teardown:
 
 | Field | Meaning |
 |-------|---------|
-| `run.resources[]` | Per resource: `ref`, `slug`, `revisionId`, `setupSucceeded`, `published[]`, `teardownRan` |
+| `run.resources[]` | Per resource: `ref`, `slug`, `revisionId`, `setupSucceeded`, `published[]`, `params`, `teardownRan` |
 | `run.mcpRegistered` | Whether any MCP server was registered for the run |
 
-Both are nested under `run`, **not** at the document root; `resourceRevisionIds` is the top-level
-field, written at submit time. Consumers must tolerate their absence, since runs predating the
-feature carry only the pinned revision ids.
+These are nested under `run`, **not** at the document root. The request's own
+`resources[]` — written at submit time — is the top-level field, and the two deliberately
+share a name: keyed by the same `revisionId`, one is what the run asked for and the other is
+what happened.
+
+There is no parallel `resourceRevisionIds: string[]`. Pinned ids and their parameter values
+live in one grouped array precisely so they cannot drift: two parallel lists would have to
+stay the same length and order forever, an invariant nothing enforces, and three ids beside
+two parameter maps has no correct interpretation.
 
 `mcpRegistered: false` is a legitimate value, not a defect — a run using the `gh` CLI surface
 registers no MCP server. It is, however, the fastest way to detect a *mis-submitted* run: a run
@@ -149,6 +156,90 @@ no-op.
 
 **The orphan purge stays first.** A resource that publishes a fixed port cannot
 start if a container from an earlier run is still holding it.
+
+## Parameters — the inputs
+
+Exports are what a setup phase publishes on the way out. **Parameters are what a run
+supplies on the way in**, and they are the reason a resource is reusable rather than a
+fixture. The GitHub simulator's lifecycle is identical for every repository, so the
+repository is a parameter — not a reason to create a second resource.
+
+```ts
+interface ResourceParameter {
+  name: string;          // environment variable identifier, e.g. "REPO"
+  description?: string;
+  required: boolean;
+  default?: string;
+  example?: string;      // illustrative only; never used as a fallback
+}
+```
+
+Declarations live on the **revision** and are folded into `contentSha256`, so editing the
+contract mints a new revision. A setup body and the parameters it reads have to move
+together; if they could drift apart, a run pinned to an old revision could be handed a
+parameter set that body never knew about.
+
+Declarations are rejected at revision-create time — all problems at once, not the first —
+when a name is not a valid environment variable identifier, uses the reserved `SCOPE_`
+prefix, collides with one of the same revision's `exports`, is declared twice, or is marked
+`required` while also carrying a `default` that could never apply. The export collision is
+the subtle one: a name that is both an input and an output makes the published value
+ambiguous, since which one wins would depend on phase ordering.
+
+### Precedence: the profile wins
+
+Values are merged **defaults → profile presets → run-supplied**, and a run **cannot
+override what a profile sets**. This is not a rule invented for resources; it is what the
+submit path already enforces for `worker`, `model`, `mcpServers`, `skills` and
+`extensions`:
+
+> *"Profile `<id>` controls these fields. Either omit them or match the profile values."*
+
+| Case | Result |
+|---|---|
+| Profile sets it, run omits it | profile value |
+| Profile sets it, run sends the same value | accepted |
+| Profile sets it, run sends a different value | `400`, reported per parameter |
+| Profile silent, run supplies it | run value — filling a gap is not overriding |
+| Nobody supplies a `required` parameter | `400` |
+
+Conflicts are reported **per parameter**, not per binding:
+
+```
+resources.github-simulator@r3.AS: sent "octo/ns", profile requires "mcp-demo/ns"
+```
+
+Per-binding comparison — the wholesale array compare used for `mcpServers` — would force a
+run to restate every value the profile already fixed just to fill one the profile left
+open, which defeats the reason parameters exist.
+
+**Unknown keys are a `400`, never ignored.** A silently dropped `REPOS=` typo would seed the
+resource with its default and produce a completely healthy-looking run that answers a
+different question than the one asked. That failure mode — succeeding while meaning nothing
+— is the one this whole area is built to prevent.
+
+### Parameters at runtime
+
+Resolved values are injected into the phase environment per resource, for **both** setup and
+teardown; teardown usually needs them to identify what to remove. Precedence, widest first:
+
+```
+process.env  <  parameters  <  caller-supplied env  <  SCOPE_SETUP_ENV
+```
+
+Caller-supplied env wins deliberately: it carries worker infrastructure such as
+`DOCKER_HOST`, and a resource declaring a parameter with that name would otherwise redirect
+the Docker socket instead of configuring itself. Parameters are also merged per resource
+rather than into shared phase options, so one resource's values cannot leak into the next
+one's script.
+
+### Parameters are not a credential channel
+
+Resolved values are stored in plaintext on the request document and shown in the portal.
+**Do not pass tokens as parameters.** The GitHub simulator resource shows the intended
+pattern: `SIM_TOKEN` is *derived inside setup* from the generated seed and published as an
+export, so the credential never appears in the catalog or on the request. A `secretRef` form
+resolving through Token Manager may come later; until it exists, this is a hard rule.
 
 ## Publishing connection details
 
