@@ -136,6 +136,8 @@ export interface Run {
   skills?: string[];
   skillRevisions?: string[];
   codebaseRevisionId?: string;
+  resourceRevisionIds?: string[];
+  resources?: ResourceRunOutcome[];
   extensions?: string[];
   priority?: number;
   submissionId?: string;
@@ -1009,6 +1011,17 @@ export interface CreateResourceRevisionBody {
   setup: ResourceScript;
   teardown?: ResourceScript;
   exports: string[];
+}
+
+export interface ResourceRunOutcome {
+  ref: string;
+  slug: string;
+  revisionId: string;
+  setupSucceeded: boolean;
+  published: string[];
+  setupDurationMs?: number;
+  error?: string;
+  teardownRan?: boolean;
 }
 
 // =============================================================================

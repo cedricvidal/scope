@@ -171,6 +171,7 @@ export const api = {
     mcpServers?: string[];
     skills?: string[];
     extensions?: string[];
+    resources?: string[];
     agentVersion?: string;
     profileId?: string;
     profileVariations?: string[];
