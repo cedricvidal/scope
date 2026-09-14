@@ -28,8 +28,15 @@ async function resolveResource(
   return ctx.resourceStore.getBySlug(projectId, idOrSlug);
 }
 
-async function hasResourceSlug(ctx: RouteContext, projectId: string, slug: string): Promise<boolean> {
-  return (await ctx.resourceStore.getBySlug(projectId, slug, { includeDeleted: true })) !== null;
+/**
+ * Existing resource holding this slug, including a soft-deleted one.
+ *
+ * Returned rather than a boolean so the caller can say *why* the slug is taken:
+ * a soft-deleted resource is invisible in every listing, so a bare "already
+ * exists" sends the caller hunting for something they cannot see.
+ */
+async function findResourceBySlugIncludingDeleted(ctx: RouteContext, projectId: string, slug: string) {
+  return ctx.resourceStore.getBySlug(projectId, slug, { includeDeleted: true });
 }
 
 async function hasRevisionRef(ctx: RouteContext, projectId: string, ref: string): Promise<boolean> {
@@ -94,8 +101,13 @@ export function registerResourcesRoutes(ctx: RouteContext): void {
         // Cosmos DB degrades the project-scoped unique index to non-unique, so
         // the route must enforce same-project uniqueness before insert. A
         // soft-deleted resource still reserves its slug so old refs stay stable.
-        if (await hasResourceSlug(ctx, projectId, slug)) {
-          res.status(409).json({ error: `A resource with slug '${slug}' already exists in this project.` });
+        const slugHolder = await findResourceBySlugIncludingDeleted(ctx, projectId, slug);
+        if (slugHolder) {
+          res.status(409).json({
+            error: slugHolder.deletedAt
+              ? `A deleted resource still holds the slug '${slug}' in this project. Slugs are not released on delete, because existing runs resolve revisions by the '{slug}@rN' ref and reusing the slug would make those refs ambiguous. Choose a different slug.`
+              : `A resource with slug '${slug}' already exists in this project.`,
+          });
           return;
         }
 
