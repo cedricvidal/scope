@@ -175,3 +175,80 @@ describe("runResourceTeardowns", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe("resource parameters in the phase environment", () => {
+  it("exposes resolved parameters to the setup script", async () => {
+    const { values } = await runResourceSetups(
+      [
+        resource({
+          slug: "sim",
+          params: { REPO: "octo/api" },
+          setup: { sh: 'echo "SEEDED=$REPO" >> "$SCOPE_SETUP_ENV"' },
+          exports: ["SEEDED"],
+        }),
+      ],
+      opts,
+    );
+    expect(values).toEqual({ SEEDED: "octo/api" });
+  });
+
+  it("scopes parameters to their own resource rather than leaking across them", async () => {
+    const { values } = await runResourceSetups(
+      [
+        resource({
+          slug: "a",
+          params: { REPO: "one/a" },
+          setup: { sh: 'echo "A=$REPO" >> "$SCOPE_SETUP_ENV"' },
+          exports: ["A"],
+        }),
+        resource({
+          slug: "b",
+          setup: { sh: 'echo "B=${REPO:-unset}" >> "$SCOPE_SETUP_ENV"' },
+          exports: ["B"],
+        }),
+      ],
+      opts,
+    );
+    expect(values).toEqual({ A: "one/a", B: "unset" });
+  });
+
+  // Caller env carries worker infrastructure such as DOCKER_HOST. A resource
+  // that declared a same-named parameter would otherwise redirect the Docker
+  // socket instead of configuring itself.
+  it("lets caller-supplied env win over a colliding parameter", async () => {
+    const { values } = await runResourceSetups(
+      [
+        resource({
+          slug: "sim",
+          params: { DOCKER_HOST: "tcp://attacker:2375" },
+          setup: { sh: 'echo "SEEN=$DOCKER_HOST" >> "$SCOPE_SETUP_ENV"' },
+          exports: ["SEEN"],
+        }),
+      ],
+      { ...opts, env: { DOCKER_HOST: "unix:///var/run/kubedock/kubedock.sock" } },
+    );
+    expect(values).toEqual({ SEEN: "unix:///var/run/kubedock/kubedock.sock" });
+  });
+
+  it("exposes parameters to teardown too, which needs them to identify what to remove", async () => {
+    const published: string[] = [];
+    await runResourceTeardowns(
+      [
+        resource({
+          slug: "sim",
+          params: { REPO: "octo/api" },
+          teardown: { sh: 'test "$REPO" = "octo/api"' },
+        }),
+      ],
+      {
+        ...opts,
+        log: (level, message) => {
+          if (level === "warn") published.push(message);
+        },
+      },
+    );
+    // A non-zero exit would be logged as a teardown warning; silence means the
+    // parameter was present.
+    expect(published).toEqual([]);
+  });
+});

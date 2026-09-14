@@ -150,6 +150,24 @@ async function runScript(
 }
 
 /**
+ * Overlay a resource's resolved parameter values onto the phase environment.
+ *
+ * Precedence, widest to narrowest: `process.env` (applied inside `runScript`),
+ * then the resource's parameters, then the caller's `env`, then
+ * `SCOPE_SETUP_ENV`.
+ *
+ * Caller-supplied `env` deliberately wins over parameters. It carries worker
+ * infrastructure such as `DOCKER_HOST`, and a resource declaring a parameter
+ * that happened to share one of those names would otherwise redirect the Docker
+ * socket rather than configure itself. `SCOPE_*` is already refused at
+ * declaration time for the same reason.
+ */
+function withParams(options: RunPhaseOptions, resource: ResourceConfig): RunPhaseOptions {
+  if (!resource.params || Object.keys(resource.params).length === 0) return options;
+  return { ...options, env: { ...resource.params, ...(options.env ?? {}) } };
+}
+
+/**
  * Provision every resource, in reference order.
  *
  * Returns the merged published values. On failure, the caller is responsible for
@@ -173,7 +191,7 @@ export async function runResourceSetups(
     // Marked provisioned before running: a phase that fails partway may still
     // have created containers, so its teardown must run.
     provisioned.push(resource);
-    const result = await runScript(resource.slug, "setup", body, options);
+    const result = await runScript(resource.slug, "setup", body, withParams(options, resource));
 
     const missing = missingExports(resource.exports, result.values);
     if (missing.length > 0) {
@@ -220,7 +238,7 @@ export async function runResourceTeardowns(
 
     try {
       void options.log?.("info", `Releasing resource '${resource.slug}'`);
-      await runScript(resource.slug, "teardown", body, options);
+      await runScript(resource.slug, "teardown", body, withParams(options, resource));
     } catch (err) {
       void options.log?.(
         "warn",

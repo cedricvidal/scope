@@ -197,6 +197,7 @@ class CopilotProcessor implements WorkerProcessor {
           revisionId: r.revisionId,
           setupSucceeded: true,
           published: r.exports,
+          ...(r.params && Object.keys(r.params).length > 0 ? { params: r.params } : {}),
         }));
         await log("info", "Resources provisioned", {
           count: provisioned.length,
@@ -212,6 +213,7 @@ class CopilotProcessor implements WorkerProcessor {
           revisionId: r.revisionId,
           setupSucceeded: false,
           published: [],
+          ...(r.params && Object.keys(r.params).length > 0 ? { params: r.params } : {}),
           ...(message.includes(`'${r.slug}'`) ? { error: message } : {}),
         }));
         // Unwind whatever already came up before failing the run; a partially
