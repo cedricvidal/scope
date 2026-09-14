@@ -5,6 +5,7 @@ import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { ScenarioSchema, PersonaSchema } from "./scenario.js";
 import { ResourceBindingSpecSchema } from "./resource.js";
+import { ResourceBindingSchema } from "./resource.js";
 import { GateIdSchema } from "./criteria.js";
 
 extendZodWithOpenApi(z);
@@ -173,6 +174,7 @@ export const RequestResponseSchema = z
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
     codebaseRevisionId: z.string().optional(),
+    resources: z.array(ResourceBindingSchema).optional(),
     extensions: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
     profileId: z.string().optional(),
