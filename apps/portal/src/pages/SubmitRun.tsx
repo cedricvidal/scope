@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import {
   getActiveAgentVersions, isAgentAvailable, isAgentVersionAvailable, type CodingAgent, type McpServerDocument,
-  type ProfileWithVersion, type ProfileVersionDocument, type Run,
+  type ProfileWithVersion, type ProfileVersionDocument, type ResourceBindingSpec, type Run,
 } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
@@ -219,7 +219,7 @@ export function SubmitRun() {
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedCodebaseSpec, setSelectedCodebaseSpec] = useState<string | null>(null);
-  const [selectedResourceSpecs, setSelectedResourceSpecs] = useState<string[]>([]);
+  const [selectedResourceSpecs, setSelectedResourceSpecs] = useState<ResourceBindingSpec[]>([]);
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
 
   // Profile
@@ -304,6 +304,9 @@ export function SubmitRun() {
     );
   const selectableProfileList = profileList.filter((profile) => profileVersionIsAvailable(profile.version));
   const selectedBaseProfile = profileList.find((profile) => profile._id === selectedProfileId);
+  const selectedBaseProfileVersion = selectedProfileId
+    ? profileVersions.find((version) => version.version === selectedProfileVersion) ?? selectedBaseProfile?.version
+    : undefined;
   const topProfiles = selectableProfileList.slice(0, 3);
 
   // ─── Effects ────────────────────────────────────────────────────────────
@@ -398,9 +401,11 @@ export function SubmitRun() {
     setSelectedAgentVersion(v.agentVersion ?? "");
     setSelectedMcpServers(v.mcpServers ?? []);
     setSelectedSkills(v.skillRevisions ?? []);
+    setSelectedResourceSpecs(v.resources ?? []);
     setSelectedExtensions(v.extensions ?? []);
     if ((v.mcpServers ?? []).length > 0) setMcpOpen(true);
     if ((v.skillRevisions ?? []).length > 0) setSkillsOpen(true);
+    if ((v.resources ?? []).length > 0) setResourcesOpen(true);
     if ((v.extensions ?? []).length > 0) setExtensionsOpen(true);
   };
 
@@ -556,9 +561,10 @@ export function SubmitRun() {
       setSelectedCodebaseSpec(run.codebaseRevisionId);
       setCodebaseOpen(true);
     }
-    const resources = run.resourceRevisionIds && run.resourceRevisionIds.length > 0
-      ? run.resourceRevisionIds
-      : (run.run?.resources ?? []).map((resource) => resource.ref);
+    const resources = run.resources ?? (run.run?.resources ?? []).map((resource) => ({
+      ref: resource.ref,
+      ...(resource.params ? { params: resource.params } : {}),
+    }));
     if (resources.length > 0) {
       setSelectedResourceSpecs(resources);
       setResourcesOpen(true);
@@ -587,6 +593,7 @@ export function SubmitRun() {
         ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
         ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
         ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
+        ...(selectedResourceSpecs.length > 0 ? { resources: selectedResourceSpecs } : {}),
         ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
       }),
     onSuccess: (data) => {
@@ -1055,7 +1062,11 @@ export function SubmitRun() {
                   Remove
                 </Button>
               </div>
-              <ResourcePicker selected={selectedResourceSpecs} onChange={setSelectedResourceSpecs} />
+              <ResourcePicker
+                selected={selectedResourceSpecs}
+                onChange={setSelectedResourceSpecs}
+                profileBindings={selectedBaseProfileVersion?.resources ?? []}
+              />
             </div>
           )}
 
@@ -1537,6 +1548,7 @@ export function SubmitRun() {
                   </p>
                   <p className="mt-1 text-muted-foreground">
                     {(selectedGraphPreview.versionDocument?.mcpServers?.length ?? 0)} MCP · {(selectedGraphPreview.versionDocument?.skillRevisions?.length ?? 0)} skills · {(selectedGraphPreview.versionDocument?.extensions?.length ?? 0)} extensions
+                    · {(selectedGraphPreview.versionDocument?.resources?.length ?? 0)} resources
                   </p>
                 </div>
               )}

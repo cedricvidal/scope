@@ -1302,6 +1302,7 @@ export const api = {
     description?: string;
     workerType: string;
     model: string;
+    reasoningEffort?: string;
     agentVersion?: string;
     mcpServers?: string[];
     skillRevisions?: string[];
@@ -1318,6 +1319,7 @@ export const api = {
   createProfileVersion: (profileId: string, body: {
     workerType: string;
     model: string;
+    reasoningEffort?: string;
     agentVersion?: string;
     mcpServers?: string[];
     skillRevisions?: string[];

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import { api } from "@/lib/api";
-import type { ResourceDocument, ResourceRevisionDocument } from "@/types";
+import type { ResourceBindingSpec, ResourceDocument, ResourceParameter, ResourceRevisionDocument } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,18 +14,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ResourceCreateForm } from "@/components/ResourceCreateForm";
 
 interface ResourcePickerProps {
-  selected: string[];
-  onChange: (specs: string[]) => void;
+  selected: ResourceBindingSpec[];
+  onChange: (specs: ResourceBindingSpec[]) => void;
+  profileBindings?: ResourceBindingSpec[];
   disabled?: boolean;
 }
 
-function parseResourceSpec(spec: string): { slug: string; revisionRef?: string } {
-  const at = spec.lastIndexOf("@r");
-  if (at > 0) return { slug: spec.substring(0, at), revisionRef: spec };
-  return { slug: spec };
+export function parseResourceRef(ref: string): { slug: string; revisionRef?: string } {
+  const at = ref.lastIndexOf("@r");
+  if (at > 0) return { slug: ref.substring(0, at), revisionRef: ref };
+  return { slug: ref };
 }
 
-export function ResourcePicker({ selected, onChange, disabled = false }: ResourcePickerProps) {
+export function ResourcePicker({ selected, onChange, profileBindings = [], disabled = false }: ResourcePickerProps) {
   const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -36,7 +37,7 @@ export function ResourcePicker({ selected, onChange, disabled = false }: Resourc
 
   const { data: resources = [], isLoading } = useQuery({ queryKey: ["resources"], queryFn: () => api.listResources() });
   const activeResources = useMemo(() => resources.filter((resource: ResourceDocument) => !resource.deletedAt), [resources]);
-  const parsedSpecs = useMemo(() => selected.map(parseResourceSpec), [selected]);
+  const parsedSpecs = useMemo(() => selected.map((binding) => parseResourceRef(binding.ref)), [selected]);
   const selectedSlugs = useMemo(() => new Set(parsedSpecs.map((spec) => spec.slug)), [parsedSpecs]);
 
   const matches = useMemo(() => {
@@ -57,14 +58,14 @@ export function ResourcePicker({ selected, onChange, disabled = false }: Resourc
   }, []);
 
   const addResource = (resource: ResourceDocument) => {
-    onChange([...selected, resource.slug]);
+    onChange([...selected, { ref: resource.slug }]);
     setQuery("");
     setOpen(false);
     inputRef.current?.focus();
   };
 
-  const replaceSpec = (index: number, spec: string) => {
-    onChange(selected.map((current, i) => i === index ? spec : current));
+  const replaceBinding = (index: number, binding: ResourceBindingSpec) => {
+    onChange(selected.map((current, i) => i === index ? binding : current));
   };
 
   const removeSpec = (index: number) => {
@@ -83,13 +84,15 @@ export function ResourcePicker({ selected, onChange, disabled = false }: Resourc
         </div>
       ) : (
         <div className="space-y-2">
-          {selected.map((spec, index) => (
+          {selected.map((binding, index) => (
             <SelectedResource
-              key={`${spec}-${index}`}
-              spec={spec}
+              key={`${binding.ref}-${index}`}
+              binding={binding}
+              profileBinding={findProfileBinding(binding, profileBindings)}
               resources={activeResources}
               disabled={disabled}
-              onReplace={(next) => replaceSpec(index, next)}
+              onReplace={(next) => replaceBinding(index, { ref: next })}
+              onChange={(next) => replaceBinding(index, next)}
               onRemove={() => removeSpec(index)}
             />
           ))}
@@ -156,7 +159,7 @@ export function ResourcePicker({ selected, onChange, disabled = false }: Resourc
                     return old.some((resource) => resource._id === created._id) ? old : [created, ...old];
                   });
                   queryClient.invalidateQueries({ queryKey: ["resources"] });
-                  onChange([...selected, created.firstRevision?.ref ?? created.slug]);
+                  onChange([...selected, { ref: created.firstRevision?.ref ?? created.slug }]);
                 }}
               />
             </div>
@@ -168,19 +171,23 @@ export function ResourcePicker({ selected, onChange, disabled = false }: Resourc
 }
 
 function SelectedResource({
-  spec,
+  binding,
+  profileBinding,
   resources,
   disabled,
   onReplace,
+  onChange,
   onRemove,
 }: {
-  spec: string;
+  binding: ResourceBindingSpec;
+  profileBinding?: ResourceBindingSpec;
   resources: ResourceDocument[];
   disabled: boolean;
   onReplace: (spec: string) => void;
+  onChange: (binding: ResourceBindingSpec) => void;
   onRemove: () => void;
 }) {
-  const parsed = useMemo(() => parseResourceSpec(spec), [spec]);
+  const parsed = useMemo(() => parseResourceRef(binding.ref), [binding.ref]);
   const resource = useMemo(
     () => resources.find((candidate) => candidate.slug === parsed.slug || candidate._id === parsed.slug) ?? null,
     [parsed.slug, resources],
@@ -190,12 +197,36 @@ function SelectedResource({
     queryFn: () => api.listResourceRevisions(resource!.slug, 20),
     enabled: !!resource,
   });
+  const selectedRevision = useMemo(() => {
+    if (!resource) return null;
+    if (parsed.revisionRef) {
+      return revisions.find((revision) => revision.ref === parsed.revisionRef || revision._id === parsed.revisionRef) ?? null;
+    }
+    if (resource.latestRevisionId) {
+      return revisions.find((revision) => revision._id === resource.latestRevisionId) ?? revisions[0] ?? null;
+    }
+    return revisions[0] ?? null;
+  }, [parsed.revisionRef, resource, revisions]);
+
+  const profileControlledResource = !!profileBinding;
+  const updateParam = (parameter: ResourceParameter, value: string) => {
+    const params = { ...(binding.params ?? {}) };
+    if (value === "" && parameter.default === undefined) {
+      delete params[parameter.name];
+    } else {
+      params[parameter.name] = value;
+    }
+    onChange({
+      ref: binding.ref,
+      ...(Object.keys(params).length > 0 ? { params } : {}),
+    });
+  };
 
   if (!resource) {
     return (
       <div className="flex items-center gap-2 rounded-md border p-2">
         <Boxes className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="flex-1 font-mono text-xs">{spec}</span>
+        <span className="flex-1 font-mono text-xs">{binding.ref}</span>
         <Badge variant="secondary" className="text-[10px]">resolved revision</Badge>
         {!disabled && <X className="h-3 w-3 cursor-pointer text-muted-foreground hover:text-destructive" onClick={onRemove} />}
       </div>
@@ -208,11 +239,12 @@ function SelectedResource({
         <Boxes className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="font-mono text-xs font-medium">{resource.slug}</span>
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{resource.name}</span>
-        {!disabled && <X className="h-3 w-3 cursor-pointer text-muted-foreground hover:text-destructive" onClick={onRemove} />}
+        {profileControlledResource && <Badge variant="outline" className="text-[10px]">profile</Badge>}
+        {!disabled && !profileControlledResource && <X className="h-3 w-3 cursor-pointer text-muted-foreground hover:text-destructive" onClick={onRemove} />}
       </div>
       <div className="space-y-1 pl-6">
         <Label className="text-xs">Revision</Label>
-        <Select value={parsed.revisionRef ?? "__latest__"} onValueChange={(value) => onReplace(value === "__latest__" ? resource.slug : value)} disabled={disabled}>
+        <Select value={parsed.revisionRef ?? "__latest__"} onValueChange={(value) => onReplace(value === "__latest__" ? resource.slug : value)} disabled={disabled || profileControlledResource}>
           <SelectTrigger className="h-8 w-full text-xs font-mono"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="__latest__">latest at submit ({resource.latestRevisionNumber ? `${resource.slug}@r${resource.latestRevisionNumber}` : "no revisions yet"})</SelectItem>
@@ -224,8 +256,93 @@ function SelectedResource({
             ))}
           </SelectContent>
         </Select>
-        <p className="text-[11px] text-muted-foreground">Bare selections pin the latest revision when the run is submitted.</p>
+        <p className="text-[11px] text-muted-foreground">
+          {profileControlledResource
+            ? "The selected profile controls this resource and revision."
+            : "Bare selections pin the latest revision when the run is submitted."}
+        </p>
+      </div>
+
+      <div className="space-y-2 pl-6">
+        <div className="flex items-center gap-2">
+          <Label className="text-xs">Parameters</Label>
+          <Badge variant="outline" className="text-[10px]">{selectedRevision?.parameters?.length ?? 0}</Badge>
+        </div>
+        {isLoading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : selectedRevision?.parameters?.length ? (
+          <div className="space-y-2">
+            {selectedRevision.parameters.map((parameter) => (
+              <ResourceParameterInput
+                key={parameter.name}
+                binding={binding}
+                parameter={parameter}
+                profileValue={profileBinding?.params?.[parameter.name]}
+                disabled={disabled}
+                onChange={(value) => updateParam(parameter, value)}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-md border border-dashed p-2 text-[11px] text-muted-foreground">
+            This revision does not declare parameter inputs.
+          </p>
+        )}
       </div>
     </div>
   );
+}
+
+function ResourceParameterInput({
+  binding,
+  parameter,
+  profileValue,
+  disabled,
+  onChange,
+}: {
+  binding: ResourceBindingSpec;
+  parameter: ResourceParameter;
+  profileValue?: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const profileControlsValue = profileValue !== undefined;
+  const value = profileControlsValue
+    ? profileValue
+    : binding.params?.[parameter.name] ?? parameter.default ?? "";
+  const inputId = `resource-param-${binding.ref.replace(/[^A-Za-z0-9_-]/g, "-")}-${parameter.name}`;
+
+  return (
+    <div className="rounded-md border bg-background p-2">
+      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+        <Label htmlFor={inputId} className="font-mono text-xs">{parameter.name}</Label>
+        {parameter.required && <Badge variant="destructive" className="text-[10px]">required</Badge>}
+        {parameter.default !== undefined && <Badge variant="secondary" className="font-mono text-[10px]">default: {parameter.default}</Badge>}
+      </div>
+      <Input
+        id={inputId}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled || profileControlsValue}
+        placeholder={parameter.example ?? parameter.description ?? ""}
+        className="h-8 font-mono text-xs"
+      />
+      {profileControlsValue ? (
+        <p className="mt-1 text-[11px] text-muted-foreground">Profile controls this value.</p>
+      ) : parameter.description ? (
+        <p className="mt-1 text-[11px] text-muted-foreground">{parameter.description}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function findProfileBinding(
+  binding: ResourceBindingSpec,
+  profileBindings: ResourceBindingSpec[],
+): ResourceBindingSpec | undefined {
+  const parsed = parseResourceRef(binding.ref);
+  return profileBindings.find((profileBinding) => {
+    if (profileBinding.ref === binding.ref) return true;
+    return parseResourceRef(profileBinding.ref).slug === parsed.slug;
+  });
 }

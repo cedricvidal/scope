@@ -43,7 +43,7 @@ import {
 } from "@/lib/gates";
 import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { toast } from "sonner";
-import type { RunState, LogEvent, ResourceRunOutcome } from "@/types";
+import type { RunState, LogEvent, ResourceBinding, ResourceRunOutcome } from "@/types";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { getRetryButtonState } from "@/components/RetryButton";
 
@@ -77,15 +77,32 @@ function ResourceLinks({ label, items, hrefBase }: { label: string; items: strin
   );
 }
 
-function RunResourceLinks({ outcomes, revisionIds }: { outcomes: ResourceRunOutcome[]; revisionIds: string[] }) {
-  const outcomeRevisionIds = new Set(outcomes.map((resource) => resource.revisionId));
-  const rawRevisionIds = revisionIds.filter((revisionId) => !outcomeRevisionIds.has(revisionId));
+function RunResourceLinks({ bindings, outcomes }: { bindings: ResourceBinding[]; outcomes: ResourceRunOutcome[] }) {
+  const outcomeByRevisionId = new Map(outcomes.map((resource) => [resource.revisionId, resource]));
+  const bindingsByRevisionId = new Set(bindings.map((binding) => binding.revisionId));
+  const outcomeOnly = outcomes.filter((resource) => !bindingsByRevisionId.has(resource.revisionId));
 
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">Resources</span>
       <div className="flex flex-wrap items-center gap-1">
-        {outcomes.map((resource) => (
+        {bindings.map((binding) => {
+          const outcome = outcomeByRevisionId.get(binding.revisionId);
+          return (
+            <Link
+              key={binding.revisionId}
+              to={`/resources/${binding.ref.split("@r")[0]}`}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-mono transition-colors hover:bg-accent",
+                outcome ? outcome.setupSucceeded ? "border-emerald-500/40" : "border-destructive/50" : "",
+              )}
+            >
+              {binding.ref}
+              {outcome && (outcome.setupSucceeded ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <XCircle className="h-3 w-3 text-destructive" />)}
+            </Link>
+          );
+        })}
+        {outcomeOnly.map((resource) => (
           <Link
             key={resource.revisionId}
             to={`/resources/${resource.slug}`}
@@ -97,11 +114,6 @@ function RunResourceLinks({ outcomes, revisionIds }: { outcomes: ResourceRunOutc
             {resource.ref}
             {resource.setupSucceeded ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <XCircle className="h-3 w-3 text-destructive" />}
           </Link>
-        ))}
-        {rawRevisionIds.map((revisionId) => (
-          <span key={revisionId} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono">
-            {formatId(revisionId)}
-          </span>
         ))}
       </div>
     </div>
@@ -541,9 +553,23 @@ export function RunDetail() {
    const skillIds = skillIdsFromRevisions.length > 0
      ? skillIdsFromRevisions
      : (run.skills ?? []);
+  const runResources = run.resources ?? [];
   const runResourceOutcomes = activeRun?.resources ?? [];
-  const runResourceRevisionIds = run.resourceRevisionIds ?? [];
-  const hasRunResources = runResourceOutcomes.length > 0 || runResourceRevisionIds.length > 0;
+  const resourceOutcomeByRevisionId = new Map(runResourceOutcomes.map((resource) => [resource.revisionId, resource]));
+  const resourceRows = runResources.length > 0
+    ? runResources.map((binding) => ({
+        binding,
+        outcome: resourceOutcomeByRevisionId.get(binding.revisionId),
+      }))
+    : runResourceOutcomes.map((outcome) => ({
+        binding: {
+          ref: outcome.ref,
+          revisionId: outcome.revisionId,
+          params: outcome.params ?? {},
+        },
+        outcome,
+      }));
+  const hasRunResources = resourceRows.length > 0;
 
   const gateSummaries = (run.gateSummaries ?? []) as GateRunSummary[];
   const gateSummaryById = new Map(gateSummaries.map((summary) => [summary.gate, summary]));
@@ -733,7 +759,7 @@ export function RunDetail() {
                   <ResourceLinks label="Extensions" items={run.extensions} hrefBase="/extensions" />
                 )}
                 {hasRunResources && (
-                  <RunResourceLinks outcomes={runResourceOutcomes} revisionIds={runResourceRevisionIds} />
+                  <RunResourceLinks bindings={runResources} outcomes={runResourceOutcomes} />
                 )}
               </div>
             )}
@@ -1443,42 +1469,52 @@ export function RunDetail() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
-                    <Boxes className="h-4 w-4" /> Resources ({Math.max(runResourceOutcomes.length, runResourceRevisionIds.length)})
+                    <Boxes className="h-4 w-4" /> Resources ({resourceRows.length})
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {runResourceOutcomes.length > 0 ? (
-                    runResourceOutcomes.map((resource) => (
-                      <div key={resource.revisionId} className="rounded-md border p-3 text-sm">
+                  {resourceRows.map(({ binding, outcome }) => (
+                      <div key={binding.revisionId} className="rounded-md border p-3 text-sm">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Link to={`/resources/${resource.slug}`} className="font-mono text-xs text-primary hover:underline">{resource.ref}</Link>
-                          {resource.setupSucceeded ? (
-                            <Badge variant="success" className="gap-1"><CheckCircle2 className="h-3 w-3" /> setup ok</Badge>
-                          ) : (
-                            <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" /> setup failed</Badge>
+                          <Link to={`/resources/${binding.ref.split("@r")[0]}`} className="font-mono text-xs text-primary hover:underline">{binding.ref}</Link>
+                          <Badge variant="outline" className="font-mono text-xs">revision {formatId(binding.revisionId)}</Badge>
+                          {outcome && (
+                            outcome.setupSucceeded ? (
+                              <Badge variant="success" className="gap-1"><CheckCircle2 className="h-3 w-3" /> setup ok</Badge>
+                            ) : (
+                              <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" /> setup failed</Badge>
+                            )
                           )}
-                          {resource.teardownRan !== undefined && (
-                            <Badge variant="outline" className="text-xs">teardown {resource.teardownRan ? "ran" : "not run"}</Badge>
+                          {outcome?.teardownRan !== undefined && (
+                            <Badge variant="outline" className="text-xs">teardown {outcome.teardownRan ? "ran" : "not run"}</Badge>
+                          )}
+                          {outcome?.setupDurationMs !== undefined && (
+                            <Badge variant="secondary" className="font-mono text-xs">{formatDuration(outcome.setupDurationMs)}</Badge>
                           )}
                         </div>
-                        {resource.error && <p className="mt-2 text-xs text-destructive">{resource.error}</p>}
+                        {outcome?.error && <p className="mt-2 text-xs text-destructive">{outcome.error}</p>}
+                        <div className="mt-2 space-y-1">
+                          <span className="text-xs text-muted-foreground">Resolved parameters:</span>
+                          {Object.keys(binding.params).length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {Object.entries(binding.params).map(([name, value]) => (
+                                <Badge key={name} variant="outline" className="font-mono text-xs">{name}={value}</Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="ml-1 text-xs text-muted-foreground">none</span>
+                          )}
+                        </div>
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                           <span className="text-xs text-muted-foreground">Published:</span>
-                          {resource.published.length > 0 ? (
-                            resource.published.map((name) => <Badge key={name} variant="secondary" className="font-mono text-xs">{name}</Badge>)
+                          {outcome?.published && outcome.published.length > 0 ? (
+                            outcome.published.map((name) => <Badge key={name} variant="secondary" className="font-mono text-xs">{name}</Badge>)
                           ) : (
                             <span className="text-xs text-muted-foreground">none</span>
                           )}
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {runResourceRevisionIds.map((revisionId) => (
-                        <Badge key={revisionId} variant="secondary" className="font-mono text-xs">{revisionId}</Badge>
-                      ))}
-                    </div>
-                  )}
+                    ))}
                 </CardContent>
               </Card>
             )}
