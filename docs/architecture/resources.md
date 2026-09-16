@@ -239,6 +239,9 @@ teardown; teardown usually needs them to identify what to remove. Precedence, wi
 process.env  <  parameters  <  caller-supplied env  <  SCOPE_SETUP_ENV
 ```
 
+`SCOPE_CONCEALED_ENV` sits outside this chain — see
+[Publishing without telling the agent](#publishing-without-telling-the-agent).
+
 Caller-supplied env wins deliberately: it carries worker infrastructure such as
 `DOCKER_HOST`, and a resource declaring a parameter with that name would otherwise redirect
 the Docker socket instead of configuring itself. Parameters are also merged per resource
@@ -290,6 +293,40 @@ Published values are used in two places:
 2. **Merged into the agent's subprocess environment** — `buildSubprocessEnv`
    constructs a fixed object and never spreads `process.env`, so this is the only
    way an agent-facing tool can learn where the run's resources are.
+
+### Publishing without telling the agent
+
+Sometimes the platform needs a value the agent must not have. A benchmark that
+compares tool surfaces is the clearest case: if the simulator's endpoint and token
+are in the agent's environment, calling the REST API directly is the shortest path
+from every arm, and the comparison stops measuring the surfaces it was built to
+compare.
+
+`$SCOPE_CONCEALED_ENV` is the same contract with a different audience. A setup
+phase appends `KEY=VALUE` lines to it exactly as with `$SCOPE_SETUP_ENV`, and the
+values reach:
+
+- MCP server interpolation, so a server record can point at the resource;
+- later resources' setup and teardown phases, via the same file;
+- tooling wrappers the resource installs, which read the file at call time —
+  setup bakes in the *path*, never the value.
+
+They do not reach `buildSubprocessEnv`, so they are absent from the agent's
+environment.
+
+Unlike `$SCOPE_SETUP_ENV`, which is a fresh per-phase temp file, the concealed
+store is **run-scoped and accumulates**. That is what lets a later resource read
+what an earlier one published; previously a resource could not, which is why
+tooling wrappers had to read connection details out of the agent's environment
+for want of anywhere else to get them.
+
+**This conceals from the environment, not from the filesystem.** Resource setup
+and the agent run as the same uid, so a determined agent can still read the file;
+POSIX cannot separate two processes that share a uid. The goal is to remove the
+path of least resistance, not to build a sandbox. An agent that goes looking
+through the filesystem for credentials is doing something qualitatively different
+from reading its own environment, and that difference is visible in the
+trajectory.
 
 ### Choose published names carefully
 
