@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import os from "node:os";
-import { CodingAgentQueueProcessor } from "./queue-processor.js";
+import { CodingAgentQueueProcessor, pairBindingsWithConfigs } from "./queue-processor.js";
 import type { QueueProcessorConfig, WorkerProcessor, WorkerResult } from "../types/types.js";
 import type { VisibilityHeartbeat } from "./visibility-heartbeat.js";
 import { InMemoryHeartbeatStore } from "./heartbeat-store.js";
@@ -649,5 +649,67 @@ describe("CodingAgentQueueProcessor.enqueuePostProcessing", () => {
       Buffer.from(sendMessage.mock.calls[0][0], "base64").toString(),
     );
     expect(decoded).toEqual({ type: "atif", requestId, runId });
+  });
+});
+
+describe("pairBindingsWithConfigs", () => {
+  const config = (slug: string, revisionId: string) => ({
+    ref: `${slug}@r1`,
+    resourceId: `res-${slug}`,
+    revisionId,
+    slug,
+    name: slug,
+    setup: { sh: "echo setup" },
+    exports: [],
+  });
+
+  it("attaches each binding's parameters to its config", () => {
+    const paired = pairBindingsWithConfigs(
+      [{ ref: "sim@r1", revisionId: "rev-1", params: { REPO: "alpha" } }],
+      [config("sim", "rev-1")],
+    );
+    expect(paired).toHaveLength(1);
+    expect(paired[0].params).toEqual({ REPO: "alpha" });
+  });
+
+  it("keeps duplicate bindings of one revision independent", () => {
+    // Regression: matching configs to bindings with find() by revisionId gave both
+    // occurrences the first binding's parameters, so two simulators intended for
+    // different repos both silently targeted the first one.
+    const paired = pairBindingsWithConfigs(
+      [
+        { ref: "sim@r1", revisionId: "rev-1", params: { REPO: "alpha" } },
+        { ref: "sim@r1", revisionId: "rev-1", params: { REPO: "beta" } },
+      ],
+      [config("sim", "rev-1")],
+    );
+    expect(paired).toHaveLength(2);
+    expect(paired[0].params).toEqual({ REPO: "alpha" });
+    expect(paired[1].params).toEqual({ REPO: "beta" });
+  });
+
+  it("preserves submission order when the resolver reorders", () => {
+    const paired = pairBindingsWithConfigs(
+      [
+        { ref: "db@r1", revisionId: "rev-db" },
+        { ref: "sim@r1", revisionId: "rev-sim" },
+      ],
+      [config("sim", "rev-sim"), config("db", "rev-db")],
+    );
+    expect(paired.map((c) => c.slug)).toEqual(["db", "sim"]);
+  });
+
+  it("leaves params unset when a binding has none", () => {
+    const paired = pairBindingsWithConfigs(
+      [{ ref: "sim@r1", revisionId: "rev-1", params: {} }],
+      [config("sim", "rev-1")],
+    );
+    expect(paired[0].params).toBeUndefined();
+  });
+
+  it("throws when the resolver omits a binding's revision", () => {
+    expect(() =>
+      pairBindingsWithConfigs([{ ref: "sim@r1", revisionId: "rev-missing" }], []),
+    ).toThrow(/rev-missing/);
   });
 });

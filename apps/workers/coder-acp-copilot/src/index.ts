@@ -58,8 +58,31 @@ export function isFirstAiCallSignal(msg: string): boolean {
  *   provided, set as NODE_EXTRA_CA_CERTS so the Node-based CLI trusts the proxy's
  *   MITM cert for the intercepted model endpoint.
  */
-export function buildSubprocessEnv(
-  githubToken: string,
+/**
+ * Reject a key published to both the public and the concealed channel.
+ *
+ * The two channels mean opposite things about agent visibility, so a key in both
+ * has no sensible resolution: the concealed value would win for MCP
+ * interpolation, the public value would be silently discarded, and the key would
+ * be withheld from the agent entirely. That is a security-sensitive ambiguity, so
+ * it fails the run instead of being resolved silently.
+ *
+ * @throws if any key appears in both maps.
+ */
+export function assertNoPublishChannelCollision(
+  values: Record<string, string>,
+  concealed: Record<string, string>,
+): void {
+  const collisions = Object.keys(concealed).filter((key) => key in values);
+  if (collisions.length > 0) {
+    throw new Error(
+      `Resource setup published the same key to both the public and concealed channels: ${collisions.sort().join(", ")}. `
+      + "Publish each key to exactly one of $SCOPE_SETUP_ENV or $SCOPE_CONCEALED_ENV."
+    );
+  }
+}
+
+export function buildSubprocessEnv(  githubToken: string,
   devProxyEnabled: boolean,
   currentNodeOptions?: string,
   gatewayUrl?: string,
@@ -218,6 +241,7 @@ class CopilotProcessor implements WorkerProcessor {
           concealedEnvPath: this.concealedStore?.path,
         });
         this.provisionedResources = provisioned;
+        assertNoPublishChannelCollision(values, concealed);
         // Concealed values join resourceEnv so MCP server interpolation keeps
         // working; they are subtracted again when the agent's env is built.
         this.resourceEnv = { ...values, ...concealed };

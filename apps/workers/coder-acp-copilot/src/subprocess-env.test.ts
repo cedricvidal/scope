@@ -2,7 +2,40 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect } from "vitest";
-import { buildSubprocessEnv } from "./index.js";
+import { buildSubprocessEnv, assertNoPublishChannelCollision } from "./index.js";
+
+describe("assertNoPublishChannelCollision", () => {
+  it("accepts keys published to exactly one channel", () => {
+    expect(() =>
+      assertNoPublishChannelCollision({ PUBLIC_URL: "http://visible" }, { SECRET_TOKEN: "ghp_x" }),
+    ).not.toThrow();
+  });
+
+  it("accepts empty channels", () => {
+    expect(() => assertNoPublishChannelCollision({}, {})).not.toThrow();
+  });
+
+  it("rejects a key published to both channels", () => {
+    // Silently resolving this would discard the public value and withhold the key
+    // from the agent entirely, while MCP interpolation quietly used the concealed
+    // value — a security-sensitive ambiguity that must fail loudly.
+    expect(() =>
+      assertNoPublishChannelCollision(
+        { API_URL: "http://public", OTHER: "x" },
+        { API_URL: "http://concealed" },
+      ),
+    ).toThrow(/API_URL/);
+  });
+
+  it("reports every colliding key", () => {
+    expect(() =>
+      assertNoPublishChannelCollision(
+        { B_KEY: "1", A_KEY: "2" },
+        { B_KEY: "3", A_KEY: "4" },
+      ),
+    ).toThrow(/A_KEY, B_KEY/);
+  });
+});
 
 describe("buildSubprocessEnv", () => {
   const token = "gho_test_token_1234567890";

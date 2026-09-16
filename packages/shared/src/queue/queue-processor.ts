@@ -42,6 +42,37 @@ import type { ResourceConfig } from "../types/resource.js";
 import { seedCodebaseToWorkspace } from "../codebases/codebase-seeder.js";
 
 /**
+ * Pair each resource binding with its resolved config, preserving submission
+ * order and per-binding parameters.
+ *
+ * Driven by the bindings rather than by the resolver's output so the run gets
+ * exactly one config per binding. Configs are looked up by revisionId, so a
+ * resolver that reorders or dedupes cannot pair a resource with another's
+ * parameters — and binding the same revision twice with different parameters
+ * yields two independent configs instead of both silently receiving the first
+ * binding's parameters.
+ *
+ * @throws if the resolver did not return a config for some binding.
+ */
+export function pairBindingsWithConfigs(
+  bindings: ReadonlyArray<{ ref: string; revisionId: string; params?: Record<string, string> }>,
+  resolved: ReadonlyArray<ResourceConfig>,
+): ResourceConfig[] {
+  const configByRevisionId = new Map(resolved.map((config) => [config.revisionId, config]));
+  return bindings.map((binding) => {
+    const config = configByRevisionId.get(binding.revisionId);
+    if (!config) {
+      throw new Error(
+        `Resource '${binding.ref}' (revision ${binding.revisionId}) was not returned by the resolver`
+      );
+    }
+    return Object.keys(binding.params ?? {}).length > 0
+      ? { ...config, params: binding.params }
+      : config;
+  });
+}
+
+/**
  * Queue processor for coding agent workers.
  * Extends BaseQueueProcessor with one-shot and multi-turn processing logic,
  * including judge evaluation loops, workspace snapshots, and visibility timeout extension.
@@ -453,15 +484,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         requestDoc.projectId,
         bindings.map(b => b.revisionId)
       );
-      // Re-attach each binding's resolved parameter values to its config. Matched
-      // by revisionId rather than by position, so a resolver that reorders or
-      // dedupes cannot silently pair a resource with another's parameters.
-      resourceConfigs = resolved.map((config) => {
-        const binding = bindings.find(b => b.revisionId === config.revisionId);
-        return binding && Object.keys(binding.params ?? {}).length > 0
-          ? { ...config, params: binding.params }
-          : config;
-      });
+      resourceConfigs = pairBindingsWithConfigs(bindings, resolved);
       await log("info", `Resolved resources: ${resourceConfigs.map(r => r.ref).join(", ")}`);
     }
 
@@ -647,6 +670,33 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   }
 
   /**
+   * Record lifecycle observations (resource outcomes, MCP registration) on the
+   * request document.
+   *
+   * Best-effort: failing to record observability must not change the run's
+   * outcome, which is the thing the run actually exists to report. Safe to call
+   * more than once — the second call simply overwrites with the same or fresher
+   * values.
+   */
+  private async persistRunObservations(
+    requestId: string,
+    log: (level: "info" | "warn" | "error" | "debug", message: string, data?: Record<string, unknown>) => Promise<void> | void,
+  ): Promise<void> {
+    if (!this.processor.getRunObservations) return;
+    try {
+      const obs = this.processor.getRunObservations();
+      const fields: Record<string, unknown> = { "run.updatedAt": new Date(), updatedAt: new Date() };
+      if (obs.resources && obs.resources.length > 0) fields["run.resources"] = obs.resources;
+      if (obs.mcpRegistered !== undefined) fields["run.mcpRegistered"] = obs.mcpRegistered;
+      if (Object.keys(fields).length > 2) {
+        await withRetry(() => this.collection.updateOne({ _id: requestId }, { $set: fields } as any));
+      }
+    } catch (err) {
+      await log("warn", `Failed to record run observations: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
    * Multi-turn processing with judge loop.
    */
   private async processMultiTurn(
@@ -718,7 +768,17 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Setup: create workspace, extract skills, upload setup videos
     if (this.processor.setup) {
-      const setupResult = await this.processor.setup(log, { model: requestDoc.model, projectId: requestDoc.projectId, mcpServerConfigs, skillConfigs, extensionConfigs, resourceConfigs });
+      let setupResult;
+      try {
+        setupResult = await this.processor.setup(log, { model: requestDoc.model, projectId: requestDoc.projectId, mcpServerConfigs, skillConfigs, extensionConfigs, resourceConfigs });
+      } catch (setupError) {
+        // Setup runs before the lifecycle try/finally below, so without this the
+        // observations the processor just recorded (which resource was attempted,
+        // its resolved parameters, why it failed) would be dropped on exactly the
+        // runs that need them most — provisioning failures.
+        await this.persistRunObservations(requestId, log);
+        throw setupError;
+      }
 
       if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
         try {
@@ -847,21 +907,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         await this.processor.teardown(log);
       }
       // Persist lifecycle observations AFTER teardown so teardownRan is accurate.
-      // Best-effort: failing to record observability must not change the run's
-      // outcome, which is the thing the run actually exists to report.
-      if (this.processor.getRunObservations) {
-        try {
-          const obs = this.processor.getRunObservations();
-          const fields: Record<string, unknown> = { "run.updatedAt": new Date(), updatedAt: new Date() };
-          if (obs.resources && obs.resources.length > 0) fields["run.resources"] = obs.resources;
-          if (obs.mcpRegistered !== undefined) fields["run.mcpRegistered"] = obs.mcpRegistered;
-          if (Object.keys(fields).length > 2) {
-            await withRetry(() => this.collection.updateOne({ _id: requestId }, { $set: fields } as any));
-          }
-        } catch (err) {
-          await log("warn", `Failed to record run observations: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
+      await this.persistRunObservations(requestId, log);
       // Unsubscribe from cancel notifications — normal completion path
       unsubCancel();
     }

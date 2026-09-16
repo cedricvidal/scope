@@ -82,7 +82,6 @@ at submit would be a lie in the UI.
 ## Run observability
 
 Two fields are written back after teardown:
-
 | Field | Meaning |
 |-------|---------|
 | `run.resources[]` | Per resource: `ref`, `slug`, `revisionId`, `setupSucceeded`, `published[]`, `params`, `teardownRan` |
@@ -104,6 +103,11 @@ whose task instructs the agent to use MCP tools but which reports `mcpRegistered
 those tools, and any conclusion drawn from it is void. Registering an MCP server requires passing
 it explicitly (`--mcp-servers <slug>`); attaching only the resource that publishes its URL is not
 enough, and fails silently rather than loudly.
+
+Both fields are also written when **setup itself fails**, not only on runs that
+reached teardown. A provisioning failure is exactly when you need to know which
+revision was attempted, what parameters it resolved to, and why it failed, so the
+observations are persisted before the failure unwinds the run.
 
 ## Indexes
 
@@ -328,6 +332,16 @@ through the filesystem for credentials is doing something qualitatively differen
 from reading its own environment, and that difference is visible in the
 trajectory.
 
+### Publish each name to exactly one channel
+
+A key written to both `$SCOPE_SETUP_ENV` and `$SCOPE_CONCEALED_ENV` **fails the
+run**. The two channels make opposite claims about agent visibility, so a key in
+both has no sensible resolution: the concealed value would win for MCP
+interpolation, the public value would be discarded, and the name would be
+withheld from the agent entirely. Every one of those outcomes is surprising, and
+the mistake is silent precisely where it matters most. Publish each name to one
+channel and the intent stays legible.
+
 ### Choose published names carefully
 
 Published values land in the agent's own process environment, so a name that a
@@ -351,6 +365,28 @@ GH_HOST=github.localhost GH_TOKEN="$SIM_TOKEN" HTTP_PROXY="$SIMULATOR_URL" \
 Resource values are spread *before* the fixed keys in `buildSubprocessEnv`, so a
 resource cannot shadow `GITHUB_TOKEN` or the proxy settings that route model
 traffic for capture — but it can still introduce a name the agent's tooling reads.
+
+## Worker support is a declared capability
+
+Provisioning is implemented per worker, so a resource-backed run is only routable
+to a worker that advertises `supportsResources` in its `agent.yaml`. Today that is
+`coder-acp-copilot`; the other workers declare it `false`. Submitting resources to
+a worker without the capability is rejected at submit time (under
+`strictAgentCapabilities`) rather than accepted and silently ignored — a run whose
+declared database or simulator was never stood up would otherwise report a result
+for an environment that never existed, which is worse than a rejection.
+
+The same check runs on resubmit, so changing a rerun's profile to one targeting a
+worker without resource support fails instead of quietly dropping the resources.
+
+## Resources survive a resubmit
+
+Resubmitting pins the **same revisions and the same parameter values** as the
+original run, because a rerun that provisioned a different environment while
+looking comparable would invalidate the comparison it exists to make. When a
+resubmit selects a different profile, that profile's resource specs win and are
+re-resolved and re-pinned at resubmit time, matching how the profile controls
+`mcpServers`, `skillRevisions`, and `extensions`.
 
 ## Failure behaviour
 

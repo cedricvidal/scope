@@ -26,6 +26,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "supportsReasoningEffort": {
             "type": "boolean",
           },
+          "supportsResources": {
+            "type": "boolean",
+          },
           "supportsSkills": {
             "type": "boolean",
           },

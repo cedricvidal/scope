@@ -230,6 +230,7 @@ export interface AgentCapabilities {
   supportsMcpServers?: boolean;       // Whether the worker can configure MCP servers
   supportsSkills?: boolean;           // Whether the worker can consume installed agent skills
   supportsExtensions?: boolean;       // Whether the worker can install VS Code extensions
+  supportsResources?: boolean;        // Whether the worker provisions resources (setup/teardown) before the agent runs
 }
 
 // Coding agent definition stored in MongoDB

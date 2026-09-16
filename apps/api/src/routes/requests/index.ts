@@ -194,6 +194,7 @@ const validatePersistedRequestTarget = (request: RequestDocument) =>
       mcpServers: request.mcpServers,
       skillRevisions: request.skillRevisions,
       extensions: request.extensions,
+      resources: request.resources,
     }),
     strictCapabilities: ctx.strictAgentCapabilities,
   });
@@ -650,6 +651,13 @@ apiRoute(ctx.app, ctx.registry, {
             mcpServers: effectiveMcpServers,
             skillRevisions: effectiveSkills,
             extensions: effectiveExtensions,
+            // Mirrors resolveResourceBindings' precedence (profile wins). Uses the
+            // specs rather than resolved bindings because the capability check only
+            // needs to know whether any resource was requested, and resolution
+            // happens after this point.
+            resources:
+              normalizeResourceBindingSpecs(variationProfileVersion.resources)
+              ?? requestedResourceSpecs,
           }),
           strictCapabilities: ctx.strictAgentCapabilities,
         });
@@ -1009,6 +1017,7 @@ apiRoute(ctx.app, ctx.registry, {
         mcpServers: effectiveMcpServers,
         skillRevisions: effectiveSkills,
         extensions: effectiveExtensions,
+        resources: resolvedResources,
       }),
       strictCapabilities: ctx.strictAgentCapabilities,
     });
@@ -2041,6 +2050,33 @@ apiRoute(ctx.app, ctx.registry, {
           ? (activeProfileVersion.extensions ?? null)
           : (overrides?.extensions !== undefined ? overrides.extensions : original.extensions);
 
+        // Resources must survive a resubmit, otherwise the rerun executes in a
+        // different environment than the original while looking comparable.
+        // When a profile is active its resource specs win and are resolved (and
+        // re-pinned) here; otherwise the original's already-pinned bindings are
+        // carried over verbatim so the rerun uses the identical revisions and
+        // parameter values.
+        let effectiveResources: ResourceBinding[] | null = null;
+        if (activeProfileVersion) {
+          if (activeProfileVersion.resources && activeProfileVersion.resources.length > 0) {
+            const resolvedResources = await resolveResourceBindings(
+              ctx,
+              original.projectId,
+              undefined,
+              activeProfileVersion.resources,
+            );
+            if (resolvedResources.errors.length > 0) {
+              res.status(422).json({
+                error: `Resource resolution failed during resubmit: ${resolvedResources.errors.join("; ")}`,
+              });
+              return;
+            }
+            effectiveResources = resolvedResources.bindings ?? null;
+          }
+        } else if (original.resources && original.resources.length > 0) {
+          effectiveResources = original.resources;
+        }
+
         const targetCheck = await validateAgentTarget(ctx.agentCollection, {
           workerType: effectiveWorkerType,
           requestedVersion:
@@ -2052,6 +2088,7 @@ apiRoute(ctx.app, ctx.registry, {
             mcpServers: effectiveMcpServers,
             skillRevisions: effectiveSkillRevisions,
             extensions: effectiveExtensions,
+            resources: effectiveResources,
           }),
           strictCapabilities: ctx.strictAgentCapabilities,
         });
@@ -2081,6 +2118,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),
+          ...(effectiveResources && effectiveResources.length > 0 ? { resources: effectiveResources } : {}),
           agentVersion: resolvedAgentVersion,
           ...(original.taskPromptId ? { taskPromptId: original.taskPromptId } : {}),
           ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
