@@ -64,6 +64,37 @@ describe("runResourceSetups", () => {
     expect(provisioned.map((r) => r.slug)).toEqual(["a", "b"]);
   });
 
+  it("reports the attempted prefix through onProvisioned before throwing", async () => {
+    // Regression: the returned `provisioned` list is lost when setup throws, so a
+    // caller relying on it tore down nothing — leaking both the resources that
+    // already came up and the failing one, whose script may have created
+    // containers before exiting non-zero.
+    const seen: string[] = [];
+    await expect(
+      runResourceSetups(
+        [
+          resource({ slug: "a", setup: { sh: 'echo "A=1" >> "$SCOPE_SETUP_ENV"' }, exports: ["A"] }),
+          resource({ slug: "b", setup: { sh: "exit 3" } }),
+          resource({ slug: "c", setup: { sh: "true" } }),
+        ],
+        { ...opts, onProvisioned: (r) => seen.push(r.slug) },
+      ),
+    ).rejects.toThrow(ResourcePhaseError);
+    // Includes the failing resource, excludes the one never attempted.
+    expect(seen).toEqual(["a", "b"]);
+  });
+
+  it("reports a resource that fails export validation as attempted", async () => {
+    const seen: string[] = [];
+    await expect(
+      runResourceSetups(
+        [resource({ slug: "a", setup: { sh: "true" }, exports: ["NEVER_PUBLISHED"] })],
+        { ...opts, onProvisioned: (r) => seen.push(r.slug) },
+      ),
+    ).rejects.toThrow(ResourcePhaseError);
+    expect(seen).toEqual(["a"]);
+  });
+
   it("fails the run when the script exits non-zero", async () => {
     await expect(
       runResourceSetups([resource({ slug: "bad", setup: { sh: "exit 3" } })], opts),

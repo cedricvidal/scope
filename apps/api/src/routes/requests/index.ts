@@ -180,6 +180,40 @@ export function _resetRunFacetsCacheForTests(): void {
   runFacetsCache.clear();
 }
 
+/**
+ * Decide where a resubmit's resources come from.
+ *
+ * A resubmit must reproduce the original environment, so pinned bindings are
+ * preserved by default — re-resolving would let a run pinned to `simulator@r1`
+ * with `REPO=run/repo` come back as `simulator@r2` with the revision's default,
+ * fail 422 if that parameter is required, or lose its resources entirely if the
+ * profile declares none.
+ *
+ * Only an explicitly supplied replacement profile re-resolves. This is keyed off
+ * `overrideProfileId` rather than off the resolved profile version, because the
+ * latter is also populated when the caller simply keeps the original profile.
+ *
+ * @param overrideProfileId - `undefined` keeps the original profile, `null`
+ *   detaches it, and a string selects a replacement.
+ */
+export function planResubmitResources(
+  overrideProfileId: string | null | undefined,
+  originalResources: ResourceBinding[] | undefined,
+  profileResourceSpecs: ResourceBindingSpec[] | undefined,
+):
+  | { kind: "preserve"; bindings: ResourceBinding[] | null }
+  | { kind: "resolve"; specs: ResourceBindingSpec[] } {
+  if (typeof overrideProfileId === "string") {
+    return profileResourceSpecs && profileResourceSpecs.length > 0
+      ? { kind: "resolve", specs: profileResourceSpecs }
+      : { kind: "preserve", bindings: null };
+  }
+  return {
+    kind: "preserve",
+    bindings: originalResources && originalResources.length > 0 ? originalResources : null,
+  };
+}
+
 export function registerRequestsRoutes(ctx: RouteContext): void {
 
 const upload = multer({ dest: tmpdir() });
@@ -2050,31 +2084,28 @@ apiRoute(ctx.app, ctx.registry, {
           ? (activeProfileVersion.extensions ?? null)
           : (overrides?.extensions !== undefined ? overrides.extensions : original.extensions);
 
-        // Resources must survive a resubmit, otherwise the rerun executes in a
-        // different environment than the original while looking comparable.
-        // When a profile is active its resource specs win and are resolved (and
-        // re-pinned) here; otherwise the original's already-pinned bindings are
-        // carried over verbatim so the rerun uses the identical revisions and
-        // parameter values.
+        const resubmitPlan = planResubmitResources(
+          overrideProfileId,
+          original.resources,
+          normalizeResourceBindingSpecs(activeProfileVersion?.resources),
+        );
         let effectiveResources: ResourceBinding[] | null = null;
-        if (activeProfileVersion) {
-          if (activeProfileVersion.resources && activeProfileVersion.resources.length > 0) {
-            const resolvedResources = await resolveResourceBindings(
-              ctx,
-              original.projectId,
-              undefined,
-              activeProfileVersion.resources,
-            );
-            if (resolvedResources.errors.length > 0) {
-              res.status(422).json({
-                error: `Resource resolution failed during resubmit: ${resolvedResources.errors.join("; ")}`,
-              });
-              return;
-            }
-            effectiveResources = resolvedResources.bindings ?? null;
+        if (resubmitPlan.kind === "resolve") {
+          const resolvedResources = await resolveResourceBindings(
+            ctx,
+            original.projectId,
+            undefined,
+            resubmitPlan.specs,
+          );
+          if (resolvedResources.errors.length > 0) {
+            res.status(422).json({
+              error: `Resource resolution failed during resubmit: ${resolvedResources.errors.join("; ")}`,
+            });
+            return;
           }
-        } else if (original.resources && original.resources.length > 0) {
-          effectiveResources = original.resources;
+          effectiveResources = resolvedResources.bindings ?? null;
+        } else {
+          effectiveResources = resubmitPlan.bindings;
         }
 
         const targetCheck = await validateAgentTarget(ctx.agentCollection, {

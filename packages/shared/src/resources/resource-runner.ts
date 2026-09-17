@@ -239,12 +239,14 @@ export async function createConcealedStore(): Promise<{ path: string; dispose: (
  * Provision every resource, in reference order.
  *
  * Returns the merged published values. On failure, the caller is responsible for
- * tearing down whatever already succeeded — `provisioned` reports that prefix so
- * it can unwind in reverse.
+ * tearing down whatever already succeeded. Because a throw discards the return
+ * value entirely, the attempted prefix is reported through `onProvisioned` as it
+ * grows rather than only in the result — a caller that waited for the result
+ * would unwind nothing on exactly the paths that need unwinding.
  */
 export async function runResourceSetups(
   resources: ResourceConfig[],
-  options: RunPhaseOptions,
+  options: RunPhaseOptions & { onProvisioned?: (resource: ResourceConfig) => void },
 ): Promise<{
   values: Record<string, string>;
   concealed: Record<string, string>;
@@ -262,8 +264,11 @@ export async function runResourceSetups(
 
     void options.log?.("info", `Provisioning resource '${resource.slug}' (${resource.ref})`);
     // Marked provisioned before running: a phase that fails partway may still
-    // have created containers, so its teardown must run.
+    // have created containers, so its teardown must run. Reported immediately so
+    // the caller can unwind this resource even though the throw below would
+    // discard the returned list.
     provisioned.push(resource);
+    options.onProvisioned?.(resource);
     const result = await runScript(resource.slug, "setup", body, withParams(options, resource));
 
     const missing = missingExports(resource.exports, result.values);

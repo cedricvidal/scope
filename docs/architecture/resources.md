@@ -383,18 +383,34 @@ worker without resource support fails instead of quietly dropping the resources.
 
 Resubmitting pins the **same revisions and the same parameter values** as the
 original run, because a rerun that provisioned a different environment while
-looking comparable would invalidate the comparison it exists to make. When a
-resubmit selects a different profile, that profile's resource specs win and are
-re-resolved and re-pinned at resubmit time, matching how the profile controls
-`mcpServers`, `skillRevisions`, and `extensions`.
+looking comparable would invalidate the comparison it exists to make. This holds
+whether the resubmit keeps the original profile or detaches it.
+
+Only an **explicitly selected replacement profile** re-resolves: that profile's
+resource specs win and are re-pinned at resubmit time, matching how a profile
+controls `mcpServers`, `skillRevisions`, and `extensions`. The distinction
+matters because keeping the original profile still resolves its version
+internally — treating that as "a profile is active" would re-resolve on an
+ordinary resubmit, quietly upgrading `simulator@r1` to `simulator@r2`, replacing
+a run-supplied parameter with the revision's default, or dropping resources the
+profile never declared.
 
 ## Failure behaviour
 
 - A setup phase exiting non-zero **fails the run**, and resources already
-  provisioned are torn down in reverse. A partially provisioned environment must
-  not leak into the next run.
+  provisioned are torn down in reverse — *including the resource that failed*,
+  whose script may already have created containers before exiting. The attempted
+  prefix is reported as each setup begins rather than returned at the end,
+  because a throw discards the return value on exactly the paths that need
+  unwinding.
 - A resource that does not publish everything its revision declared in `exports`
-  fails the run, naming the missing variables.
+  fails the run, naming the missing variables. It counts as attempted, so its
+  teardown still runs.
+- **Teardown covers the whole run lifecycle, not just the agent loop.** Resource
+  provisioning happens during worker setup, so the cleanup boundary opens before
+  setup: a failure in MCP registration, codebase seeding, skill extraction, or
+  gate-prompt resolution releases resources rather than leaking them. Teardown is
+  idempotent, so overlapping unwind paths are safe.
 - Teardown is **best-effort**: failures are logged but do not change the run's
   outcome, because losing cleanup should not mask the result the run produced.
 - Scripts run under `sh -e`, so a failing command aborts the phase instead of

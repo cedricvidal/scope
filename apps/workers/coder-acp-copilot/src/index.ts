@@ -239,6 +239,13 @@ class CopilotProcessor implements WorkerProcessor {
           env: { ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}) },
           log: (level, message) => void log(level, message),
           concealedEnvPath: this.concealedStore?.path,
+          // Tracked as each resource is attempted, not from the returned list: a
+          // setup that throws never returns, and releaseResources() would then
+          // find an empty list and tear down nothing — including the failing
+          // resource, whose script may already have created containers.
+          onProvisioned: (resource) => {
+            this.provisionedResources = [...this.provisionedResources, resource];
+          },
         });
         this.provisionedResources = provisioned;
         assertNoPublishChannelCollision(values, concealed);
@@ -259,18 +266,26 @@ class CopilotProcessor implements WorkerProcessor {
           published: Object.keys(values).sort(),
         });
       } catch (err) {
-        // Record which resources were attempted before unwinding, so a failed
-        // run still shows what environment it was trying to stand up.
+        // Record what actually happened to each resource, so a failed run still
+        // shows the environment it was trying to stand up. The attempted prefix
+        // is read before releaseResources() clears it: everything before the last
+        // entry was provisioned successfully, the last entry is the one that
+        // failed, and anything beyond it was never attempted. Marking all of them
+        // failed would misreport both of the other two groups.
         const message = err instanceof Error ? err.message : String(err);
-        this.resourceOutcomes = this.resourceConfigs.map((r) => ({
-          ref: r.ref,
-          slug: r.slug,
-          revisionId: r.revisionId,
-          setupSucceeded: false,
-          published: [],
-          ...(r.params && Object.keys(r.params).length > 0 ? { params: r.params } : {}),
-          ...(message.includes(`'${r.slug}'`) ? { error: message } : {}),
-        }));
+        const attempted = this.provisionedResources;
+        const failing = attempted[attempted.length - 1];
+        this.resourceOutcomes = this.resourceConfigs
+          .filter((r) => attempted.some((a) => a.revisionId === r.revisionId))
+          .map((r) => ({
+            ref: r.ref,
+            slug: r.slug,
+            revisionId: r.revisionId,
+            setupSucceeded: failing ? r.revisionId !== failing.revisionId : false,
+            published: failing && r.revisionId !== failing.revisionId ? r.exports : [],
+            ...(r.params && Object.keys(r.params).length > 0 ? { params: r.params } : {}),
+            ...(failing && r.revisionId === failing.revisionId ? { error: message } : {}),
+          }));
         // Unwind whatever already came up before failing the run; a partially
         // provisioned environment would otherwise leak into the next run.
         await this.releaseResources(log);

@@ -766,103 +766,93 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     const maxIterations = requestMaxIterations;
 
-    // Setup: create workspace, extract skills, upload setup videos
-    if (this.processor.setup) {
-      let setupResult;
-      try {
-        setupResult = await this.processor.setup(log, { model: requestDoc.model, projectId: requestDoc.projectId, mcpServerConfigs, skillConfigs, extensionConfigs, resourceConfigs });
-      } catch (setupError) {
-        // Setup runs before the lifecycle try/finally below, so without this the
-        // observations the processor just recorded (which resource was attempted,
-        // its resolved parameters, why it failed) would be dropped on exactly the
-        // runs that need them most — provisioning failures.
-        await this.persistRunObservations(requestId, log);
-        throw setupError;
-      }
-
-      if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
-        try {
-          const setupVideoUrls: string[] = [];
-          for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
-            const videoBlobName = `${requestId}/runs/${runId}/setup/video-${i}.webm`;
-            const videoUrl = await blobStorage.uploadFile(
-              setupResult.videoFilePaths[i],
-              videoBlobName,
-              "video/webm"
-            );
-            setupVideoUrls.push(videoUrl);
-          }
-          await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
-          if (setupVideoUrls.length > 0) {
-            await withRetry(() => this.collection.updateOne(
-              { _id: requestId },
-              { $set: { "run.setupVideoUrls": setupVideoUrls, "run.updatedAt": new Date(), updatedAt: new Date() } }
-            ));
-          }
-        } catch (uploadError) {
-          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
-          await log("warn", `Failed to upload setup video files: ${msg}`);
-        }
-      }
-    }
-
-    // Seed the workspace from a selected codebase revision (after setup so
-    // workspacePath is resolved, BEFORE skills so skills overlay the project).
-    // Seeding is a hard prerequisite — a failure here fails the run rather than
-    // silently starting the agent from an empty workspace.
-    if (requestDoc.codebaseRevisionId) {
-      const apiBaseUrl = process.env.SCOPE_MT_API_URL;
-      if (!apiBaseUrl) {
-        throw new Error("Codebase revision requested but SCOPE_MT_API_URL is not configured");
-      }
-      const codebaseWorkspacePath =
-        this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
-      const codebaseClient = new CodebaseClient(apiBaseUrl);
-      await seedCodebaseToWorkspace({
-        revisionId: requestDoc.codebaseRevisionId,
-        codebaseClient,
-        workspacePath: codebaseWorkspacePath,
-        log: (msg) => log("info", msg),
-      });
-    }
-
-    // Extract skills to the workspace (after setup so workspacePath is resolved)
-    if (skillConfigs) {
-      await this.extractSkills(requestDoc, skillConfigs, log);
-    }
-
-    // Resolve workspace path after setup
-    const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
-
-    // Write AGENTS.md into the workspace once before the run (constant for the
-    // whole run). Throws → run is marked failed (fail loudly, never no-op).
-    await this.writeAgentsMd(requestDoc, workspacePath, log);
-
-    // Resolve each gate's prompt text. The Select gate uses the already-resolved
-    // scenario task; other gates resolve their typed prompt entity by id via the
-    // API. See docs/design/gates.md §4.4/§4.5.
-    const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
-    const resolvedGates: ResolvedGate[] = [];
-    for (const gc of gateConfigs) {
-      let promptText: string;
-      if (gc.gate === "select") {
-        promptText = requestDoc.scenario.task;
-      } else {
-        if (!gc.promptId) {
-          throw new Error(`Gate '${gc.gate}' is missing a resolved promptId.`);
-        }
-        promptText = await this.resolveGatePromptText(gc.promptId, apiBaseUrl, log);
-      }
-      resolvedGates.push({
-        gate: gc.gate,
-        promptText,
-        criteria: gc.criteria,
-        maxIterations: gc.maxIterations ?? maxIterations,
-      });
-    }
-
     let result;
     try {
+      // Setup: create workspace, extract skills, upload setup videos
+      if (this.processor.setup) {
+        const setupResult = await this.processor.setup(log, { model: requestDoc.model, projectId: requestDoc.projectId, mcpServerConfigs, skillConfigs, extensionConfigs, resourceConfigs });
+
+        if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
+          try {
+            const setupVideoUrls: string[] = [];
+            for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
+              const videoBlobName = `${requestId}/runs/${runId}/setup/video-${i}.webm`;
+              const videoUrl = await blobStorage.uploadFile(
+                setupResult.videoFilePaths[i],
+                videoBlobName,
+                "video/webm"
+              );
+              setupVideoUrls.push(videoUrl);
+            }
+            await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
+            if (setupVideoUrls.length > 0) {
+              await withRetry(() => this.collection.updateOne(
+                { _id: requestId },
+                { $set: { "run.setupVideoUrls": setupVideoUrls, "run.updatedAt": new Date(), updatedAt: new Date() } }
+              ));
+            }
+          } catch (uploadError) {
+            const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+            await log("warn", `Failed to upload setup video files: ${msg}`);
+          }
+        }
+      }
+
+      // Seed the workspace from a selected codebase revision (after setup so
+      // workspacePath is resolved, BEFORE skills so skills overlay the project).
+      // Seeding is a hard prerequisite — a failure here fails the run rather than
+      // silently starting the agent from an empty workspace.
+      if (requestDoc.codebaseRevisionId) {
+        const apiBaseUrl = process.env.SCOPE_MT_API_URL;
+        if (!apiBaseUrl) {
+          throw new Error("Codebase revision requested but SCOPE_MT_API_URL is not configured");
+        }
+        const codebaseWorkspacePath =
+          this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+        const codebaseClient = new CodebaseClient(apiBaseUrl);
+        await seedCodebaseToWorkspace({
+          revisionId: requestDoc.codebaseRevisionId,
+          codebaseClient,
+          workspacePath: codebaseWorkspacePath,
+          log: (msg) => log("info", msg),
+        });
+      }
+
+      // Extract skills to the workspace (after setup so workspacePath is resolved)
+      if (skillConfigs) {
+        await this.extractSkills(requestDoc, skillConfigs, log);
+      }
+
+      // Resolve workspace path after setup
+      const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+
+      // Write AGENTS.md into the workspace once before the run (constant for the
+      // whole run). Throws → run is marked failed (fail loudly, never no-op).
+      await this.writeAgentsMd(requestDoc, workspacePath, log);
+
+      // Resolve each gate's prompt text. The Select gate uses the already-resolved
+      // scenario task; other gates resolve their typed prompt entity by id via the
+      // API. See docs/design/gates.md §4.4/§4.5.
+      const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+      const resolvedGates: ResolvedGate[] = [];
+      for (const gc of gateConfigs) {
+        let promptText: string;
+        if (gc.gate === "select") {
+          promptText = requestDoc.scenario.task;
+        } else {
+          if (!gc.promptId) {
+            throw new Error(`Gate '${gc.gate}' is missing a resolved promptId.`);
+          }
+          promptText = await this.resolveGatePromptText(gc.promptId, apiBaseUrl, log);
+        }
+        resolvedGates.push({
+          gate: gc.gate,
+          promptText,
+          criteria: gc.criteria,
+          maxIterations: gc.maxIterations ?? maxIterations,
+        });
+      }
+
       result = await runGatedLoop({
         processor: this.processor,
         gates: resolvedGates,
@@ -902,7 +892,11 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         },
       });
     } finally {
-      // Lifecycle: always call teardown() if setup() exists, even on error
+      // Lifecycle: teardown covers everything from setup onward, not just the
+      // agent loop. Resource provisioning happens inside setup(), so a failure in
+      // MCP registration, codebase seeding, skill extraction, or gate-prompt
+      // resolution would otherwise leave provisioned resources running. teardown()
+      // is idempotent, so the widened boundary is safe.
       if (this.processor.teardown) {
         await this.processor.teardown(log);
       }

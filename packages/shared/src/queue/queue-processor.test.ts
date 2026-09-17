@@ -713,3 +713,70 @@ describe("pairBindingsWithConfigs", () => {
     ).toThrow(/rev-missing/);
   });
 });
+
+// ─── Lifecycle teardown boundary ─────────────────────────────────────────────
+describe("CodingAgentQueueProcessor lifecycle teardown boundary", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // Regression: resource provisioning happens inside setup(), but setup used to
+  // sit outside the try/finally that calls teardown(). Any failure between setup
+  // and the agent loop — MCP registration, codebase seeding, skill extraction,
+  // gate-prompt resolution — left provisioned resources running.
+  it("tears down when initialization fails after setup succeeds", async () => {
+    const teardown = vi.fn().mockResolvedValue(undefined);
+    const setup = vi.fn().mockResolvedValue(undefined);
+    const processor: WorkerProcessor = {
+      workerName: "test-worker",
+      async processMessage(): Promise<WorkerResult> {
+        return { response: "ok" };
+      },
+      getAgentVersion: () => "test-1.0.0",
+      setup,
+      teardown,
+      getRunObservations: () => ({ resources: [], mcpRegistered: false }),
+    };
+
+    const qp = new CodingAgentQueueProcessor(
+      {
+        ...testConfig,
+        // BlobStorage is constructed before setup runs, so it needs a parseable
+        // endpoint for the test to reach the code path under test.
+        storageConnectionString:
+          "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=a2V5;BlobEndpoint=http://localhost:10000/devstoreaccount1;QueueEndpoint=http://localhost:10001/devstoreaccount1;",
+      },
+      processor,
+    );
+    (qp as any).collection = { updateOne: vi.fn().mockResolvedValue({}) };
+    (qp as any).logPublisher = { publish: vi.fn().mockResolvedValue(undefined), evictRun: vi.fn() };
+    (qp as any).heartbeatStore = new InMemoryHeartbeatStore();
+
+    // Seeding runs straight after setup and throws without this variable, which
+    // makes it a faithful stand-in for any post-setup initialization failure.
+    vi.stubEnv("SCOPE_MT_API_URL", "");
+
+    const requestDoc = {
+      _id: "req-teardown",
+      projectId: "p1",
+      workerType: "test-worker",
+      scenario: { task: "t", criteria: [] },
+      maxIterations: 1,
+      codebaseRevisionId: "codebase@r1",
+      run: { _id: "run-teardown", status: "processing" },
+    } as any;
+
+    await expect(
+      (qp as any).processMultiTurn(
+        requestDoc,
+        { messageId: "m1", popReceipt: "r1" },
+        { stop: vi.fn() },
+        vi.fn().mockResolvedValue(undefined),
+        new Date(),
+      ),
+    ).rejects.toThrow(/SCOPE_MT_API_URL/);
+
+    expect(setup).toHaveBeenCalled();
+    expect(teardown).toHaveBeenCalled();
+  });
+});
