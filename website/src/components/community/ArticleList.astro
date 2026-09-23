@@ -21,6 +21,15 @@ const articles = limit === undefined ? all : all.slice(0, limit);
 				<a class="community-article__title" href={data.url} rel="noopener">
 					{data.title}
 				</a>
+				<span class="community-article__authors">
+					{data.authors.map((a, i) => (
+						<span class="community-article__author">
+							{i > 0 && <span aria-hidden="true">{' · '}</span>}
+							{/* Keep on one line: newlines between these tags render as a space before the comma. */}
+							<span class="community-article__author-name">{`${a.firstName} ${a.lastName}`}</span>{', '}<span class="community-article__author-position">{a.position}</span>
+						</span>
+					))}
+				</span>
 				<span class="community-article__meta">
 					{data.publication}
 					{data.date && (
@@ -59,6 +68,14 @@ const articles = limit === undefined ? all : all.slice(0, limit);
 	.community-article__title:hover {
 		color: var(--sl-color-text-accent);
 		text-decoration: underline;
+	}
+	.community-article__authors {
+		font-size: var(--sl-text-sm);
+		color: var(--sl-color-gray-2);
+	}
+	.community-article__author-name {
+		font-weight: 500;
+		white-space: nowrap;
 	}
 	.community-article__meta {
 		font-size: var(--sl-text-sm);

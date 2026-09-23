@@ -514,6 +514,7 @@ body:has(.scope-home) header.header {
 .scope-community .community-article { border-bottom-color: var(--border); }
 .scope-community .community-article__title { color: var(--text); }
 .scope-community .community-article__title:hover { color: var(--brand); }
+.scope-community .community-article__authors { color: var(--text); }
 .scope-community .community-article__meta { color: var(--text-muted); }
 
 .scope-community .community-talk {

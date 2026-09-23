@@ -172,6 +172,10 @@ needed.
   title: Building AX evals that actually work
   url: https://developer.microsoft.com/blog/building-ax-evals-that-actually-work/
   publication: Microsoft for Developers   # blog name
+  authors:                                 # as credited, byline order
+    - firstName: Waldek
+      lastName: Mastykarz
+      position: Principal Developer Advocate
   date: 2026-07-15                         # publish date (optional)
   ```
 - **Talk**: `src/content/talks/<yyyy-mm-dd>-<event-slug>.yaml`
@@ -185,7 +189,8 @@ needed.
   youtubeId: SxaKOmqX-rk                          # omit while pending
   ```
 
-Take title, blog name, and publish date from the article page itself.
+Take title, blog name, authors (name and position from the article's
+author section), and publish date from the article page itself.
 If a date can't be confirmed, leave `date` out; undated articles
 sort last. A talk without `youtubeId` shows "Video coming soon".
 Both lists sort newest first. A missing field, bad URL, or bad date

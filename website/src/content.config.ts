@@ -16,6 +16,17 @@ const articles = defineCollection({
 		url: z.url(),
 		// Blog name, e.g. "Microsoft for Developers".
 		publication: z.string(),
+		// Authors as credited on the article, in byline order.
+		authors: z
+			.array(
+				z.object({
+					firstName: z.string(),
+					lastName: z.string(),
+					// Job title shown on the article, e.g. "Principal Developer Advocate".
+					position: z.string(),
+				}),
+			)
+			.min(1),
 		// Publish date. Omit when it can't be confirmed from the article.
 		date: z.coerce.date().optional(),
 	}),
