@@ -226,7 +226,7 @@ pnpm run refresh:openapi # generate the OpenAPI snapshot from scope-core
 Both `pnpm test` and `pnpm run build` must pass. The public build uses
 `SITE=https://microsoft.github.io BASE_PATH=/scope pnpm run build`;
 exercise that configuration when changing links or deployment settings,
-not just the local `/` default. The current snapshot produces **200
+not just the local `/` default. The current snapshot produces **203
 pages**, including the generated API reference. An unexpected drop in
 page count can indicate a content collection file failed to parse.
 
