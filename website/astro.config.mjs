@@ -87,6 +87,10 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Community',
+					items: [{ label: 'Articles & talks', slug: 'community/articles-and-talks' }],
+				},
+				{
 					label: 'Getting Started',
 					items: [
 						{ label: 'Access', slug: 'getting-started/access' },
@@ -132,10 +136,6 @@ export default defineConfig({
 						{ label: 'Troubleshooting', slug: 'resources/troubleshooting' },
 						{ label: 'Glossary', slug: 'resources/glossary' },
 					],
-				},
-				{
-					label: 'Community',
-					items: [{ label: 'Articles & talks', slug: 'community/articles-and-talks' }],
 				},
 			],
 		}),
