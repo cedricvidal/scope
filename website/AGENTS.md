@@ -24,7 +24,15 @@ A static documentation site published to GitHub Pages.
 ## Where things live
 
 - `src/content/docs/` — all user-facing pages (`.md` and `.mdx`)
-  - `introduction/`, `getting-started/`, `guides/`, `reference/`, `resources/`
+  - `introduction/`, `getting-started/`, `guides/`, `reference/`,
+    `resources/`, `community/`
+- `src/content/articles/`, `src/content/talks/` — one YAML file per
+  published article / talk, schema-validated by the `articles` and
+  `talks` collections in `src/content.config.ts` (see
+  "Articles & talks" below)
+- `src/components/community/` — `ArticleList`, `TalkList`,
+  `TalkCard`, and `CommunityTeaser` (the landing-page section), all
+  reading those collections
   - Sidebar order is defined in `astro.config.mjs`, not by directory order
 - `src/openapi/scope-openapi.json` — committed artifact generated from
   the Scope API's OpenAPI registry; drives the auto-generated REST
@@ -151,6 +159,37 @@ Do not hard-code the deployment prefix in content or code examples.
 Sidebar order is set in `astro.config.mjs`. Adding a new page
 requires updating the sidebar array. The auto-generated REST API
 groups are spread via `...openAPISidebarGroups`.
+
+### Articles & talks
+
+The `community/articles-and-talks` page and the "From the community"
+section on the landing page are generated from two content
+collections. To add an entry, add one YAML file. No code changes are
+needed.
+
+- **Article**: `src/content/articles/<title-slug>.yaml`
+  ```yaml
+  title: Building AX evals that actually work
+  url: https://developer.microsoft.com/blog/building-ax-evals-that-actually-work/
+  publication: Microsoft for Developers   # blog name
+  date: 2026-07-15                         # publish date (optional)
+  ```
+- **Talk**: `src/content/talks/<yyyy-mm-dd>-<event-slug>.yaml`
+  ```yaml
+  title: "From Findings to Fixes: ..."
+  speakers: [Jay Gordon, Cedric Vidal]
+  event: Global AI New York
+  venue: Microsoft Lafayette, New York City
+  date: 2026-09-21
+  eventUrl: https://globalai.community/e/783bfa20  # GAIC event page
+  youtubeId: SxaKOmqX-rk                          # omit while pending
+  ```
+
+Take title, blog name, and publish date from the article page itself.
+If a date can't be confirmed, leave `date` out; undated articles
+sort last. A talk without `youtubeId` shows "Video coming soon".
+Both lists sort newest first. A missing field, bad URL, or bad date
+fails `pnpm run build`.
 
 ### Style
 

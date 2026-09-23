@@ -133,6 +133,10 @@ export default defineConfig({
 						{ label: 'Glossary', slug: 'resources/glossary' },
 					],
 				},
+				{
+					label: 'Community',
+					items: [{ label: 'Articles & talks', slug: 'community/articles-and-talks' }],
+				},
 			],
 		}),
 	],
