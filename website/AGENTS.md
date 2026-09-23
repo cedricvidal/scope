@@ -181,7 +181,10 @@ needed.
 - **Talk**: `src/content/talks/<yyyy-mm-dd>-<event-slug>.yaml`
   ```yaml
   title: "From Findings to Fixes: ..."
-  speakers: [Jay Gordon, Cedric Vidal]
+  speakers:                                       # same shape as authors
+    - firstName: Jay
+      lastName: Gordon
+      position: Senior Program Manager, Azure Cosmos DB
   event: Global AI New York
   venue: Microsoft Lafayette, New York City
   date: 2026-09-21
@@ -191,6 +194,8 @@ needed.
 
 Take title, blog name, authors (name and position from the article's
 author section), and publish date from the article page itself.
+Take speaker positions from the event page or the speaker's event
+profile (e.g. their Luma bio).
 If a date can't be confirmed, leave `date` out; undated articles
 sort last. A talk without `youtubeId` shows "Video coming soon".
 Both lists sort newest first. A missing field, bad URL, or bad date

@@ -2,6 +2,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import Byline from './Byline.astro';
 import { formatDate, getArticles, isoDate } from './community';
 
 interface Props {
@@ -22,13 +23,7 @@ const articles = limit === undefined ? all : all.slice(0, limit);
 					{data.title}
 				</a>
 				<span class="community-article__authors">
-					{data.authors.map((a, i) => (
-						<span class="community-article__author">
-							{i > 0 && <span aria-hidden="true">{' · '}</span>}
-							{/* Keep on one line: newlines between these tags render as a space before the comma. */}
-							<span class="community-article__author-name">{`${a.firstName} ${a.lastName}`}</span>{', '}<span class="community-article__author-position">{a.position}</span>
-						</span>
-					))}
+					<Byline people={data.authors} />
 				</span>
 				<span class="community-article__meta">
 					{data.publication}
@@ -70,12 +65,7 @@ const articles = limit === undefined ? all : all.slice(0, limit);
 		text-decoration: underline;
 	}
 	.community-article__authors {
-		font-size: var(--sl-text-sm);
 		color: var(--sl-color-gray-2);
-	}
-	.community-article__author-name {
-		font-weight: 500;
-		white-space: nowrap;
 	}
 	.community-article__meta {
 		font-size: var(--sl-text-sm);

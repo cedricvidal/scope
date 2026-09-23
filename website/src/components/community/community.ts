@@ -5,6 +5,7 @@ import { getCollection, type CollectionEntry } from 'astro:content';
 
 export type Article = CollectionEntry<'articles'>;
 export type Talk = CollectionEntry<'talks'>;
+export type Person = Article['data']['authors'][number];
 
 /** Articles, newest first; undated articles last, alphabetically. */
 export async function getArticles(): Promise<Article[]> {
@@ -44,8 +45,4 @@ export function formatDate(date: Date): string {
 
 export function isoDate(date: Date): string {
 	return date.toISOString().slice(0, 10);
-}
-
-export function formatSpeakers(speakers: string[]): string {
-	return new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(speakers);
 }

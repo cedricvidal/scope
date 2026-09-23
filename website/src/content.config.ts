@@ -7,6 +7,14 @@ import { z } from 'astro/zod';
 import { docsLoader } from '@astrojs/starlight/loaders';
 import { docsSchema } from '@astrojs/starlight/schema';
 
+// A credited person: article author or talk speaker.
+const person = z.object({
+	firstName: z.string(),
+	lastName: z.string(),
+	// Job title as credited by the article or event, e.g. "Principal Developer Advocate".
+	position: z.string(),
+});
+
 // Published articles about Scope. One YAML file per article in
 // src/content/articles/; the file name is the entry id.
 const articles = defineCollection({
@@ -17,16 +25,7 @@ const articles = defineCollection({
 		// Blog name, e.g. "Microsoft for Developers".
 		publication: z.string(),
 		// Authors as credited on the article, in byline order.
-		authors: z
-			.array(
-				z.object({
-					firstName: z.string(),
-					lastName: z.string(),
-					// Job title shown on the article, e.g. "Principal Developer Advocate".
-					position: z.string(),
-				}),
-			)
-			.min(1),
+		authors: z.array(person).min(1),
 		// Publish date. Omit when it can't be confirmed from the article.
 		date: z.coerce.date().optional(),
 	}),
@@ -38,7 +37,8 @@ const talks = defineCollection({
 	loader: glob({ pattern: '**/*.yaml', base: './src/content/talks' }),
 	schema: z.object({
 		title: z.string(),
-		speakers: z.array(z.string()).min(1),
+		// Speakers in the order the event lists them.
+		speakers: z.array(person).min(1),
 		event: z.string(),
 		venue: z.string(),
 		date: z.coerce.date(),

@@ -2,7 +2,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { formatDate, formatSpeakers, isoDate, type Talk } from './community';
+import Byline from './Byline.astro';
+import { formatDate, isoDate, type Talk } from './community';
 
 interface Props {
 	talk: Talk;
@@ -36,7 +37,7 @@ const { data } = Astro.props.talk;
 	</div>
 	<div class="community-talk__body">
 		<h3 class="community-talk__title">{data.title}</h3>
-		<p class="community-talk__speakers">{formatSpeakers(data.speakers)}</p>
+		<p class="community-talk__speakers"><Byline people={data.speakers} /></p>
 		<p class="community-talk__meta">
 			<a href={data.eventUrl} rel="noopener">{data.event}</a>
 			{' · '}
@@ -92,7 +93,6 @@ const { data } = Astro.props.talk;
 	}
 	.community-talk__speakers {
 		margin: 0.4rem 0 0;
-		font-weight: 500;
 		color: var(--sl-color-gray-2);
 	}
 	.community-talk__meta {
