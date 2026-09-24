@@ -7,6 +7,9 @@ tableOfContents: false
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
+export const demoVideoBase =
+	import.meta.env.PUBLIC_DEMO_VIDEO_BASE ?? 'https://github.com/microsoft/scope/releases/download/website-demo-video-v1';
+
 <div class="scope-home">
 
 {/* ============================ HERO ============================ */}
@@ -38,9 +41,9 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 			poster="/demo/scope-demo-poster.jpg"
 			aria-label="Scope demo, 74 seconds, narrated with captions: define a baseline profile and two variations, submit 18 runs in one batch, then compare tool calls, token usage, and reports in the Portal and the CLI."
 		>
-			<source src="https://github.com/microsoft/scope/releases/download/website-demo-video-v1/scope-demo.mp4" type="video/mp4" />
-			<source src="https://github.com/microsoft/scope/releases/download/website-demo-video-v1/scope-demo.webm" type="video/webm" />
-			<a href="https://github.com/microsoft/scope/releases/download/website-demo-video-v1/scope-demo.mp4">Download the Scope demo video (MP4)</a>
+			<source src={`${demoVideoBase}/scope-demo.mp4`} type="video/mp4" />
+			<source src={`${demoVideoBase}/scope-demo.webm`} type="video/webm" />
+			<a href={`${demoVideoBase}/scope-demo.mp4`}>Download the Scope demo video (MP4)</a>
 		</video>
 	</figure>
 </section>

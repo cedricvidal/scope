@@ -170,9 +170,17 @@ and `install-cli.sh` pick the first `cli/v*` release. Always create
 the release with `--latest=false` so it never becomes the repo's
 "latest" release.
 
+To preview with local copies (e.g. before the release exists), serve
+the two files over HTTP with Range support and point the build at
+them. Leave `PUBLIC_DEMO_VIDEO_BASE` unset in CI:
+
+```sh
+PUBLIC_DEMO_VIDEO_BASE=http://127.0.0.1:18766 pnpm run dev
+```
+
 To replace the video, re-render it (the HyperFrames source project is
-not in this repo), then publish a new tag and update the three URLs in
-`index.mdx`. Replace the poster in `public/demo/` if the opening frame
+not in this repo), then publish a new tag and update the
+`demoVideoBase` default in `index.mdx`. Replace the poster in `public/demo/` if the opening frame
 changed:
 
 ```sh
