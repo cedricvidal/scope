@@ -26,59 +26,23 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 		</div>
 	</div>
 
-	{/* Static "scenario coverage" proof panel */}
-	<div class="scope-proof" role="img" aria-label="One scenario evaluated across GitHub Copilot, Claude Code, and VS Code against the same five criteria.">
-		<div class="scope-proof__bar">
-			<span class="scope-proof__dots"><i></i><i></i><i></i></span>
-			<span class="scope-proof__title">one scenario · 5 criteria · one run per agent</span>
-			<span class="scope-proof__run">req_8f2a…</span>
-		</div>
-		<div class="scope-board">
-			<div class="scope-lane">
-				<div class="scope-lane__top">
-					<span>
-						<span class="scope-lane__name">GitHub Copilot</span>
-						<span class="scope-lane__id">coder-acp-copilot</span>
-					</span>
-					<span class="scope-lane__badge">succeeded</span>
-				</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--pass">✓</span> Builds &amp; runs clean</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--pass">✓</span> All tests pass</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--pass">✓</span> Typed end to end</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--pass">✓</span> Handles errors</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--pass">✓</span> Idiomatic structure</div>
-			</div>
-
-			<div class="scope-lane">
-				<div class="scope-lane__top">
-					<span>
-						<span class="scope-lane__name">Claude Code</span>
-						<span class="scope-lane__id">coder-acp-claude-code</span>
-					</span>
-					<span class="scope-lane__badge">failed</span>
-				</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--pass">✓</span> Builds &amp; runs clean</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--pass">✓</span> All tests pass</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--fail">✕</span> Typed end to end</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--pass">✓</span> Handles errors</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--pass">✓</span> Idiomatic structure</div>
-			</div>
-
-			<div class="scope-lane">
-				<div class="scope-lane__top">
-					<span>
-						<span class="scope-lane__name">VS Code</span>
-					</span>
-					<span class="scope-lane__badge">processing</span>
-				</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--pass">✓</span> Builds &amp; runs clean</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--pass">✓</span> All tests pass</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--run">•</span> Typed end to end</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--wait">•</span> Handles errors</div>
-				<div class="scope-crit"><span class="scope-mark scope-mark--wait">•</span> Idiomatic structure</div>
-			</div>
-		</div>
-	</div>
+	{/* Product demo: videos are GitHub release assets (see website/AGENTS.md) */}
+	<figure class="scope-demo">
+		<video
+			class="scope-demo__video"
+			controls
+			playsinline
+			preload="none"
+			width="1920"
+			height="1080"
+			poster="/demo/scope-demo-poster.jpg"
+			aria-label="Scope demo, 74 seconds, narrated with captions: define a baseline profile and two variations, submit 18 runs in one batch, then compare tool calls, token usage, and reports in the Portal and the CLI."
+		>
+			<source src="https://github.com/microsoft/scope/releases/download/website-demo-video-v1/scope-demo.mp4" type="video/mp4" />
+			<source src="https://github.com/microsoft/scope/releases/download/website-demo-video-v1/scope-demo.webm" type="video/webm" />
+			<a href="https://github.com/microsoft/scope/releases/download/website-demo-video-v1/scope-demo.mp4">Download the Scope demo video (MP4)</a>
+		</video>
+	</figure>
 </section>
 
 {/* ============================ HOW IT WORKS ============================ */}

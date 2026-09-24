@@ -13,7 +13,7 @@ The product and this documentation site live in
 
 ```
 .
-├── public/                          # static assets
+├── public/                          # static assets (demo video poster in demo/)
 ├── src/
 │   ├── assets/
 │   ├── content/docs/                # all user-facing pages (.md / .mdx)
@@ -24,7 +24,7 @@ The product and this documentation site live in
 │   │   └── resources/
 │   ├── openapi/scope-openapi.json   # artifact generated from the API registry
 │   ├── plugins/
-│   │   ├── remark-base-path.mjs    # applies the deployment base to internal links
+│   │   ├── remark-base-path.mjs    # applies the deployment base to internal links/posters
 │   │   └── remark-http-snippets.mjs # turns ```http blocks into multi-language tabs
 │   └── content.config.ts
 ├── astro.config.mjs                 # sidebar, plugins, starlight-openapi config

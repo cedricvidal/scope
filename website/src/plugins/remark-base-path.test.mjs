@@ -54,6 +54,27 @@ test('prefixes literal MDX href and src attributes, including nested links', () 
 	assert.equal(tree.children[0].children[1].attributes[0].value, '/scope/images/scope.svg');
 });
 
+test('prefixes literal MDX video poster and source attributes', () => {
+	const tree = transform([
+		{
+			type: 'mdxJsxFlowElement',
+			name: 'video',
+			attributes: [{ type: 'mdxJsxAttribute', name: 'poster', value: '/demo/scope-demo-poster.jpg' }],
+			children: [
+				{
+					type: 'mdxJsxFlowElement',
+					name: 'source',
+					attributes: [{ type: 'mdxJsxAttribute', name: 'src', value: 'https://github.com/o/r/releases/download/t/v.mp4' }],
+					children: [],
+				},
+			],
+		},
+	]);
+
+	assert.equal(tree.children[0].attributes[0].value, '/scope/demo/scope-demo-poster.jpg');
+	assert.equal(tree.children[0].children[0].attributes[0].value, 'https://github.com/o/r/releases/download/t/v.mp4');
+});
+
 test('leaves external, relative, fragment, and already-prefixed URLs unchanged', () => {
 	const urls = [
 		'https://example.com/reference/',

@@ -33,7 +33,10 @@ A static documentation site published to GitHub Pages.
   expands fenced ` ```http ` blocks into multi-language Starlight
   `<Tabs>` (curl, JS fetch, Python, Go, Java, C#)
 - `src/plugins/remark-base-path.mjs`: prefixes internal Markdown URLs and
-  literal MDX `href`/`src` attributes with the configured deployment base
+  literal MDX `href`/`src`/`poster` attributes with the configured
+  deployment base
+- `public/demo/scope-demo-poster.jpg`: poster frame for the front-page
+  demo video (see [Front-page demo video](#front-page-demo-video))
 - `astro.config.mjs` — sidebar, plugins, `markdown.remarkPlugins`,
   `starlight-openapi` config
 - `dist/` — build output (gitignored)
@@ -145,6 +148,39 @@ Use site-root paths such as `/getting-started/access/` in Markdown links
 and literal MDX `href`/`src` attributes. The base-path remark plugin adds
 `/scope` in the public build while keeping local root deployments working.
 Do not hard-code the deployment prefix in content or code examples.
+
+### Front-page demo video
+
+The hero of `src/content/docs/index.mdx` embeds a narrated, captioned
+74-second demo (1920×1080). Only the poster is committed. The video
+files are **assets on the `website-demo-video-v1` GitHub release** of
+`microsoft/scope`, so git history carries no large binaries:
+
+- `scope-demo.mp4` (H.264/AAC, fast-start; listed first for Safari)
+- `scope-demo.webm` (VP9/Opus)
+
+The player is click-to-play (`preload="none"`), so page loads don't
+fetch the video. Release assets are served as
+`application/octet-stream` with `Content-Disposition: attachment`.
+Safari, Chrome, and Edge still play and seek them in a `<video>`
+element, but re-check Safari whenever the hosting changes.
+
+The release tag must **not** start with `cli/v`. The CLI update check
+and `install-cli.sh` pick the first `cli/v*` release. Always create
+the release with `--latest=false` so it never becomes the repo's
+"latest" release.
+
+To replace the video, re-render it (the HyperFrames source project is
+not in this repo), then publish a new tag and update the three URLs in
+`index.mdx`. Replace the poster in `public/demo/` if the opening frame
+changed:
+
+```sh
+gh release create website-demo-video-v2 --repo microsoft/scope \
+  --latest=false --title "Website demo video v2" \
+  --notes "Front-page demo video for the documentation site." \
+  scope-demo.mp4 scope-demo.webm
+```
 
 ### Sidebar
 

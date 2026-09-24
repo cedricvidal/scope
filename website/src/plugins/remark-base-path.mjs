@@ -3,6 +3,8 @@
 
 import { visit } from 'unist-util-visit';
 
+const URL_ATTRIBUTES = new Set(['href', 'src', 'poster']);
+
 export default function remarkBasePath({ base = '/' } = {}) {
 	const prefix = `/${base.replace(/^\/+|\/+$/g, '')}`;
 
@@ -21,12 +23,12 @@ export default function remarkBasePath({ base = '/' } = {}) {
 				node.url = withBase(node.url);
 			}
 
-			// MDX anchors and images keep literal attributes outside Markdown link nodes.
+			// MDX anchors, images, and videos keep literal attributes outside Markdown link nodes.
 			if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
 				for (const attribute of node.attributes) {
 					if (
 						attribute.type === 'mdxJsxAttribute' &&
-						(attribute.name === 'href' || attribute.name === 'src') &&
+						URL_ATTRIBUTES.has(attribute.name) &&
 						typeof attribute.value === 'string'
 					) {
 						attribute.value = withBase(attribute.value);
