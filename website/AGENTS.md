@@ -15,8 +15,11 @@ A static documentation site published to GitHub Pages.
   `website/`)
 - Deployed by `.github/workflows/static.yml` (build + deploy jobs),
   which builds from `website/` via a `working-directory` default and
-  `website/**` path filters; `site` and `base` are driven by
-  `actions/configure-pages` outputs with safe localhost defaults
+  `website/**` path filters; both PR and production builds explicitly use
+  `SITE=https://microsoft.github.io` and `BASE_PATH=/scope`.
+  Do not derive these from `actions/configure-pages` outputs, which can
+  report an isolated hostname instead of the public project URL.
+  Local development keeps localhost and `/` defaults.
 
 ## Where things live
 
@@ -29,6 +32,8 @@ A static documentation site published to GitHub Pages.
 - `src/plugins/remark-http-snippets.mjs` — custom remark plugin that
   expands fenced ` ```http ` blocks into multi-language Starlight
   `<Tabs>` (curl, JS fetch, Python, Go, Java, C#)
+- `src/plugins/remark-base-path.mjs`: prefixes internal Markdown URLs and
+  literal MDX `href`/`src` attributes with the configured deployment base
 - `astro.config.mjs` — sidebar, plugins, `markdown.remarkPlugins`,
   `starlight-openapi` config
 - `dist/` — build output (gitignored)
@@ -125,12 +130,21 @@ Plain JSON examples (response shapes, profile config) stay as
 
 ### REST API reference page
 
+- Link to `/reference/api/` for the generated reference landing page.
+  `/reference/api/operations/` is not a page.
 - **Auto-generated** per-endpoint pages live under
   `/reference/api/...` (built from
   `src/openapi/scope-openapi.json` by `starlight-openapi`).
 - The hand-written `reference/rest-api.md` is a narrative overview
   with cross-links to the auto-generated pages and the live Swagger.
   Don't duplicate the per-endpoint detail there.
+
+### Internal links
+
+Use site-root paths such as `/getting-started/access/` in Markdown links
+and literal MDX `href`/`src` attributes. The base-path remark plugin adds
+`/scope` in the public build while keeping local root deployments working.
+Do not hard-code the deployment prefix in content or code examples.
 
 ### Sidebar
 
@@ -154,15 +168,18 @@ groups are spread via `...openAPISidebarGroups`.
 
 ```sh
 pnpm install
+pnpm test                # plugin regressions, using Node's built-in test runner
 pnpm run build           # writes dist/
 pnpm run dev             # local preview at http://localhost:4321
 pnpm run refresh:openapi # generate the OpenAPI snapshot from scope-core
 ```
 
-A green `pnpm run build` is the gate. As of the last edit it produces
-**164 pages** (≈ 23 hand-written + the rest auto-generated from the
-OpenAPI spec). A drop in page count usually means a content collection
-file failed to parse.
+Both `pnpm test` and `pnpm run build` must pass. The public build uses
+`SITE=https://microsoft.github.io BASE_PATH=/scope pnpm run build`;
+exercise that configuration when changing links or deployment settings,
+not just the local `/` default. The current snapshot produces **200
+pages**, including the generated API reference. An unexpected drop in
+page count can indicate a content collection file failed to parse.
 
 ## Workflow
 

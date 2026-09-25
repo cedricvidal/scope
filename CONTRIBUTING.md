@@ -40,6 +40,11 @@ Scope is a pnpm workspaces monorepo (TypeScript, with a Rust component for the A
 
 - **Docker** — required to run the backing services (MongoDB, Redis, Azurite, Lowkey Vault) and to
   run integration tests.
+- **[mkcert](https://github.com/FiloSottile/mkcert#installation)**: required for
+  trusted HTTPS certificates when running the local authentication emulator.
+- **[GitHub CLI](https://cli.github.com/)**: used to obtain a token for local
+  Copilot runs. The account supplying the token must have an **active GitHub
+  Copilot entitlement**; `gh auth login` alone does not grant Copilot access.
 - **Rust / Cargo** — only needed if you work on the AI gateway (`apps/gateway/`).
 
 ## Getting started
@@ -53,6 +58,22 @@ dependencies.
 
 ## Local development
 
+Local authentication requires your browser to trust a development certificate.
+The Portal development scripts run `mkcert -install` to add a local certificate
+authority to the OS/browser trust store and generate the emulator's `localhost`
+certificate. On first use, you may be prompted to approve this trust-store
+change. Follow the
+[local authentication instructions](./ENV_VARIABLES.md#local-dev-setup-entra-local)
+for details.
+
+For the Copilot worker, authenticate with an account that has an active Copilot
+entitlement and make its token available to the development stack:
+
+```bash
+gh auth login
+export GITHUB_TOKEN="$(gh auth token)"
+```
+
 Start the backing services first, then run the stack or an individual service:
 
 ```bash
@@ -65,6 +86,22 @@ pnpm dev:portal                   # Portal only (native)
 pnpm dev:coder-acp-copilot        # A single worker natively (pnpm dev:<service-name>)
 pnpm open:portal                  # Open the portal in your browser
 ```
+
+### Debug the Docker development API
+
+`pnpm docker:dev:portal` starts the API with the Node inspector enabled. To
+debug API TypeScript while retaining the Docker stack and hot reload:
+
+1. Run `pnpm docker:dev:portal` and wait for the API to start.
+2. Read `API_DEBUG_PORT` from the generated `.env` file (it is worktree-specific).
+3. In VS Code, select **Attach API (Docker)** from **Run and Debug**, enter that
+   port, and start debugging.
+4. Set breakpoints in the workspace source under `apps/api/src`, not in a copied
+   or attached snapshot of the file.
+
+The debugger maps the container's `/app` tree to the workspace and reconnects
+when `tsx watch` restarts the API after a source change. The inspector is
+published on `127.0.0.1` only.
 
 The CLI is the primary interface for CI/CD and power users:
 
@@ -138,10 +175,69 @@ MongoDB is CosmosDB-compatible — avoid MongoDB features that CosmosDB's MongoD
 6. Open the PR and complete the CLA check if the bot asks you to. Address review feedback and keep the
    branch up to date with `main`.
 
+### Recording a demo
+
+For user-visible changes (Portal/CLI features or UX changes), attach a short recording in the PR's
+Demo section. For user-visible bug fixes, show the same steps before and after the fix. Aim for
+20-30 seconds focused on the changed interaction and its result. Write "N/A" for changes that aren't
+user-visible, such as documentation, internal refactors, or infrastructure-only changes.
+
+Use a screen recorder such as macOS Screenshot (`Shift+Command+5`), Windows Snipping Tool's video
+capture, or OBS Studio to capture the relevant browser or terminal area. An agent with browser or
+terminal automation and recording tools can run the steps and produce an annotated recording for
+you; review its output before uploading.
+
+Use synthetic data and scrub tokens, cookies, credentials, and real run/customer data from the
+recording, including terminal output and browser UI. Check the entire clip before sharing it.
+Drag and drop an `.mp4`, `.mov`, or `.gif` into the PR description to upload it to GitHub, and add a
+one-line caption describing what it shows so reviewers can search for the behavior.
+
+Recordings complement, not replace, the Testing section: keep test commands, results, and any manual
+checks in text. Screenshots can add context but do not show interaction or timing.
+
+## Third-party notices
+
+Scope redistributes npm production dependencies in its service images and Rust
+crates in the gateway binary. Their attributions and license texts are collected
+in the root [`NOTICE`](./NOTICE) file.
+
+`NOTICE` is generated; don't edit it by hand. Regenerate it after changing
+dependencies:
+
+```bash
+pnpm notice          # Regenerate NOTICE and NOTICE-REVIEW.txt
+pnpm notice:check    # Check whether the committed notices are current
+```
+
+The generator ([`scripts/generate-notice.ts`](./scripts/generate-notice.ts))
+orchestrates license tooling and concatenates its verbatim output. It doesn't
+author or edit license text. It uses
+[`generate-license-file`](https://generate-license-file.js.org) for npm production
+dependencies and [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) for
+crates compiled into the gateway. npm exclusions and multi-license disambiguation
+live in the generator; Rust configuration and templates live in
+[`apps/gateway/about.toml`](./apps/gateway/about.toml) and
+[`apps/gateway/about.hbs`](./apps/gateway/about.hbs).
+Only [`scripts/notice-header.txt`](./scripts/notice-header.txt) is written by hand.
+Production packages whose licenses can't be resolved as standard open source
+are excluded from `NOTICE` and listed in `NOTICE-REVIEW.txt` for manual legal
+review.
+
+`generate-license-file` runs through `npx`. To regenerate the Rust portion,
+install its tool with `cargo install cargo-about --features cli`. Set
+`SKIP_CARGO=1` to reuse the cached Rust section when it hasn't changed.
+
+Both notice files are platform-independent. Per-platform native binaries
+(`@os-theme/*` and `@github/copilot-<os>-<arch>`) and macOS-only `fsevents` are
+excluded so macOS and Linux produce the same output. Attributions for excluded
+native binaries are carried by their platform-independent parent packages.
+The `notice-check` job in [CI](./.github/workflows/ci.yml) checks for drift from
+installed dependencies.
+
 ## Project structure and where to start
 
-- Start with the [architecture overview](./docs/architecture/overview.md) and the
+- Start with the [system architecture](./docs/architecture/system-architecture.md) and the
   [app design](./docs/architecture/app-design.md) docs for the big picture.
 - The [README](./README.md) introduces the platform, provides a local quick start, and links the full documentation index.
-- Planned work (e.g. test variations and experiment-level analysis) is flagged as *Upcoming* in the
-  README's Key Features — good starting points if you're looking for larger areas to help with.
+- Browse [open issues](https://github.com/microsoft/scope/issues) for bugs and
+  proposed improvements. Discuss larger changes in an issue before starting work.

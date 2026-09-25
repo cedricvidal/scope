@@ -111,7 +111,7 @@ observations are persisted before the failure unwinds the run.
 
 ## Indexes
 
-Migration `029-create-resource-indexes.ts` creates:
+Migration `030-create-resource-indexes.ts` creates:
 
 | Collection | Index | Purpose |
 |------------|-------|---------|

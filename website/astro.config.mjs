@@ -8,12 +8,13 @@ import starlightOpenAPI, { openAPISidebarGroups } from 'starlight-openapi';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
+import remarkBasePath from './src/plugins/remark-base-path.mjs';
 import remarkHttpSnippets from './src/plugins/remark-http-snippets.mjs';
 
 // https://astro.build/config
 // `site` and `base` are driven by the GitHub Pages deployment URL in CI
-// (set via env vars from `actions/configure-pages` outputs), with safe
-// defaults for local development.
+// (set explicitly in the deployment workflow), with safe defaults
+// for local development.
 //
 // `DOC_PORT` is read from the `.env` file that `worktree-env` writes to
 // the git repo root (so each worktree binds to a unique dev/preview
@@ -47,13 +48,14 @@ function readDotEnv(name) {
 	return undefined;
 }
 const docPort = Number(readDotEnv('DOC_PORT')) || 4300;
+const base = process.env.BASE_PATH || '/';
 
 export default defineConfig({
 	site: process.env.SITE || `http://localhost:${docPort}`,
-	base: process.env.BASE_PATH || '/',
+	base,
 	server: { port: docPort },
 	markdown: {
-		remarkPlugins: [remarkHttpSnippets],
+		remarkPlugins: [[remarkBasePath, { base }], remarkHttpSnippets],
 	},
 	integrations: [
 		starlight({

@@ -62,7 +62,6 @@ import { RunPreviewPanel } from "@/pages/RunPreviewPanel";
 import { Admin } from "@/pages/Admin";
 import { Projects } from "@/pages/Projects";
 import { FeatureRoute } from "@/components/FeatureRoute";
-import { RequireAuth } from "@/components/auth/RequireAuth";
 import { ProjectGate } from "@/components/ProjectGate";
 import { HomeRoute } from "@/components/HomeRoute";
 import { useFavicon } from "@/hooks/useFavicon";
@@ -73,11 +72,7 @@ export function App() {
   return (
     <Routes>
       <Route
-        element={
-          <RequireAuth>
-            <Layout />
-          </RequireAuth>
-        }
+        element={<Layout />}
       >
         {/* Root is the unscoped "home": `HomeRoute` clears any active project
             and renders the project picker. Reaching `/` by any means (the MS

@@ -24,6 +24,7 @@ The product and this documentation site live in
 │   │   └── resources/
 │   ├── openapi/scope-openapi.json   # artifact generated from the API registry
 │   ├── plugins/
+│   │   ├── remark-base-path.mjs    # applies the deployment base to internal links
 │   │   └── remark-http-snippets.mjs # turns ```http blocks into multi-language tabs
 │   └── content.config.ts
 ├── astro.config.mjs                 # sidebar, plugins, starlight-openapi config
@@ -42,12 +43,21 @@ Sidebar order is defined in `astro.config.mjs`, not by directory order.
 | `pnpm dev`             | Start local dev server at `localhost:4321`                 |
 | `pnpm build`           | Build the production site to `./dist/`                     |
 | `pnpm preview`         | Preview the production build locally                       |
+| `pnpm test`            | Test site plugins with Node's built-in test runner          |
 | `pnpm refresh:openapi` | Generate the OpenAPI snapshot from `scope-core` |
 
 ## Authoring docs
 
 - Use `.md` for plain Markdown, `.mdx` whenever the page contains JSX
   (e.g. Starlight `<Tabs>`).
+- Write internal Markdown links and literal MDX `href`/`src` attributes
+  relative to the site root, such as `/getting-started/access/`.
+  [src/plugins/remark-base-path.mjs](src/plugins/remark-base-path.mjs)
+  adds the configured base path at build time. Do not hard-code `/scope`
+  in content. External URLs, relative links, fragments, and code examples
+  are left unchanged.
+- Link to `/reference/api/` for the generated API reference landing page.
+  `/reference/api/operations/` has endpoint pages beneath it, but no index.
 - Write HTTP examples as a single fenced ` ```http ` block — the
   custom remark plugin in
   [src/plugins/remark-http-snippets.mjs](src/plugins/remark-http-snippets.mjs)
@@ -71,9 +81,25 @@ where to look in scope-core for any given topic.
 Pushed builds deploy to GitHub Pages via
 [../.github/workflows/static.yml](../.github/workflows/static.yml).
 The workflow builds from this `website/` directory (via a
-`working-directory` default and `website/**` path filters). `site`
-and `base` are driven by `actions/configure-pages` outputs with safe
-localhost defaults.
+`working-directory` default and `website/**` path filters). Both pull-request
+and production builds use `SITE=https://microsoft.github.io` and
+`BASE_PATH=/scope`, matching the public
+[documentation URL](https://microsoft.github.io/scope/).
+`actions/configure-pages` still configures deployment, but its reported
+hostname and base path are not used to generate URLs: it can report an
+isolated Pages hostname instead of the public project URL.
+
+Local development defaults to the site root (`/`). To reproduce the
+public deployment locally, run these commands from `website/`:
+
+```sh
+pnpm test
+SITE=https://microsoft.github.io BASE_PATH=/scope pnpm build
+SITE=https://microsoft.github.io BASE_PATH=/scope pnpm preview
+```
+
+Open `/scope/` on the preview server. Keep `BASE_PATH` the same for the
+build and preview so assets, navigation, and search use the same URLs.
 
 ## Learn more
 

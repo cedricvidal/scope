@@ -19,7 +19,7 @@ import {
   ensureUniqueIndexOrFallback,
 } from "../cosmos-index-helpers.js";
 
-const TAG = "029";
+const TAG = "030";
 
 export class CreateResourceIndexes implements MigrationInterface {
   async up(db: Db): Promise<void> {

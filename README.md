@@ -2,12 +2,12 @@
 
   <h1><img src="./apps/portal/public/favicon.svg" alt="Scope logo" width="44" align="absmiddle" />&nbsp;Scope</h1>
 
-  <p><strong>Benchmark AI coding agents with repeatable, evidence-backed runs.</strong></p>
+  <p><strong>An open-source agentic experience evaluation platform.</strong></p>
 
   <p>
-    Compare agents, models, skills, and product surfaces against realistic tasks.
-    Watch each run live, evaluate the result against clear criteria, and keep the
-    artifacts that explain what happened.
+    Evaluate how AI agents use your product, approach real tasks and respond to feedback. Compare accross surfaces (CLI, MCP, Skills, doc, ...), context, tasks, operating systems, ...
+    Define success with reusable criteria, follow each run live, and inspect the
+    evidence behind every result through the Portal or CLI.
   </p>
 
   <p>
@@ -20,230 +20,299 @@
   <p>
     <a href="#why-scope">Why Scope</a> |
     <a href="#how-it-works">How it works</a> |
-    <a href="#quick-start">Quick start</a> |
+    <a href="#getting-started">Get started</a> |
     <a href="#documentation">Documentation</a> |
     <a href="#contributing">Contributing</a>
   </p>
 </div>
 
-## Why Scope
+## Why Scope?
 
-AI coding agents change quickly. A useful evaluation platform needs to show more
-than a pass or fail result. Scope turns a coding task into a repeatable
-experiment: define the context, run it across agents, inspect the evidence, and
-compare the outcomes.
+A working result is only part of the agentic experience. Scope helps you
+evaluate the output, the steps an agent took, and how it responded to feedback.
+Use repeatable evaluations to understand both successes and failures.
 
-| Define the challenge | Run the experiment | Learn from the evidence |
-| --- | --- | --- |
-| Create tasks, personas, skills, codebases, and reusable criteria that reflect real work. | Submit the same benchmark to GitHub Copilot, Claude Code, or VS Code based workers from the Portal or CLI. | Follow live logs, evaluate a criteria DAG, retain workspace snapshots, and compare trajectories across runs. |
+- **Define what success means.** Organize evaluation criteria into a directed
+  acyclic graph (DAG), with dependencies between checks.
+- **Inspect the evidence.** Follow live logs and review generated files,
+  workspace snapshots, criteria results, and captured agent activity.
+- **Evaluate changes.** Reuse tasks and saved profiles to understand how the
+  agent, model, skills, tools, or starting codebase affect the experience.
+- **Automate evaluations.** Submit and manage runs from the CLI or REST API,
+  and explore results, reports, and insights in the Portal.
 
-### Built for useful comparisons
-
-- **Realistic contexts**: Test prompts alongside personas, skills, MCP servers,
-  and optional seeded codebases.
-- **Clear evaluation**: Express quality as a criteria DAG, then let the Judge
-  score each run with explicit dependencies between checks.
-- **Agent and model coverage**: Track worker versions and discovered model
-  capabilities so a benchmark is tied to the software that ran it.
-- **Live visibility**: Stream run activity to the Portal and CLI over SSE while
-  preserving artifacts in MongoDB and Blob Storage.
-- **Fair scheduling**: Prioritize urgent work without losing control of the
-  queue, then let KEDA scale workers to demand.
-- **Analysis beyond one task**: Compare criteria state transitions across
-  scenarios with an MDP-based view of agent behavior.
-
-### Agent surfaces
-
-| Surface | How Scope runs it |
-| --- | --- |
-| GitHub Copilot | Agent Client Protocol worker and VS Code based workers |
-| Claude Code | Agent Client Protocol worker |
-| VS Code with Copilot Chat | Browser automation and Electron driver-extension workers |
-| New agent integrations | Shared worker, queue, evaluation, and reporting foundations |
+Scope is for product managers, developers, researchers, and teams evaluating how their software is being used by coding agents.
+Results describe the tasks and configurations you tested, not a universal agent
+ranking. The automated Judge can make mistakes; important conclusions need human
+review.
 
 ## How it works
 
-Every run follows the same path, whether it starts in the Portal, the CLI, or
-your own automation.
-
 ```mermaid
 flowchart LR
-    User["Portal or CLI"] -->|submit a benchmark| API["Scope API"]
-    API -->|create run request| DB[("MongoDB")]
-    Scheduler["Priority scheduler"] -->|claim pending work| DB
-    Scheduler -->|dispatch| Queue["Azure Storage Queues"]
-    Queue -->|dequeue| Worker["Coding agent worker"]
-    Worker -->|live logs| Redis[("Redis")]
-    Redis -->|SSE| API
-    Worker -->|evaluate| Judge["Criteria DAG judge"]
-    Judge -->|scores| DB
-    Worker -->|snapshots and artifacts| Blob[("Blob Storage")]
-    Worker -->|results| DB
+    Client["Portal or CLI"] --> API["API"]
+    API --> DB[("MongoDB")]
+    Scheduler["Scheduler"] -->|claim pending runs| DB
+    Scheduler --> Queue["Storage Queues"]
+    Queue --> Worker["Coding agent worker"]
+    Worker --> Judge["Judge"]
+    Judge -->|criteria results| DB
+    Worker -->|logs| Redis["Redis"]
+    Redis -->|live events| API
+    Worker -->|artifacts| Blob["Blob Storage"]
+    Worker -->|run status| DB
 ```
 
-The API accepts a benchmark request. The scheduler selects pending work by
-priority, workers execute the selected agent, and the Judge records a
-criteria-level result. Logs and artifacts stay attached to the run so results
-are inspectable, not just summarized.
+1. **Define** a task, its evaluation criteria, and the agent configuration.
+2. **Submit** a request through the Portal or CLI. The scheduler dispatches
+   pending runs to the appropriate worker queue.
+3. **Execute and evaluate.** The worker runs the agent and asks the Judge to
+   evaluate its output. Runs can include multiple feedback iterations.
+4. **Inspect and compare.** Review logs, snapshots, and criteria results.
+   Post-processing and report workers produce additional analysis when enabled.
 
-For the full production topology, including token management, AI traffic
-capture, deployment, and service ownership, see the
-[system architecture](./docs/architecture/system-architecture.md).
+MongoDB holds evaluation configuration and run records. Blob Storage holds larger
+artifacts, and Redis relays live events. Local development uses MongoDB, Redis,
+Azurite (the Azure Storage emulator), and Lowkey Vault. See the
+[system architecture](./docs/architecture/system-architecture.md) for service
+details and production deployment considerations.
 
-## Quick start
+### Coding agents
 
-### What you need
+| Worker | Integration | Getting started |
+| --- | --- | --- |
+| GitHub Copilot | Agent Client Protocol (ACP) | `pnpm docker:dev:copilot` |
+| Claude Code | ACP | `pnpm docker:dev:claude-code` |
+| GitHub Copilot on Windows | Windows ACP worker | Deployment-specific; see [system architecture](./docs/architecture/system-architecture.md) |
 
-- Node.js 22
-- pnpm 10.29.1, enabled through [Corepack](https://nodejs.org/api/corepack.html)
-- Docker and Docker Compose
-- [GitHub CLI](https://cli.github.com/) authenticated with `gh auth login` when
-  running the GitHub Copilot worker
+The default local workflow below uses the Copilot worker. The
+`pnpm docker:dev:all` command enables both local ACP workers, not every
+deployment-specific integration. Each provider requires its own credentials
+and access to the selected models.
 
-### Start a local benchmark stack
+## Getting started
+
+### Prerequisites
+
+| Tool | Requirement |
+| --- | --- |
+| Git | Clone the repository; fork it first if you plan to contribute. |
+| Node.js | Version 22, matching CI. |
+| pnpm | Version 10.29.1, pinned in `package.json`. |
+| Docker with Compose v2 | Run the local stack. Use a current version with Compose Watch support. |
+| [mkcert](https://github.com/FiloSottile/mkcert#installation) | Create trusted HTTPS certificates for the local sign-in emulator. |
+| [GitHub CLI](https://cli.github.com/) | Obtain a token for the Copilot quick start with `gh auth login`. |
+
+The Copilot worker requires an **active GitHub Copilot entitlement** on the
+account supplying its token. Authenticating with `gh auth login` alone does not
+grant Copilot access. You also need credentials with access to the models used
+by the Judge and other AI features. Provider usage may incur charges or consume
+quotas. The local backing services don't require an Azure subscription.
+
+The commands below use a Bash-compatible shell. Rust is only required on the
+host if you build or modify the gateway outside Docker.
+
+### 1. Clone and install
 
 ```bash
+git clone https://github.com/microsoft/scope.git
+cd scope
 corepack enable
-pnpm install
+pnpm install --frozen-lockfile
+```
+
+If you cloned a fork, run the remaining commands from that checkout instead.
+
+### 2. Configure and start the stack
+
+Authenticate with an account that has an active Copilot entitlement:
+
+```bash
+gh auth login
 GITHUB_TOKEN="$(gh auth token)" pnpm docker:dev:copilot
 ```
 
-This starts the local data services, API, scheduler, Judge, token manager,
-Copilot worker, report generator, and Portal with hot reload enabled.
+This builds and starts the Copilot worker, Portal, API, scheduler, Judge,
+token manager, gateway, post-processing and reporting services, and their local
+dependencies. Database migrations and development agent registration run
+automatically. The first build downloads several images and can take some time.
 
-Open the Portal in a second terminal:
+The startup scripts also generate `.env` from [`.env.base`](./.env.base) and
+configure local sign-in over HTTPS. Local authentication requires your browser
+to trust the development certificate. The scripts run `mkcert -install` to add
+a local certificate authority to the OS/browser trust store and generate the
+emulator's `localhost` certificate. On first use, you may be prompted to approve
+this trust-store change. See the
+[local authentication instructions](./ENV_VARIABLES.md#local-dev-setup-entra-local).
+
+For persistent overrides, copy [`.env.local.example`](./.env.local.example) to
+`.env.local` and edit it locally. Don't put credentials in `.env.base` or commit
+them. Avoid editing the generated `.env`, which is regenerated by the scripts.
+See the [environment reference](./ENV_VARIABLES.md) for provider credentials,
+Judge models, and optional Azure AI Foundry configuration.
+
+### 3. Open the Portal
+
+In a second terminal, from the repository root:
 
 ```bash
 pnpm open:portal
 ```
 
-The default Portal address is `http://localhost:5100`. In a Git worktree,
-`pnpm open:portal` resolves that worktree's assigned port automatically.
+The default address is `http://localhost:5100`. Git worktrees get their own port
+assignments; `pnpm open:portal` resolves the correct address automatically.
+Local sign-in uses the seeded emulator users, such as `alice@entralocal.dev`,
+not a production Microsoft Entra tenant. See
+[local authentication setup](./ENV_VARIABLES.md#local-dev-setup-entra-local).
 
-<details>
-  <summary><strong>Prefer to run services natively?</strong></summary>
+> **Local development is not a security sandbox.** The ACP worker configuration
+> mounts the Docker socket so agents can run containers. Use a dedicated
+> environment for untrusted tasks, and don't expose this development stack to
+> the internet.
 
-  ```bash
-  pnpm docker:up:infra
-  pnpm dev:api
-  pnpm dev:portal
-  ```
+## Run your first evaluation
 
-  Start an individual worker with `pnpm dev:coder-acp-copilot` or
-  `pnpm dev:coder-acp-claude-code`. See
-  [Contributing](./CONTRIBUTING.md#local-development) for the full local
-  development workflow.
-</details>
+### From the Portal
 
-### Find your way around
+1. Select or create a project to keep your evaluation data together.
+2. Create a task and at least one observable evaluation criterion. For example,
+   ask the agent to create a Node.js HTTP server and evaluate whether its source
+   implements a `GET /health` route returning JSON.
+3. Open the run submission page, select the running Copilot agent and an
+   available model, and attach your task and criteria. You can save the agent
+   configuration as a reusable profile.
+4. Submit the run, follow its live logs, and inspect the Judge's results and
+   workspace artifacts.
 
-| I want to... | Start here |
-| --- | --- |
-| Submit or automate a benchmark | `pnpm cli --help` |
-| Discover available run commands | `pnpm cli run --help` |
-| Start all available workers locally | `pnpm docker:dev:all` |
-| Run unit tests | `pnpm test` |
-| Configure Portal AI assistance | [Environment variables](./ENV_VARIABLES.md#llm-configuration-portal-ai-features) |
+If no models are available, check your provider access and the model-scanner
+logs before submitting. A registered agent isn't necessarily running; choose
+the worker enabled by your Compose command.
 
-## Shape the benchmark
+### From the CLI
 
-Scope keeps the pieces of an evaluation separate, so you can reuse and
-change them independently.
+Build the CLI and its shared dependency, then explore the available commands:
 
-| Building block | Purpose | Where to learn more |
-| --- | --- | --- |
-| Tasks and scenarios | Define the coding challenge and acceptance context. | [`config/scenarios/`](./config/scenarios/) |
-| Personas | Set the perspective, experience, and communication style behind a task. | [`config/personas/`](./config/personas/) |
-| Criteria | Describe observable quality checks and their dependencies. | [Criteria provider](./docs/architecture/criteria-provider.md) |
-| Skills and codebases | Give agents the tools and starting context that mirror a real product surface. | [Skills](./docs/architecture/skills.md) and [codebases](./docs/architecture/codebases.md) |
-| Profiles and variations | Compose an agent configuration, then compare changes against a baseline. | [Application design](./docs/architecture/app-design.md) |
-
-MongoDB is the runtime source of truth. The YAML files in `config/` make
-configuration portable and easy to version alongside your work.
-
-## A platform that grows with your experiments
-
-The monorepo keeps the benchmark experience, worker runtime, and deployment
-model together.
-
-```text
-apps/       API, Portal, CLI, scheduler, Judge, gateway, token manager, workers
-packages/   Shared types, storage clients, migrations, auth, model scanning, evaluation
-config/     Portable examples for scenarios, personas, criteria, and prompt features
-docs/       Architecture, operations, research, and design documentation
+```bash
+pnpm build:cli
+pnpm cli --help
+pnpm cli project list
 ```
+
+Select a project using the ID returned by `project list`:
+
+```bash
+pnpm cli project use <project-id>
+pnpm cli criteria list
+pnpm cli run submit --help
+pnpm cli run list
+```
+
+Replace `<project-id>` with an actual ID. Submission requires a selected project,
+a task, and evaluation criteria. Use `--project <project-id>` or `SCOPE_PROJECT`
+to select a project explicitly in automation. The CLI reads local port settings
+from the generated `.env`; set `SCOPE_API_URL` to target another instance.
+
+### Evaluation building blocks
+
+| Concept | Purpose |
+| --- | --- |
+| Tasks and scenarios | Define the work the agent should perform. |
+| Criteria | Define observable checks and dependencies for the Judge. |
+| Personas | Configure the evaluation perspective and feedback style. |
+| Profiles and variations | Save an agent configuration and compare changes against a baseline. |
+| Skills and MCP servers | Provide agent instructions and tools through the Model Context Protocol. |
+| Codebases | Seed a run with a versioned starting workspace. |
+
+The YAML files in [`config/`](./config/) are portable examples, not the live
+configuration database. MongoDB is the runtime source of truth. Manage
+configuration through the Portal or CLI; don't assume that editing an example
+file changes an existing evaluation.
+
+## Development
+
+The repository is a pnpm workspaces monorepo, primarily TypeScript, with a React
+Portal and a Rust AI gateway.
+
+| Path | Contents |
+| --- | --- |
+| [`apps/api/`](./apps/api/) | REST API and live event streaming |
+| [`apps/portal/`](./apps/portal/) | Web UI and Storybook components |
+| [`apps/cli/`](./apps/cli/) | CLI for evaluation management and automation |
+| [`apps/scheduler/`](./apps/scheduler/) and [`apps/judge/`](./apps/judge/) | Run dispatch and criteria evaluation |
+| [`apps/workers/`](./apps/workers/) | Coding-agent, post-processing, and report workers |
+| [`apps/gateway/`](./apps/gateway/) and [`apps/token-manager/`](./apps/token-manager/) | AI traffic capture and credential management |
+| [`packages/`](./packages/) | Shared types, storage clients, migrations, and supporting libraries |
+| [`config/`](./config/) and [`docs/`](./docs/) | Evaluation examples and documentation |
+
+Useful commands from the repository root:
+
+```bash
+pnpm test                  # Unit tests
+pnpm lint                  # Workspace lint and type checks
+pnpm build                 # Workspace builds
+pnpm storybook             # Portal component catalog
+pnpm test:integration      # Integration tests; requires .env and backing services
+```
+
+For service-by-service development, Rust commands, migrations, and code
+conventions, read [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Documentation
 
-| Topic | Read |
+| Topic | Guide |
 | --- | --- |
-| Platform topology and request lifecycle | [System architecture](./docs/architecture/system-architecture.md) |
-| API, domain models, and project boundaries | [Application design](./docs/architecture/app-design.md) |
-| Queue priority, recovery, and scaling | [Queue scheduler](./docs/architecture/queue-scheduler.md) |
-| Criteria DAGs and evaluation providers | [Criteria provider](./docs/architecture/criteria-provider.md) |
-| Writing and delivering agent skills | [Skills architecture](./docs/architecture/skills.md) |
-| CLI installation and automation | [CLI distribution](./docs/architecture/cli-distribution.md) |
-| Environment settings | [Environment variable reference](./ENV_VARIABLES.md) |
-| All docs | [Documentation index](./docs/README.md) |
+| Architecture and run lifecycle | [System architecture](./docs/architecture/system-architecture.md) |
+| Domain models and API design | [Application design](./docs/architecture/app-design.md) |
+| Project organization | [Projects](./docs/architecture/data-organization-projects.md) |
+| Evaluation and criteria DAGs | [Criteria provider](./docs/architecture/criteria-provider.md) |
+| Agent context | [Skills](./docs/architecture/skills.md) and [codebases](./docs/architecture/codebases.md) |
+| Scheduling and recovery | [Queue scheduler](./docs/architecture/queue-scheduler.md) |
+| Configuration and authentication | [Environment variables](./ENV_VARIABLES.md) |
+| AI limitations and data handling | [Responsible AI FAQ](./docs/responsible-ai-faq.md) |
+| More architecture, operations, and research | [Documentation index](./docs/README.md) |
 
 ## Contributing
 
-Contributions are welcome. The [contribution guide](./CONTRIBUTING.md) covers
-local setup, testing, code conventions, the Microsoft Contributor License
-Agreement, and the pull request process.
+Contributions aren't limited to new workers. Documentation improvements,
+reproducible bug reports, evaluation examples, tests, and accessibility fixes
+are useful ways to get involved.
 
-Please report security issues through the process in
-[SECURITY.md](./SECURITY.md), not in a public issue. This project follows the
-[Microsoft Open Source Code of Conduct](./CODE_OF_CONDUCT.md).
+Search [existing issues](https://github.com/microsoft/scope/issues) before
+reporting a bug or proposing a feature. For larger changes, open an issue to
+discuss the approach before implementation. Include reproduction steps and
+relevant versions in bug reports, and remove credentials and sensitive run
+content from logs.
 
-## License
+Read the [contribution guide](./CONTRIBUTING.md) for setup, conventions, and the
+pull request process. Open pull requests against `microsoft/scope` on `main`,
+including when working from a fork. Most contributions require the Microsoft
+Contributor License Agreement; the CLA bot will guide you through it.
 
-Scope is available under the [MIT License](./LICENSE).
+Everyone participating in the project is expected to follow the
+[Code of Conduct](./CODE_OF_CONDUCT.md).
 
-<details>
-  <summary>Trademark notice</summary>
+## Support and security
 
-  This project may contain trademarks or logos for projects, products, or
-  services. Authorized use of Microsoft trademarks or logos must follow
-  [Microsoft's Trademark and Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
-  Use of Microsoft trademarks or logos in modified versions of this project
-  must not cause confusion or imply Microsoft sponsorship. Any use of
-  third-party trademarks or logos is subject to those parties' policies.
-</details>
+For usage questions, bugs, and feature requests, see [SUPPORT.md](./SUPPORT.md).
+Report vulnerabilities privately through [SECURITY.md](./SECURITY.md), never
+through a public GitHub issue.
 
-## Third-party notices
+Evaluation artifacts can contain prompts, source code, tool output, and network
+metadata. Only use data and credentials approved for your deployment, configure
+appropriate access controls, and review generated code before using it. Scope
+doesn't certify that an agent or its output is safe or production-ready. Read
+the [Responsible AI FAQ](./docs/responsible-ai-faq.md) before running sensitive
+or untrusted workloads.
 
-Scope redistributes third-party open-source components (npm production dependencies shipped in
-the service images and the Rust crates linked into the `gateway` binary). Their attributions and
-license texts are collected in the root [`NOTICE`](NOTICE) file.
+## License and trademarks
 
-`NOTICE` is generated — do not edit it by hand. Regenerate it after changing dependencies:
+Scope is licensed under the [MIT License](./LICENSE). Third-party attributions
+are in [`NOTICE`](./NOTICE); contributors changing dependencies should follow
+the [notice maintenance instructions](./CONTRIBUTING.md#third-party-notices).
 
-```bash
-pnpm notice          # regenerate NOTICE (and NOTICE-REVIEW.txt)
-pnpm notice:check    # CI check: fail if NOTICE is out of date
-```
-
-The generator (`scripts/generate-notice.ts`) only orchestrates purpose-built license tooling
-and concatenates its verbatim output — it never authors or edits license text. It uses
-[`generate-license-file`](https://generate-license-file.js.org) for the npm production
-dependencies (exclusions and multi-license disambiguation are configured in
-`scripts/generate-notice.ts`, which emits the tool's config as JSON) and
-[`cargo-about`](https://github.com/EmbarkStudios/cargo-about) for the crates compiled into the
-`gateway` binary (config: `apps/gateway/about.toml`, template: `apps/gateway/about.hbs`). Only
-the header (`scripts/notice-header.txt`) is written by hand. Any production package whose
-license cannot be resolved as standard OSS is excluded from `NOTICE` and listed in
-`NOTICE-REVIEW.txt` for manual / legal (CELA) review.
-
-`generate-license-file` runs via `npx` (no install needed). Regenerating the Rust portion
-requires `cargo install cargo-about --features cli`. Set `SKIP_CARGO=1` to reuse the cached
-Rust section and skip the (slower) cargo step.
-
-`NOTICE` and `NOTICE-REVIEW.txt` are platform-independent: per-platform native binaries
-(`@os-theme/*` and the `@github/copilot-<os>-<arch>` variants) and macOS-only packages
-(`fsevents`, absent from the shipped Linux images) are excluded so the tools produce
-byte-identical output on macOS and the Linux CI runner — the verbatim license text of any
-excluded native binary is carried by its platform-independent parent package (e.g. `os-theme`,
-MIT), which remains in `NOTICE`. The `notice-check` job in
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `pnpm notice:check` on every pull
-request and fails if the committed files drift from the installed dependencies.
+This project may contain trademarks or logos for projects, products, or
+services. Authorized use of Microsoft trademarks or logos must follow
+[Microsoft's Trademark and Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
+Use of Microsoft trademarks or logos in modified versions of this project
+must not cause confusion or imply Microsoft sponsorship. Any use of
+third-party trademarks or logos is subject to those parties' policies.
