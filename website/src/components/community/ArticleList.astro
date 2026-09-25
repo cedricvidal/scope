@@ -19,8 +19,14 @@ const articles = limit === undefined ? all : all.slice(0, limit);
 	{
 		articles.map(({ data }) => (
 			<li class="community-article">
-				<a class="community-article__title" href={data.url} rel="noopener">
+				<a
+					class="community-article__title"
+					href={data.url}
+					target="_blank"
+					rel="noopener noreferrer"
+				>
 					{data.title}
+					<span class="sr-only"> (opens in a new tab)</span>
 				</a>
 				<span class="community-article__authors">
 					<Byline people={data.authors} />

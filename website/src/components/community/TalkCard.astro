@@ -39,7 +39,10 @@ const { data } = Astro.props.talk;
 		<h3 class="community-talk__title">{data.title}</h3>
 		<p class="community-talk__speakers"><Byline people={data.speakers} /></p>
 		<p class="community-talk__meta">
-			<a href={data.eventUrl} rel="noopener">{data.event}</a>
+			<a href={data.eventUrl} target="_blank" rel="noopener noreferrer">
+				{data.event}
+				<span class="sr-only"> (opens in a new tab)</span>
+			</a>
 			{' · '}
 			{data.venue}
 			{' · '}

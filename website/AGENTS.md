@@ -199,7 +199,10 @@ profile (e.g. their Luma bio).
 If a date can't be confirmed, leave `date` out; undated articles
 sort last. A talk without `youtubeId` shows "Video coming soon".
 Both lists sort newest first. A missing field, bad URL, or bad date
-fails `pnpm run build`.
+fails `pnpm run build`. Article and event links are external, so the
+components open them in a new tab (`target="_blank"
+rel="noopener noreferrer"`) with a screen-reader "(opens in a new
+tab)" hint; keep that pattern for any new external link.
 
 ### Style
 
