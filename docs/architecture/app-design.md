@@ -30,6 +30,7 @@ flowchart LR
 | `judge` | Evaluation engine — executes criteria against agent output |
 | `shared` | Types, database models, queue/blob/redis clients, config loaders, codebase/skill stores and clients |
 | `workers/*` | Coding agent adapters — each implements the same interface for a different agent |
+| `test-utils` | Shared ACP worker integration-test harness and Docker helpers |
 | `static-prompt-evals` | Mixed TypeScript/Python developer tooling for static prompt quality and user-controlled prompt red teaming |
 
 ## Data Model
