@@ -813,9 +813,11 @@ jobs:
               - 'apps/portal/**'
             coder-acp-copilot:
               - 'apps/workers/coder-acp-copilot/**'
+              - 'packages/test-utils/**'
             coder-acp-claude-code:
               - 'apps/workers/coder-acp-claude-code/**'
               - 'packages/copilot-driver-ext/**'
+              - 'packages/test-utils/**'
             token-manager:
               - 'apps/token-manager/**'
             model-scanner-copilot:
@@ -839,6 +841,7 @@ jobs:
               - 'scripts/build-windows-worker.ps1'
               - 'pnpm-workspace.yaml'
               - '.dockerignore'
+              - 'packages/test-utils/**'
             typescript:
               - '.github/workflows/ci.yml'
               - '.github/workflows/publish-cli.yml'
