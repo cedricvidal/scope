@@ -119,7 +119,7 @@ pnpm test:coverage                # Unit tests with a coverage report
 pnpm test:integration             # Integration tests (requires a .env file + Docker)
 ```
 
-[CI's](./.github/workflows/ci.yml) worker integration and queue recovery jobs
+[CI's](./.github/workflows/ci.yml) worker integration, queue recovery and Windows build jobs
 require `github.repository == 'microsoft/scope'`: they do not execute in fork
 repositories. A fork PR into upstream still runs the ACP workers' tool checks and
 the disposable MongoDB/Redis/Azurite queue tests. Worker credentials are withheld
@@ -140,14 +140,25 @@ workers have no Dockerfiles or integration suites in this repository.
 Live-model credentials remain necessary for live-auth tests; passing public
 tool checks does not validate live-model access.
 
-The internal `scope-core` repository is separate. Its ACR publishers (including
-Windows base images), cross-repository infrastructure status report, and
-FLUX-token CLI publication to `scope-doc` are not OSS automation and have been
-removed here. This does not change that repository, local Docker builds, the CLI
-bundle/build tests, or public GitHub Pages. OSS automated binary-release
-publishing is not implemented by this change; legacy CLI installation/updater
-references remain a separate distribution migration topic. See
-[CLI distribution](./docs/architecture/cli-distribution.md).
+Windows validation uses GitHub's `windows-2022` runner and its Windows Docker
+engine. `scripts/build-windows-worker.ps1` builds `Dockerfile.base` from public
+`servercore:ltsc2022`, builds pinned Copilot dependencies against that local image,
+then builds and smoke-tests the worker against the local dependencies image.
+No internal registry, prebuilt private image, secrets or image publication is
+required. Changes to the Windows worker, Linux Copilot dependency, shared packages,
+telemetry, workspace/build context, or CI select this check; failures block
+CI Summary. Run the same script locally on Windows Server 2022 with Docker.
+The PowerShell orchestration tests require `pwsh` (included on GitHub's Ubuntu
+runners); they mock Docker and do not replace the hosted Windows image build.
+
+The OSS repository does not depend on internal `scope-core` automation. The
+internal infrastructure status report and cloud image publishers are removed;
+Windows build validation is local, while CLI release publication is retained in
+this repository using its own `GITHUB_TOKEN`. Public Pages is unchanged. The
+manual CLI release workflow runs only on upstream `main`, builds and tests the
+exact bundle before publishing it to `microsoft/scope`, and needs no FLUX token.
+See [CLI distribution](./docs/architecture/cli-distribution.md) for versioning,
+installation and update behavior.
 
 ## Build, lint, and typecheck
 

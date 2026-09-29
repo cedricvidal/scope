@@ -5,14 +5,16 @@ Command-line interface for the Scope AI coding agent benchmarking platform.
 ## Installation
 
 ```bash
-gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H "Accept: application/vnd.github.raw" | bash
+curl --fail --location https://raw.githubusercontent.com/microsoft/scope/main/install-cli.sh | bash
 ```
 
 **Prerequisites:**
 - Node.js >= 20
-- `gh` CLI installed and authenticated (`gh auth login`)
+- `curl` (no GitHub authentication required for installation)
 
-The installer downloads the latest release and places `scope` in `~/.local/bin/`. Add it to your PATH if needed:
+The installer downloads the latest published `cli/v*` release from `microsoft/scope`
+and places `scope` in `~/.local/bin/` (override with `SCOPE_INSTALL_DIR`). It fails
+clearly if no CLI release has been published yet. Add it to your PATH if needed:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -90,10 +92,12 @@ Update to the latest version:
 scope update
 ```
 
-Or re-run the install script:
+This command requires `gh` installed and authenticated (`gh auth login`) and
+downloads from the same public `microsoft/scope` repository.
+Alternatively, re-run the install script without `gh`:
 
 ```bash
-gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H "Accept: application/vnd.github.raw" | bash
+curl --fail --location https://raw.githubusercontent.com/microsoft/scope/main/install-cli.sh | bash
 ```
 
 The CLI will also notify you when a newer version is available. Suppress this with:

@@ -1,0 +1,114 @@
+name: Publish CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        required: true
+        default: minor
+        type: choice
+        options: [patch, minor, major]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-cli
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Build and test release bundle
+    if: github.repository == 'microsoft/scope' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.29.1 --activate
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Resolve next CLI version
+        id: version
+        working-directory: apps/cli
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import { readFileSync, appendFileSync } from 'node:fs';
+          import semver from 'semver';
+          if (!['patch', 'minor', 'major'].includes(process.env.BUMP)) throw new Error('Invalid version bump');
+          const tags = execFileSync('git', ['tag', '--list', 'cli/v*'], { encoding: 'utf8' }).trim();
+          const versions = tags ? tags.split('\n').map(tag => {
+            const version = tag.slice('cli/v'.length);
+            if (!semver.valid(version)) throw new Error(`Invalid CLI tag: ${tag}`);
+            return version;
+          }) : [];
+          let current = versions.sort(semver.rcompare)[0];
+          if (!current) {
+            const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+            const baseline = semver.parse(pkg.version);
+            if (!baseline) throw new Error('Invalid package version for initial release');
+            current = `${baseline.major}.${baseline.minor}.${baseline.patch}`;
+            console.log(`No cli/v* tags: bootstrapping from package version ${pkg.version} (release baseline ${current})`);
+          }
+          const version = semver.inc(current, process.env.BUMP);
+          if (!version) throw new Error('Unable to increment CLI version');
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          NODE
+      - name: Set release version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: pnpm --dir apps/cli version "$VERSION" --no-git-tag-version
+      - name: Build CLI bundle
+        run: pnpm build:cli
+      - name: Test release bundle
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SCOPE_NO_UPDATE_CHECK: "1"
+        run: |
+          test "$(node apps/cli/dist/scope.mjs --version)" = "$VERSION"
+          pnpm exec vitest run --config vitest.integration.config.ts apps/cli/src/bundle.integration.test.ts
+      - name: Upload tested bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-release-bundle
+          path: apps/cli/dist/scope.mjs
+          if-no-files-found: error
+
+  publish:
+    name: Publish public CLI release
+    needs: test
+    if: github.repository == 'microsoft/scope' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-release-bundle
+          path: bundle
+      - name: Create release in this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.test.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          gh release create "cli/v${VERSION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$COMMIT" \
+            --title "Scope CLI v${VERSION}" \
+            --notes "Standalone Scope CLI. Install: https://github.com/microsoft/scope/blob/main/apps/cli/README.md#installation" \
+            bundle/scope.mjs

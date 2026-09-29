@@ -1,24 +1,19 @@
 # CLI Distribution
 
-How the Scope CLI is bundled, and how the legacy standalone distribution path works.
-
-The OSS repository retains CLI source, local bundling, bundle integration tests,
-and existing installation/update functionality. Its former `publish-cli.yml`
-workflow depended on a FLUX GitHub App scoped to `growth-ecosystems/scope-core`
-and `growth-ecosystems/scope-doc` and has been removed. This repository does not currently
-automate standalone binary releases. No replacement release architecture or
-change to legacy updater URLs is introduced here.
+How the Scope CLI is bundled, released, installed and updated from the public
+`microsoft/scope` repository without internal repository dependencies.
 
 ## Overview
 
 The CLI is bundled into a single `.mjs` file using [esbuild](https://esbuild.github.io/).
-The legacy distribution path uses GitHub Releases on `scope-doc` and installation
-through the `gh` CLI. Access to that target is separate from access to the public
-OSS repository; its current support/availability is not established by this doc.
+The manual release workflow builds and tests the bundle, then publishes it to
+GitHub Releases in the same repository. The installer and updater use that public
+release destination.
 
 ```mermaid
 flowchart LR
-    A[Legacy internal publication] --> C[Legacy scope-doc releases<br/>scope.mjs]
+    A[microsoft/scope<br/>publish-cli.yml] -->|Build and test| B[Validated bundle]
+    B -->|GITHUB_TOKEN| C[microsoft/scope releases<br/>scope.mjs]
     C -->|install-cli.sh| D[User workstation<br/>~/.local/bin/scope]
 ```
 
@@ -47,7 +42,7 @@ the CLI's `build` script runs `tsc --noEmit` **before** esbuild:
 
 Because the OSS CI entry points invoke the CLI `build` script — `pnpm build` (`pnpm -r build`,
 used by the CI **Build** job) and `pnpm build:cli` (used by the
-**CLI Bundle Integration Tests** job) — the CLI is now typechecked automatically wherever it is
+**CLI Bundle Integration Tests** and release jobs) — the CLI is now typechecked automatically wherever it is
 built, with no separate CI step. `tsc` requires the `shared` package's `dist` to exist; every one
 of these entry points builds `shared` first (topologically for `pnpm -r`, explicitly for
 `build:cli`), which esbuild already required, so there is no new ordering constraint.
@@ -84,51 +79,70 @@ In dev mode (`pnpm cli` via tsx), these defines are not applied — the CLI fall
 
 ## Versioning
 
-The legacy release workflow used git tags on `scope-core` with the `cli/v*`
-prefix (e.g. `cli/v0.2.0`) as its version source. The `apps/cli/package.json`
-version remains `0.0.0-dev` for local builds. The OSS repository has no replacement
-automated version-bump/release workflow.
+The release workflow sorts valid `cli/v*` tags in `microsoft/scope` semantically
+and bumps the highest version by the selected `patch`, `minor` or `major` increment.
+Only when there are no matching tags does it bootstrap from the validated
+`apps/cli/package.json` version's major/minor/patch components, logging that
+decision and removing the development prerelease suffix before bumping. With the current
+`0.0.0-dev` baseline, the default minor bump produces `0.1.0`. Invalid tags,
+invalid package versions, and tag-read/fetch failures fail the workflow rather
+than masquerading as an empty release history.
+
+The version is written only in the release workspace before building; it is not
+committed back to `main`. The release tag targets the exact checked-out source SHA.
+Workflow-level concurrency serializes version selection through publication,
+without cancelling an in-progress release.
 
 - Local builds produce `0.0.0-dev` — clearly indicating a dev build.
 - Dev mode (`pnpm cli`) reports `0.1.0-dev`.
-- Legacy release builds carry a real version number.
+- Release builds carry the selected version number.
 - The `cli/v*` prefix allows other monorepo components to have their own tag namespaces.
 
-## Publishing ownership
+## Publishing
 
-The removed internal-token-dependent workflow created a tag in its source
-repository and a release in `growth-ecosystems/scope-doc`, rather than
-`microsoft/scope`. It required cross-repository GitHub App credentials.
-Do not configure those internal credentials in OSS to restore it.
+Maintainers manually dispatch [Publish CLI](../../.github/workflows/publish-cli.yml)
+on upstream `main` and select a bump type (default: minor). The read-only build
+job checks out full tag history, installs locked dependencies, sets the version,
+runs the typechecked bundle build and bundle integration tests, and checks the
+bundle's reported version. The separate publish job downloads that exact artifact
+and creates `cli/v<version>` with `scope.mjs` attached.
 
-OSS CI still builds and tests the CLI bundle and uploads it as an Actions
-artifact. A public standalone release destination, versioning policy, installer,
-and updater migration need to be defined together in a separate change.
+Only the publish job gets `contents: write`, using this repository's
+`GITHUB_TOKEN`. Fork repositories and non-main refs cannot publish. No FLUX app,
+internal release repository, cloud environment, OIDC or custom secret is needed.
+Repository rules must permit the workflow token to create release tags; rules
+are not changed by this workflow. No release exists until a maintainer explicitly
+runs it successfully.
 
-## Legacy installation
+## Installation
 
-Users install via the `gh` CLI (required since the repo is EMU-protected):
+Use the public installer with Node.js >= 20 and `curl`:
 
 ```bash
-gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H "Accept: application/vnd.github.raw" | bash
+curl --fail --location https://raw.githubusercontent.com/microsoft/scope/main/install-cli.sh | bash
 ```
 
-The installer (`install-cli.sh` in scope-doc):
-1. Downloads `scope.mjs` from the latest `cli/v*` release
-2. Places it at `~/.local/bin/scope`
-3. Makes it executable
+The installer selects a published, non-prerelease `cli/v*` release and downloads
+`scope.mjs` with bounded retries. It verifies the reported version before
+atomically replacing `~/.local/bin/scope` (`SCOPE_INSTALL_DIR` overrides the
+directory). Missing releases, API/download errors and version mismatches fail
+explicitly without replacing an existing installation. Installation does not
+require GitHub authentication; public API rate limits still apply.
 
-Prerequisites: Node.js >= 20, `gh` CLI authenticated.
+`scope update` retains its `gh release download` implementation, so updating
+in-place requires `gh` configured with GitHub authentication. Alternatively,
+rerun the public installer without `gh`.
 
 ## Update check
 
 After each command, the CLI performs a non-blocking check for newer versions:
 
-- Queries the GitHub Releases API on `scope-doc` (3s timeout)
+- Checks `cli/v*` releases in `microsoft/scope` (2s per background lookup attempt)
 - Compares the current embedded version against the latest release tag
 - If newer, prints a one-line notice with the upgrade command
 - Suppressed by `SCOPE_NO_UPDATE_CHECK=1`
-- Requires `GH_TOKEN` or `GITHUB_TOKEN` for private repo access (silently skips without it)
+- Uses `gh` when available, falling back to the public REST API; `GH_TOKEN` or
+  `GITHUB_TOKEN` is optional for that fallback
 
 This is the **one** place in the CLI that calls `fetch` directly rather than the
 centralized `apiFetch()` wrapper (`apps/cli/src/utils/api-client.ts`): it targets the

@@ -2,7 +2,7 @@ ARG COPILOT_CLI_VERSION
 ARG DEPS_IMAGE
 
 # --- Base stage: pre-built image with Node.js, Git, pnpm, and Copilot CLI ---
-# Build Dockerfile.base and Dockerfile.deps separately, then pass DEPS_IMAGE.
+# scripts/build-windows-worker.ps1 builds base, deps and worker images locally.
 FROM ${DEPS_IMAGE} AS base
 
 # --- Builder stage: compile TypeScript ---
@@ -18,7 +18,7 @@ COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/workers/coder-acp-copilot/package.json ./apps/workers/coder-acp-copilot/
 COPY apps/workers/coder-acp-copilot-windows/package.json ./apps/workers/coder-acp-copilot-windows/
 
-RUN C:\tools\pnpm.exe install --frozen-lockfile
+RUN C:\tools\pnpm.exe install --frozen-lockfile; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
@@ -29,7 +29,10 @@ COPY apps/workers/coder-acp-copilot/src ./apps/workers/coder-acp-copilot/src/
 COPY apps/workers/coder-acp-copilot-windows/tsconfig.json ./apps/workers/coder-acp-copilot-windows/
 COPY apps/workers/coder-acp-copilot-windows/src ./apps/workers/coder-acp-copilot-windows/src/
 
-RUN C:\tools\pnpm.exe --filter shared build; C:\tools\pnpm.exe --filter telemetry build; C:\tools\pnpm.exe --filter coder-acp-copilot build; C:\tools\pnpm.exe --filter coder-acp-copilot-windows build
+RUN C:\tools\pnpm.exe --filter shared build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; \
+    C:\tools\pnpm.exe --filter telemetry build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; \
+    C:\tools\pnpm.exe --filter coder-acp-copilot build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; \
+    C:\tools\pnpm.exe --filter coder-acp-copilot-windows build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Pre-convert agent.yaml to JSON so the registration job doesn't need the yaml package at runtime
 COPY apps/workers/coder-acp-copilot-windows/agent.yaml ./apps/workers/coder-acp-copilot-windows/agent.yaml
@@ -49,7 +52,7 @@ COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/workers/coder-acp-copilot/package.json ./apps/workers/coder-acp-copilot/
 COPY apps/workers/coder-acp-copilot-windows/package.json ./apps/workers/coder-acp-copilot-windows/
 
-RUN C:\tools\pnpm.exe install --frozen-lockfile --prod
+RUN C:\tools\pnpm.exe install --frozen-lockfile --prod; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 COPY --from=builder C:/app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder C:/app/packages/telemetry/dist ./packages/telemetry/dist/
