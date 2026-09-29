@@ -22,7 +22,8 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Configuration
 
-Set the API URL to your Scope instance:
+There is no default API URL in either the installed CLI or source-mode
+development. Set the URL of your Scope instance explicitly:
 
 ```bash
 export SCOPE_API_URL=https://your-scope-api.example.com
@@ -33,6 +34,12 @@ Or pass it per-command with `-u`:
 ```bash
 scope run list -u https://your-scope-api.example.com
 ```
+
+API operations fail with configuration guidance when no URL is supplied.
+`--help`, `--version`, and `scope update` do not need a Scope API URL.
+`SCOPE_DEFAULT_API_URL` and `SCOPE_API_PORT` no longer select an API destination.
+For local development, set `SCOPE_API_URL=http://localhost:<your-api-port>`
+explicitly (in your environment or `.env`).
 
 ### Authentication
 
@@ -110,8 +117,7 @@ export SCOPE_NO_UPDATE_CHECK=1
 
 | Variable | Description |
 |----------|-------------|
-| `SCOPE_API_URL` | Default API base URL |
-| `SCOPE_API_PORT` | Derive API URL as `http://localhost:$PORT` when `SCOPE_API_URL` is unset |
+| `SCOPE_API_URL` | API base URL; required for API operations unless `-u` is provided. No default |
 | `SCOPE_TOKEN` | Caller-provided IdP access token for authenticated API calls; new identities must explicitly enroll |
 | `SCOPE_NO_UPDATE_CHECK` | Set to `1` to suppress update notifications |
 | `GH_TOKEN` / `GITHUB_TOKEN` | GitHub token for authenticated API calls (update checks, install script) |
