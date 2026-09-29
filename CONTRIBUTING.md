@@ -119,6 +119,67 @@ pnpm test:coverage                # Unit tests with a coverage report
 pnpm test:integration             # Integration tests (requires a .env file + Docker)
 ```
 
+### CI repository and fork boundaries
+
+The four repository-gated jobs in [CI](./.github/workflows/ci.yml) intentionally
+require `github.repository == 'microsoft/scope'`. They must not run when the
+workflow executes in a fork repository. Do not remove this restriction or
+replace it with an opt-in variable.
+
+A fork **PR into upstream** is different: its workflow executes in
+`microsoft/scope`, but its head code is untrusted.
+
+| Job | Upstream fork-head PR | Upstream same-repository PR, main push, or manual run |
+| --- | --- | --- |
+| Queue recovery integration | Runs when selected | Runs when selected |
+| Worker integration | Skipped | Runs when selected |
+| Linux / Windows image publishing | Skipped | Runs when selected, with existing prerequisite checks |
+
+Selection still depends on the existing changed paths and manual `images`
+input. Other public validation jobs remain available; this is not a global
+fork-CI disable switch. LLM evals also skip fork-head PRs because they use a PAT.
+All CI jobs use GitHub-hosted Ubuntu runners, not self-hosted runners.
+
+Queue recovery provisions disposable MongoDB, Redis, and Azurite containers and
+pulls public images without Docker Hub credentials. Validation jobs use read-only
+GitHub permissions; test results and coverage remain in Actions summaries and
+artifacts rather than PR comments. Only image-publishing jobs request OIDC.
+Neither approval of a fork workflow nor a label grants it access to privileged
+jobs. Never use `pull_request_target` to execute fork code.
+
+**Maintainer prerequisites:** repository identity is necessary, not proof that
+cloud credentials or infrastructure exist. Before relying on the restored jobs:
+
+- For live Copilot worker tests and LLM evals, provide `COPILOT_GITHUB_TOKEN` as a
+  repository/organization secret with the required Copilot entitlement / GitHub
+  Models access. Without it, existing live tests self-skip; that is not evidence
+  they passed. Claude live-prompt credentials remain disabled; its tool checks
+  still run. The worker matrix covers the current Copilot and Claude ACP workers,
+  not the removed VS Code workers.
+- For publishing, configure the `integration` environment with
+  `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `ACR_NAME`, and
+  `ACR_RESOURCE_GROUP` variables. Configure Azure federation for
+  `repo:microsoft/scope:environment:integration`, with registry-scoped read/push
+  permissions and ACR Tasks build permissions for Windows. Missing setup is a
+  publishing failure, not a reason to bypass checks.
+- Protect the environment with required reviewers and deployment-ref restrictions
+  matching the release policy, including any reviewed same-repository PR refs
+  allowed to publish. Protect workflow changes through code review. Do not grant
+  Azure trust or privileged runners to fork repositories to make their CI pass.
+
+Gate regression tests evaluate the actual workflow expressions, distinguish the
+workflow repository from the PR head repository, and check failure/cancellation
+handling. Run the focused checks with:
+
+```bash
+pnpm exec vitest run scripts/ci-workflow.test.ts
+pnpm test:integration:queue       # Real disposable services; Docker required
+go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck= .github/workflows/ci.yml
+```
+
+The regression tests also parse inline Bash with `bash -n`; the actionlint command
+does not require a local ShellCheck installation.
+
 ## Build, lint, and typecheck
 
 ```bash

@@ -37,10 +37,7 @@ on:
         default: ""
 
 permissions:
-  id-token: write
   contents: read
-  pull-requests: write
-  issues: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -101,7 +98,7 @@ jobs:
           name: coverage-reports-node-${{ matrix.node-version }}
           path: coverage/
 
-      - name: Post coverage summary to Pull Request
+      - name: Write coverage summary
         if: always() && github.event_name == 'pull_request'
         run: |
           node -e "
@@ -121,19 +118,6 @@ jobs:
           ];
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
           "
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Post test results to Pull Request
-        if: always() && github.event_name == 'pull_request'
-        run: |
-          pnpm exec github-actions-ctrf pull-request "ctrf/*-ctrf-report.json" --title "Test Results (Node.js ${{ matrix.node-version }})" || {
-            echo "⚠️ Failed to post PR comment (may be due to permissions)"
-            echo "✅ Test results are still available in the Actions summary above"
-            exit 0
-          }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload CTRF test results
         uses: actions/upload-artifact@v4
@@ -148,14 +132,14 @@ jobs:
   # orientation eval (origin: #1225) lives here today; adding more *.eval.test.ts
   # files makes them run in this same job. Path-filtered to eval files + prompt-gen
   # source and required via CI Summary (success-or-skipped). Self-skips when no LLM
-  # token is present.
+  # token is present. Never pass a PAT to a fork PR.
   # ---------------------------------------------------------------------------
   llm-evals:
     name: LLM Evals
     needs: [detect-changes]
     if: >
-      github.event_name == 'workflow_dispatch' ||
-      needs.detect-changes.outputs.evals == 'true'
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.evals == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -214,7 +198,8 @@ jobs:
     name: Integration Tests (${{ matrix.worker.name }})
     needs: [detect-changes]
     if: >-
-      github.repository == 'growth-ecosystems/scope-core' &&
+      github.repository == 'microsoft/scope' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (
         github.event_name == 'workflow_dispatch' ||
         needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
@@ -227,23 +212,6 @@ jobs:
       fail-fast: false
       matrix:
         worker:
-          - name: vscode-web
-            images: |
-              docker buildx build \
-                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
-                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-                --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
-                --load \
-                .
-              docker buildx build \
-                --target dev \
-                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
-                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-                --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
-                --load \
-                .
           - name: copilot-acp
             dockerfile: apps/workers/coder-acp-copilot/Dockerfile
             versions_env: apps/workers/coder-acp-copilot/versions.env
@@ -255,16 +223,6 @@ jobs:
                 -f apps/workers/coder-acp-copilot/Dockerfile \
                 --target dev \
                 --build-arg COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION \
-                --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
-                --load \
-                .
-          - name: vscode-electron
-            images: |
-              docker buildx build \
-                --target dev \
-                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
-                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
                 --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
@@ -330,12 +288,6 @@ jobs:
           key: docker-${{ matrix.worker.name }}-${{ hashFiles(matrix.worker.dockerfile, matrix.worker.versions_env) }}
           restore-keys: docker-${{ matrix.worker.name }}-
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Pre-build Docker test images
         run: |
           ${{ matrix.worker.images }}
@@ -348,10 +300,7 @@ jobs:
       - name: Run integration tests
         run: npx vitest run --config vitest.integration.config.ts --silent=false ${{ matrix.worker.test_pattern }}
         env:
-          GH_AUTH_USERNAME: ${{ secrets.GH_AUTH_USERNAME }}
-          GH_AUTH_PASSWORD: ${{ secrets.GH_AUTH_PASSWORD }}
-          GH_AUTH_TOTP_SECRET: ${{ secrets.GH_AUTH_TOTP_SECRET }}
-          GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ matrix.worker.name == 'copilot-acp' && secrets.COPILOT_GITHUB_TOKEN || '' }}
           # NOTE: Claude Code credentials disabled — out of budget.
           # The expensive "completes coding prompts" test auto-skips when
           # these are absent; tool-check tests still run.
@@ -379,23 +328,6 @@ jobs:
           path: test-snapshots/
           if-no-files-found: ignore
 
-      - name: Collect test videos
-        if: always()
-        run: |
-          mkdir -p test-videos
-          i=0; find apps/workers/*/test-output -name "*.webm" | sort | while read f; do
-            cp "$f" "test-videos/recording-$i.webm"
-            i=$((i+1))
-          done
-
-      - name: Upload test videos
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-videos-${{ matrix.worker.name }}
-          path: test-videos/
-          if-no-files-found: ignore
-
   # ---------------------------------------------------------------------------
   # Queue recovery integration tests (stuck-run fix). Self-provision their own
   # MongoDB/Redis/Azurite via testcontainers — no docker-compose infra needed.
@@ -404,7 +336,7 @@ jobs:
     name: Integration Tests (queue recovery)
     needs: [detect-changes]
     if: >-
-      github.repository == 'growth-ecosystems/scope-core' &&
+      github.repository == 'microsoft/scope' &&
       (
         github.event_name == 'workflow_dispatch' ||
         needs.detect-changes.outputs.shared == 'true' ||
@@ -439,14 +371,7 @@ jobs:
       - name: Build shared packages
         run: pnpm --filter shared build
 
-      # mongo:7.0 and redis are pulled from Docker Hub; authenticate to avoid
-      # anonymous pull-rate limits. (Azurite comes from mcr.microsoft.com.)
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
+      # Pull public MongoDB/Redis/Azurite images anonymously, including on forks.
       - name: Run queue recovery integration tests
         run: pnpm vitest run --config vitest.integration.config.ts --silent=false packages/shared/src/queue/redelivery.integration.test.ts apps/scheduler/src/stuck-run-reaper.integration.test.ts
 
@@ -661,16 +586,6 @@ jobs:
         run: |
           npx github-actions-ctrf "ctrf/gateway-ctrf-report.json" --title "Gateway: lint, test & build"
 
-      - name: Post test results to Pull Request
-        if: always() && github.event_name == 'pull_request'
-        run: |
-          npx github-actions-ctrf pull-request "ctrf/gateway-ctrf-report.json" --title "Gateway: lint, test & build" || {
-            echo "⚠️ Failed to post PR comment (may be due to permissions)"
-            exit 0
-          }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload CTRF test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -754,6 +669,9 @@ jobs:
   # ---------------------------------------------------------------------------
   detect-changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       api: ${{ steps.changes.outputs.api }}
       judge: ${{ steps.changes.outputs.judge }}
@@ -783,6 +701,7 @@ jobs:
           base: ${{ github.event.before }}
           filters: |
             shared:
+              - '.github/workflows/ci.yml'
               - 'packages/shared/**'
               - 'package.json'
               - 'pnpm-lock.yaml'
@@ -820,6 +739,8 @@ jobs:
               - 'apps/workers/coder-acp-copilot-windows/**'
               - 'apps/workers/coder-acp-copilot/versions.env'
             typescript:
+              - '.github/workflows/ci.yml'
+              - 'scripts/ci-workflow.test.ts'
               - 'apps/**'
               - '!apps/gateway/**'
               - 'packages/**'
@@ -843,7 +764,8 @@ jobs:
     if: >-
       always() &&
       !cancelled() &&
-      github.repository == 'growth-ecosystems/scope-core' &&
+      github.repository == 'microsoft/scope' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.test.result == 'success' || needs.test.result == 'skipped') &&
       (needs.build.result == 'success' || needs.build.result == 'skipped') &&
       (needs.gateway.result == 'success' || needs.gateway.result == 'skipped') &&
@@ -872,6 +794,9 @@ jobs:
     needs: [test, integration-test, integration-test-queue, build, gateway, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -924,8 +849,9 @@ jobs:
       - name: Check if image should be built (manual trigger)
         id: check
         if: github.event_name == 'workflow_dispatch'
+        env:
+          IMAGES: ${{ inputs.images }}
         run: |
-          IMAGES="${{ github.event.inputs.images }}"
           if [[ "$IMAGES" == "all" ]] || echo "$IMAGES" | grep -qw "${{ matrix.image.name }}"; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
@@ -977,8 +903,6 @@ jobs:
               VERSION_PREFIX="copilot-${COPILOT_CLI_VERSION}" ;;
             coder-acp-claude-code)
               VERSION_PREFIX="claude-agent-acp-${CLAUDE_CODE_ACP_VERSION}-sdk-${CLAUDE_AGENT_SDK_VERSION}" ;;
-              VERSION_PREFIX="vscode-${VSCODE_VERSION}-copilot-${COPILOT_CHAT_VERSION}" ;;
-              VERSION_PREFIX="vscode-electron-${VSCODE_VERSION}-copilot-${COPILOT_CHAT_VERSION}" ;;
           esac
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
@@ -1051,7 +975,8 @@ jobs:
     if: >-
       always() &&
       !cancelled() &&
-      github.repository == 'growth-ecosystems/scope-core' &&
+      github.repository == 'microsoft/scope' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.test.result == 'success' || needs.test.result == 'skipped') &&
       (
         (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || contains(github.event.inputs.images, 'coder-acp-copilot-windows'))) ||
@@ -1060,6 +985,9 @@ jobs:
     needs: [test, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -1123,7 +1051,7 @@ jobs:
           WORKER_DIR="apps/workers/coder-acp-copilot-windows"
           ACR_LOGIN_SERVER="${{ steps.base.outputs.acr_login_server }}"
 
-          DEPS_HASH=$(cat ${WORKER_DIR}/Dockerfile.deps ${WORKER_DIR}/versions.env ${WORKER_DIR}/Dockerfile.base | sha256sum | cut -c1-12)
+          DEPS_HASH=$(cat ${WORKER_DIR}/Dockerfile.deps apps/workers/coder-acp-copilot/versions.env ${WORKER_DIR}/Dockerfile.base | sha256sum | cut -c1-12)
           DEPS_TAG="deps-${DEPS_HASH}"
           DEPS_IMAGE="${ACR_LOGIN_SERVER}/scoped/coder-acp-copilot-windows-deps:${DEPS_TAG}"
 
