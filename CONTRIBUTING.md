@@ -119,6 +119,26 @@ pnpm test:coverage                # Unit tests with a coverage report
 pnpm test:integration             # Integration tests (requires a .env file + Docker)
 ```
 
+CI's worker integration, queue recovery, and image-publishing jobs intentionally
+require `github.repository == 'microsoft/scope'`: they do not execute in fork
+repositories. A fork PR into upstream still runs the ACP workers' tool checks and
+the disposable MongoDB/Redis/Azurite queue tests. Worker credentials are withheld
+from fork-head code, so the existing live-auth tests skip when credentials are
+absent. Docker Hub login is optional and restricted to trusted code; public images
+can be pulled anonymously. LLM evals and Azure image publishing require trusted
+PR heads; OIDC is granted only to the publishing jobs. PR test reporting and video
+uploads remain enabled, with missing video directories treated as no recordings.
+
+Changes to the CI workflow select the integration checks through a dedicated
+path filter without selecting every application image. Run the focused workflow
+regressions with `pnpm exec vitest run scripts/ci-workflow.test.ts` and the real
+queue tests with `pnpm test:integration:queue` (Docker required).
+The ACP matrix covers the existing Copilot and Claude workers; the removed VS Code
+workers have no Dockerfiles or integration suites in this repository.
+Live-model credentials and the `integration` environment's Azure/OIDC/ACR
+configuration remain maintainer prerequisites; passing public tests does not
+validate cloud publishing or live-model access.
+
 ## Build, lint, and typecheck
 
 ```bash

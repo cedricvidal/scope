@@ -37,7 +37,6 @@ on:
         default: ""
 
 permissions:
-  id-token: write
   contents: read
   pull-requests: write
   issues: write
@@ -154,8 +153,8 @@ jobs:
     name: LLM Evals
     needs: [detect-changes]
     if: >
-      github.event_name == 'workflow_dispatch' ||
-      needs.detect-changes.outputs.evals == 'true'
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.evals == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -217,33 +216,22 @@ jobs:
       github.repository == 'microsoft/scope' &&
       (
         github.event_name == 'workflow_dispatch' ||
+        needs.detect-changes.outputs.ci == 'true' ||
         needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
         needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
         needs.detect-changes.outputs.shared == 'true'
       )
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      TRUSTED_CODE: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+      DOCKERHUB_LOGIN_ENABLED: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
 
     strategy:
       fail-fast: false
       matrix:
         worker:
-          - name: vscode-web
-            images: |
-              docker buildx build \
-                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
-                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-                --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
-                --load \
-                .
-              docker buildx build \
-                --target dev \
-                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
-                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-                --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
-                --load \
-                .
           - name: copilot-acp
             dockerfile: apps/workers/coder-acp-copilot/Dockerfile
             versions_env: apps/workers/coder-acp-copilot/versions.env
@@ -255,16 +243,6 @@ jobs:
                 -f apps/workers/coder-acp-copilot/Dockerfile \
                 --target dev \
                 --build-arg COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION \
-                --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
-                --load \
-                .
-          - name: vscode-electron
-            images: |
-              docker buildx build \
-                --target dev \
-                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
-                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
                 --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
@@ -331,6 +309,7 @@ jobs:
           restore-keys: docker-${{ matrix.worker.name }}-
 
       - name: Log in to Docker Hub
+        if: env.TRUSTED_CODE == 'true' && env.DOCKERHUB_LOGIN_ENABLED == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -348,10 +327,10 @@ jobs:
       - name: Run integration tests
         run: npx vitest run --config vitest.integration.config.ts --silent=false ${{ matrix.worker.test_pattern }}
         env:
-          GH_AUTH_USERNAME: ${{ secrets.GH_AUTH_USERNAME }}
-          GH_AUTH_PASSWORD: ${{ secrets.GH_AUTH_PASSWORD }}
-          GH_AUTH_TOTP_SECRET: ${{ secrets.GH_AUTH_TOTP_SECRET }}
-          GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          GH_AUTH_USERNAME: ${{ env.TRUSTED_CODE == 'true' && secrets.GH_AUTH_USERNAME || '' }}
+          GH_AUTH_PASSWORD: ${{ env.TRUSTED_CODE == 'true' && secrets.GH_AUTH_PASSWORD || '' }}
+          GH_AUTH_TOTP_SECRET: ${{ env.TRUSTED_CODE == 'true' && secrets.GH_AUTH_TOTP_SECRET || '' }}
+          GITHUB_TOKEN: ${{ env.TRUSTED_CODE == 'true' && secrets.COPILOT_GITHUB_TOKEN || '' }}
           # NOTE: Claude Code credentials disabled — out of budget.
           # The expensive "completes coding prompts" test auto-skips when
           # these are absent; tool-check tests still run.
@@ -383,7 +362,7 @@ jobs:
         if: always()
         run: |
           mkdir -p test-videos
-          i=0; find apps/workers/*/test-output -name "*.webm" | sort | while read f; do
+          i=0; find apps/workers -type f -path "*/test-output/*" -name "*.webm" | sort | while IFS= read -r f; do
             cp "$f" "test-videos/recording-$i.webm"
             i=$((i+1))
           done
@@ -407,10 +386,15 @@ jobs:
       github.repository == 'microsoft/scope' &&
       (
         github.event_name == 'workflow_dispatch' ||
+        needs.detect-changes.outputs.ci == 'true' ||
         needs.detect-changes.outputs.shared == 'true' ||
         needs.detect-changes.outputs.scheduler == 'true'
       )
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      DOCKERHUB_LOGIN_ENABLED: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
 
     steps:
       - name: Checkout repository
@@ -439,9 +423,12 @@ jobs:
       - name: Build shared packages
         run: pnpm --filter shared build
 
-      # mongo:7.0 and redis are pulled from Docker Hub; authenticate to avoid
-      # anonymous pull-rate limits. (Azurite comes from mcr.microsoft.com.)
+      # Authenticate when available on trusted code; fork PRs use public images
+      # anonymously so missing secrets do not prevent these local-service tests.
       - name: Log in to Docker Hub
+        if: >-
+          env.DOCKERHUB_LOGIN_ENABLED == 'true' &&
+          (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -755,6 +742,7 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
+      ci: ${{ steps.changes.outputs.ci }}
       api: ${{ steps.changes.outputs.api }}
       judge: ${{ steps.changes.outputs.judge }}
       portal: ${{ steps.changes.outputs.portal }}
@@ -782,6 +770,9 @@ jobs:
         with:
           base: ${{ github.event.before }}
           filters: |
+            ci:
+              - '.github/workflows/ci.yml'
+              - 'scripts/ci-workflow.test.ts'
             shared:
               - 'packages/shared/**'
               - 'package.json'
@@ -820,6 +811,8 @@ jobs:
               - 'apps/workers/coder-acp-copilot-windows/**'
               - 'apps/workers/coder-acp-copilot/versions.env'
             typescript:
+              - '.github/workflows/ci.yml'
+              - 'scripts/ci-workflow.test.ts'
               - 'apps/**'
               - '!apps/gateway/**'
               - 'packages/**'
@@ -844,6 +837,7 @@ jobs:
       always() &&
       !cancelled() &&
       github.repository == 'microsoft/scope' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.test.result == 'success' || needs.test.result == 'skipped') &&
       (needs.build.result == 'success' || needs.build.result == 'skipped') &&
       (needs.gateway.result == 'success' || needs.gateway.result == 'skipped') &&
@@ -872,6 +866,9 @@ jobs:
     needs: [test, integration-test, integration-test-queue, build, gateway, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -977,7 +974,9 @@ jobs:
               VERSION_PREFIX="copilot-${COPILOT_CLI_VERSION}" ;;
             coder-acp-claude-code)
               VERSION_PREFIX="claude-agent-acp-${CLAUDE_CODE_ACP_VERSION}-sdk-${CLAUDE_AGENT_SDK_VERSION}" ;;
+            vscode-web)
               VERSION_PREFIX="vscode-${VSCODE_VERSION}-copilot-${COPILOT_CHAT_VERSION}" ;;
+            vscode-electron)
               VERSION_PREFIX="vscode-electron-${VSCODE_VERSION}-copilot-${COPILOT_CHAT_VERSION}" ;;
           esac
 
@@ -1052,6 +1051,7 @@ jobs:
       always() &&
       !cancelled() &&
       github.repository == 'microsoft/scope' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.test.result == 'success' || needs.test.result == 'skipped') &&
       (
         (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || contains(github.event.inputs.images, 'coder-acp-copilot-windows'))) ||
@@ -1060,6 +1060,9 @@ jobs:
     needs: [test, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -1123,7 +1126,7 @@ jobs:
           WORKER_DIR="apps/workers/coder-acp-copilot-windows"
           ACR_LOGIN_SERVER="${{ steps.base.outputs.acr_login_server }}"
 
-          DEPS_HASH=$(cat ${WORKER_DIR}/Dockerfile.deps ${WORKER_DIR}/versions.env ${WORKER_DIR}/Dockerfile.base | sha256sum | cut -c1-12)
+          DEPS_HASH=$(cat ${WORKER_DIR}/Dockerfile.deps apps/workers/coder-acp-copilot/versions.env ${WORKER_DIR}/Dockerfile.base | sha256sum | cut -c1-12)
           DEPS_TAG="deps-${DEPS_HASH}"
           DEPS_IMAGE="${ACR_LOGIN_SERVER}/scoped/coder-acp-copilot-windows-deps:${DEPS_TAG}"
 
