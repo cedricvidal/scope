@@ -974,10 +974,6 @@ jobs:
               VERSION_PREFIX="copilot-${COPILOT_CLI_VERSION}" ;;
             coder-acp-claude-code)
               VERSION_PREFIX="claude-agent-acp-${CLAUDE_CODE_ACP_VERSION}-sdk-${CLAUDE_AGENT_SDK_VERSION}" ;;
-            vscode-web)
-              VERSION_PREFIX="vscode-${VSCODE_VERSION}-copilot-${COPILOT_CHAT_VERSION}" ;;
-            vscode-electron)
-              VERSION_PREFIX="vscode-electron-${VSCODE_VERSION}-copilot-${COPILOT_CHAT_VERSION}" ;;
           esac
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
