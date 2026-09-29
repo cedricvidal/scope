@@ -60,9 +60,15 @@ of these entry points builds `shared` first (topologically for `pnpm -r`, explic
 | Define | Source | Purpose |
 |--------|--------|---------|
 | `process.env.SCOPE_CLI_VERSION` | `apps/cli/package.json` version | Reported by `--version` |
-| `process.env.SCOPE_DEFAULT_API_URL` | `SCOPE_DEFAULT_API_URL` env var or `https://msscope.azurewebsites.net` | Default API URL in bundled builds |
 
-In dev mode (`pnpm cli` via tsx), these defines are not applied — the CLI falls back to `http://localhost:3100`.
+There is no build-time or runtime default API destination. Both the bundle and
+source-mode CLI require `SCOPE_API_URL` or a command's `-u/--url` option
+(`--api-url` for MCP server create/update); the command-line option takes
+precedence. Missing or blank URLs fail before an API request with configuration
+guidance. `SCOPE_DEFAULT_API_URL` is no longer injected or read, and
+`SCOPE_API_PORT` no longer derives a localhost destination. Local development
+must also configure `SCOPE_API_URL` explicitly. Help, version, and CLI updates
+remain available without API configuration.
 
 ### esbuild plugins
 
@@ -75,7 +81,31 @@ In dev mode (`pnpm cli` via tsx), these defines are not applied — the CLI fall
 
 - **ESM format** with a `createRequire` polyfill banner (CJS won't work due to Ink's top-level await)
 - **All dependencies bundled** — no `node_modules` needed at runtime
+- **Pure shared runtime imports** — CLI gate constants and helpers come from
+  `shared/types` and `shared/gates`, not the top-level `shared` barrel. The barrel
+  also initializes server-side modules with dynamic Redis imports that esbuild
+  cannot bundle. Type-only imports from `shared` are safe because they are erased.
 - **Node.js >= 20 required** at runtime
+
+### Standalone bundle validation
+
+Build first, then exercise the actual artifact:
+
+```bash
+pnpm build:cli
+node apps/cli/dist/scope.mjs --version
+pnpm exec vitest run --config vitest.integration.config.ts \
+  apps/cli/src/bundle.integration.test.ts \
+  apps/cli/src/utils/update-check.integration.test.ts
+```
+
+Both suites copy the bundle outside the checkout and run it from that temporary
+directory using `process.execPath`, empty `NODE_PATH`/`NODE_OPTIONS`, and
+`--no-global-search-paths`. This prevents pnpm's Vitest launcher from making
+workspace dependencies available to the child process and hiding missing bundled
+modules. Coverage includes the extensionless installed `scope` executable, mock
+API commands, missing-URL failures, explicit URL precedence, offline help/version,
+and update checks; no release is published by these tests.
 
 ## Versioning
 
@@ -212,7 +242,7 @@ unique and need no project. See
 | Aspect | Dev (`pnpm cli`) | Bundled (`scope`) |
 |--------|-------------------|-------------------|
 | Runner | tsx (TypeScript direct) | Node.js (single .mjs) |
-| API default | `http://localhost:3100` | `https://msscope.azurewebsites.net` |
+| API default | None; configure `SCOPE_API_URL` or `-u` | None; configure `SCOPE_API_URL` or `-u` |
 | Version | `0.1.0-dev` | Embedded package version (`0.0.0-dev` locally) |
 | Command name | `pnpm cli` | `scope` |
 | Update check | Disabled | Enabled |
