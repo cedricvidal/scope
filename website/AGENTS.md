@@ -15,13 +15,24 @@ A static documentation site published to GitHub Pages.
   `website/`)
 - Deployed by `.github/workflows/static.yml` (build + deploy jobs),
   which builds from `website/` via a `working-directory` default and
-  `website/**` path filters; `site` and `base` are driven by
-  `actions/configure-pages` outputs with safe localhost defaults
+  `website/**` path filters; both PR and production builds explicitly use
+  `SITE=https://microsoft.github.io` and `BASE_PATH=/scope`.
+  Do not derive these from `actions/configure-pages` outputs, which can
+  report an isolated hostname instead of the public project URL.
+  Local development keeps localhost and `/` defaults.
 
 ## Where things live
 
 - `src/content/docs/` — all user-facing pages (`.md` and `.mdx`)
-  - `introduction/`, `getting-started/`, `guides/`, `reference/`, `resources/`
+  - `introduction/`, `getting-started/`, `guides/`, `reference/`,
+    `resources/`, `community/`
+- `src/content/articles/`, `src/content/talks/` — one YAML file per
+  published article / talk, schema-validated by the `articles` and
+  `talks` collections in `src/content.config.ts` (see
+  "Articles & talks" below)
+- `src/components/community/` — `ArticleList`, `TalkList`,
+  `TalkCard`, and `CommunityTeaser` (the landing-page section), all
+  reading those collections
   - Sidebar order is defined in `astro.config.mjs`, not by directory order
 - `src/openapi/scope-openapi.json` — committed artifact generated from
   the Scope API's OpenAPI registry; drives the auto-generated REST
@@ -29,6 +40,8 @@ A static documentation site published to GitHub Pages.
 - `src/plugins/remark-http-snippets.mjs` — custom remark plugin that
   expands fenced ` ```http ` blocks into multi-language Starlight
   `<Tabs>` (curl, JS fetch, Python, Go, Java, C#)
+- `src/plugins/remark-base-path.mjs`: prefixes internal Markdown URLs and
+  literal MDX `href`/`src` attributes with the configured deployment base
 - `astro.config.mjs` — sidebar, plugins, `markdown.remarkPlugins`,
   `starlight-openapi` config
 - `dist/` — build output (gitignored)
@@ -125,6 +138,8 @@ Plain JSON examples (response shapes, profile config) stay as
 
 ### REST API reference page
 
+- Link to `/reference/api/` for the generated reference landing page.
+  `/reference/api/operations/` is not a page.
 - **Auto-generated** per-endpoint pages live under
   `/reference/api/...` (built from
   `src/openapi/scope-openapi.json` by `starlight-openapi`).
@@ -132,11 +147,62 @@ Plain JSON examples (response shapes, profile config) stay as
   with cross-links to the auto-generated pages and the live Swagger.
   Don't duplicate the per-endpoint detail there.
 
+### Internal links
+
+Use site-root paths such as `/getting-started/access/` in Markdown links
+and literal MDX `href`/`src` attributes. The base-path remark plugin adds
+`/scope` in the public build while keeping local root deployments working.
+Do not hard-code the deployment prefix in content or code examples.
+
 ### Sidebar
 
 Sidebar order is set in `astro.config.mjs`. Adding a new page
 requires updating the sidebar array. The auto-generated REST API
 groups are spread via `...openAPISidebarGroups`.
+
+### Articles & talks
+
+The `community/articles-and-talks` page and the "From the community"
+section on the landing page are generated from two content
+collections. To add an entry, add one YAML file. No code changes are
+needed.
+
+- **Article**: `src/content/articles/<title-slug>.yaml`
+  ```yaml
+  title: Building AX evals that actually work
+  url: https://developer.microsoft.com/blog/building-ax-evals-that-actually-work/
+  publication: Microsoft for Developers   # blog name
+  authors:                                 # as credited, byline order
+    - firstName: Waldek
+      lastName: Mastykarz
+      position: Principal Developer Advocate
+  date: 2026-07-15                         # publish date (optional)
+  ```
+- **Talk**: `src/content/talks/<yyyy-mm-dd>-<event-slug>.yaml`
+  ```yaml
+  title: "From Findings to Fixes: ..."
+  speakers:                                       # same shape as authors
+    - firstName: Jay
+      lastName: Gordon
+      position: Senior Program Manager, Azure Cosmos DB
+  event: Global AI New York
+  venue: Microsoft Lafayette, New York City
+  date: 2026-09-21
+  eventUrl: https://globalai.community/e/783bfa20  # GAIC event page
+  youtubeId: SxaKOmqX-rk                          # omit while pending
+  ```
+
+Take title, blog name, authors (name and position from the article's
+author section), and publish date from the article page itself.
+Take speaker positions from the event page or the speaker's event
+profile (e.g. their Luma bio).
+If a date can't be confirmed, leave `date` out; undated articles
+sort last. A talk without `youtubeId` shows "Video coming soon".
+Both lists sort newest first. A missing field, bad URL, or bad date
+fails `pnpm run build`. Article and event links are external, so the
+components open them in a new tab (`target="_blank"
+rel="noopener noreferrer"`) with a screen-reader "(opens in a new
+tab)" hint; keep that pattern for any new external link.
 
 ### Style
 
@@ -154,15 +220,18 @@ groups are spread via `...openAPISidebarGroups`.
 
 ```sh
 pnpm install
+pnpm test                # plugin regressions, using Node's built-in test runner
 pnpm run build           # writes dist/
 pnpm run dev             # local preview at http://localhost:4321
 pnpm run refresh:openapi # generate the OpenAPI snapshot from scope-core
 ```
 
-A green `pnpm run build` is the gate. As of the last edit it produces
-**164 pages** (≈ 23 hand-written + the rest auto-generated from the
-OpenAPI spec). A drop in page count usually means a content collection
-file failed to parse.
+Both `pnpm test` and `pnpm run build` must pass. The public build uses
+`SITE=https://microsoft.github.io BASE_PATH=/scope pnpm run build`;
+exercise that configuration when changing links or deployment settings,
+not just the local `/` default. The current snapshot produces **203
+pages**, including the generated API reference. An unexpected drop in
+page count can indicate a content collection file failed to parse.
 
 ## Workflow
 
