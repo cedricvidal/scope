@@ -129,6 +129,11 @@ directory). Missing releases, API/download errors and version mismatches fail
 explicitly without replacing an existing installation. Installation does not
 require GitHub authentication; public API rate limits still apply.
 
+The published website's onboarding pages use this same URL.
+`website/install-cli.sh` remains a compatibility entry point: it downloads
+the canonical root script completely before running it, rather than
+maintaining another release lookup or installation implementation.
+
 `scope update` retains its `gh release download` implementation, so updating
 in-place requires `gh` configured with GitHub authentication. Alternatively,
 rerun the public installer without `gh`.

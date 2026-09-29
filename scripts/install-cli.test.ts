@@ -13,7 +13,15 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 const url = args.find(arg => arg.startsWith('https://'));
 fs.appendFileSync(process.env.CURL_LOG, url + '\\n');
-if (url === 'https://api.github.com/repos/microsoft/scope/releases') {
+if (url === 'https://raw.githubusercontent.com/microsoft/scope/main/install-cli.sh') {
+  const output = args[args.indexOf('--output') + 1];
+  if (process.env.INSTALLER_ERROR) {
+    fs.writeFileSync(output, 'echo damaged > "$SCOPE_INSTALL_DIR/scope"\\n');
+    console.error('Installer download failed');
+    process.exit(22);
+  }
+  fs.copyFileSync(process.env.ROOT_INSTALLER, output);
+} else if (url === 'https://api.github.com/repos/microsoft/scope/releases') {
   if (process.env.RELEASE_ERROR) { console.error('Release request failed'); process.exit(22); }
   console.log(process.env.RELEASES);
 } else if (url === 'https://github.com/microsoft/scope/releases/download/cli%2Fv3.2.1/scope.mjs') {
@@ -22,7 +30,7 @@ if (url === 'https://api.github.com/repos/microsoft/scope/releases') {
 } else { console.error('Unexpected URL: ' + url); process.exit(1); }
 `;
 
-describe("Public CLI installer", () => {
+describe.each(["install-cli.sh", "website/install-cli.sh"])("Public CLI installer: %s", (entryPoint) => {
   it.each([
     { name: "success", success: true },
     { name: "missing release", releases: "[]", message: "No published Scope CLI release" },
@@ -36,10 +44,14 @@ describe("Public CLI installer", () => {
     mkdirSync(installDir);
     writeFileSync(join(installDir, "scope"), "existing installation");
     writeFileSync(join(directory, "curl"), curlFixture, { mode: 0o755 });
+    writeFileSync(join(directory, "gh"), '#!/bin/sh\necho "Unexpected GitHub authentication dependency" >&2\nexit 1\n', { mode: 0o755 });
     try {
-      const result = spawnSync("bash", [installer], {
+      const result = spawnSync("bash", [], {
+        input: readFileSync(entryPoint, "utf8"),
+        cwd: directory,
         env: {
           ...process.env, PATH: `${directory}:${process.env.PATH}`, SCOPE_INSTALL_DIR: installDir,
+          GH_TOKEN: "", GITHUB_TOKEN: "", ROOT_INSTALLER: installer, INSTALLER_ERROR: "",
           CURL_LOG: log, RELEASE_ERROR: releaseError ?? "", DOWNLOAD_ERROR: downloadError ?? "",
           BUNDLE_VERSION: version ?? "3.2.1",
           RELEASES: releases ?? JSON.stringify([
@@ -63,9 +75,57 @@ describe("Public CLI installer", () => {
         expect(installed).toBe("existing installation");
       }
       expect(readdirSync(installDir)).toEqual(["scope"]);
-      expect(readFileSync(log, "utf8")).not.toMatch(/scope-core|scope-doc/);
+      const requests = readFileSync(log, "utf8").trim().split("\n");
+      expect(requests[0]).toBe(entryPoint.startsWith("website/")
+        ? "https://raw.githubusercontent.com/microsoft/scope/main/install-cli.sh"
+        : "https://api.github.com/repos/microsoft/scope/releases");
+      expect(requests.join("\n")).not.toMatch(/scope-core|scope-doc/);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+});
+
+it("does not execute a partial website installer download or replace an existing installation", () => {
+  const directory = mkdtempSync(join(tmpdir(), "scope-install-bootstrap-test-"));
+  const installDir = join(directory, "bin");
+  const temporary = join(directory, "tmp");
+  mkdirSync(installDir);
+  mkdirSync(temporary);
+  writeFileSync(join(installDir, "scope"), "existing installation");
+  writeFileSync(join(directory, "curl"), curlFixture, { mode: 0o755 });
+  try {
+    const result = spawnSync("bash", [], {
+      input: readFileSync("website/install-cli.sh", "utf8"),
+      cwd: directory,
+      env: {
+        ...process.env, PATH: `${directory}:${process.env.PATH}`, SCOPE_INSTALL_DIR: installDir,
+        TMPDIR: temporary, CURL_LOG: join(directory, "curl.log"), INSTALLER_ERROR: "1",
+        GH_TOKEN: "", GITHUB_TOKEN: "",
+      },
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Installer download failed");
+    expect(readFileSync(join(installDir, "scope"), "utf8")).toBe("existing installation");
+    expect(readdirSync(temporary)).toEqual([]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("routes published onboarding examples to the public canonical installer", () => {
+  for (const file of ["install-cli.md", "access.md"]) {
+    const content = readFileSync(`website/src/content/docs/getting-started/${file}`, "utf8");
+    expect(content).toContain("https://raw.githubusercontent.com/microsoft/scope/main/install-cli.sh");
+    expect(content).not.toMatch(/growth-ecosystems|scope-doc|GH_TOKEN|GITHUB_TOKEN/);
+  }
+  expect(readFileSync("website/src/content/docs/getting-started/install-cli.md", "utf8"))
+    .toContain("| SCOPE_INSTALL_DIR=~/bin bash");
+  expect(readFileSync("website/src/content/docs/getting-started/access.md", "utf8"))
+    .toContain("your deployment's API still requires its configured authentication");
+  const compatibilityScript = readFileSync("website/install-cli.sh", "utf8");
+  expect(compatibilityScript).not.toContain("api.github.com/repos");
+  expect(compatibilityScript).toContain("--retry 3");
 });

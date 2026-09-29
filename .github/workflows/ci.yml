@@ -18,6 +18,7 @@ on:
       - ".github/workflows/publish-cli.yml"
       - ".dockerignore"
       - "install-cli.sh"
+      - "website/install-cli.sh"
   pull_request:
     branches: [main]
     paths:
@@ -35,6 +36,7 @@ on:
       - ".github/workflows/publish-cli.yml"
       - ".dockerignore"
       - "install-cli.sh"
+      - "website/install-cli.sh"
   workflow_dispatch:
 
 permissions:
@@ -845,6 +847,7 @@ jobs:
               - 'scripts/build-windows-worker.test.ts'
               - 'scripts/build-windows-worker.ps1'
               - 'install-cli.sh'
+              - 'website/install-cli.sh'
               - '.dockerignore'
               - 'pnpm-workspace.yaml'
               - 'apps/**'
