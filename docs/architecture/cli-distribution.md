@@ -1,15 +1,24 @@
 # CLI Distribution
 
-How the Scope CLI is bundled, distributed, and updated as a standalone tool.
+How the Scope CLI is bundled, and how the legacy standalone distribution path works.
+
+The OSS repository retains CLI source, local bundling, bundle integration tests,
+and existing installation/update functionality. Its former `publish-cli.yml`
+workflow depended on a FLUX GitHub App scoped to `growth-ecosystems/scope-core`
+and `growth-ecosystems/scope-doc` and has been removed. This repository does not currently
+automate standalone binary releases. No replacement release architecture or
+change to legacy updater URLs is introduced here.
 
 ## Overview
 
-The CLI is bundled into a single `.mjs` file using [esbuild](https://esbuild.github.io/), distributed via GitHub Releases on the `scope-doc` repo, and installed using the `gh` CLI. This allows users to run the CLI without checking out the monorepo.
+The CLI is bundled into a single `.mjs` file using [esbuild](https://esbuild.github.io/).
+The legacy distribution path uses GitHub Releases on `scope-doc` and installation
+through the `gh` CLI. Access to that target is separate from access to the public
+OSS repository; its current support/availability is not established by this doc.
 
 ```mermaid
 flowchart LR
-    A[scope-core<br/>apps/cli/] -->|publish-cli.yml| B[GitHub Actions]
-    B -->|gh release create| C[scope-doc releases<br/>scope.mjs]
+    A[Legacy internal publication] --> C[Legacy scope-doc releases<br/>scope.mjs]
     C -->|install-cli.sh| D[User workstation<br/>~/.local/bin/scope]
 ```
 
@@ -36,8 +45,8 @@ the CLI's `build` script runs `tsc --noEmit` **before** esbuild:
 "build:tsc": "tsc --noEmit",   // standalone typecheck alias
 ```
 
-Because every CI/release entry point invokes the CLI `build` script — `pnpm build` (`pnpm -r build`,
-used by the CI **Build** job and `publish-cli.yml`) and `pnpm build:cli` (used by the
+Because the OSS CI entry points invoke the CLI `build` script — `pnpm build` (`pnpm -r build`,
+used by the CI **Build** job) and `pnpm build:cli` (used by the
 **CLI Bundle Integration Tests** job) — the CLI is now typechecked automatically wherever it is
 built, with no separate CI step. `tsc` requires the `shared` package's `dist` to exist; every one
 of these entry points builds `shared` first (topologically for `pnpm -r`, explicitly for
@@ -75,32 +84,28 @@ In dev mode (`pnpm cli` via tsx), these defines are not applied — the CLI fall
 
 ## Versioning
 
-The **source of truth** for the CLI version is the git tag on `scope-core` using the `cli/v*` prefix (e.g. `cli/v0.2.0`). The `apps/cli/package.json` version is `0.0.0-dev` — a placeholder that CI resolves from the latest `cli/v*` tag and then bumps via `pnpm version` during the publish workflow. It is never committed back to `main`.
+The legacy release workflow used git tags on `scope-core` with the `cli/v*`
+prefix (e.g. `cli/v0.2.0`) as its version source. The `apps/cli/package.json`
+version remains `0.0.0-dev` for local builds. The OSS repository has no replacement
+automated version-bump/release workflow.
 
 - Local builds produce `0.0.0-dev` — clearly indicating a dev build.
 - Dev mode (`pnpm cli`) reports `0.1.0-dev`.
-- Only CI-built releases carry a real version number.
+- Legacy release builds carry a real version number.
 - The `cli/v*` prefix allows other monorepo components to have their own tag namespaces.
 
-## Publishing
+## Publishing ownership
 
-The publish workflow (`.github/workflows/publish-cli.yml`) is triggered manually:
+The removed internal-token-dependent workflow created a tag in its source
+repository and a release in `growth-ecosystems/scope-doc`, rather than
+`microsoft/scope`. It required cross-repository GitHub App credentials.
+Do not configure those internal credentials in OSS to restore it.
 
-1. Select bump type: `patch` | `minor` | `major` (default: minor)
-2. Workflow resolves the current version from the latest `cli/v*` tag
-3. Bumps `apps/cli/package.json` via `pnpm version`
-4. Builds the bundle with prod API URL (`vars.SCOPE_API_URL`)
-5. Creates a git tag `cli/v<version>` on scope-core
-6. Creates a GitHub Release on `scope-doc` with `scope.mjs`
+OSS CI still builds and tests the CLI bundle and uploads it as an Actions
+artifact. A public standalone release destination, versioning policy, installer,
+and updater migration need to be defined together in a separate change.
 
-### Required secrets/variables
-
-| Name | Type | Purpose |
-|------|------|---------|
-| `SCOPE_DOC_TOKEN` | Secret | PAT with `contents:write` on scope-doc repo |
-| `SCOPE_API_URL` | Variable | Production API URL injected at build time |
-
-## Installation
+## Legacy installation
 
 Users install via the `gh` CLI (required since the repo is EMU-protected):
 
@@ -189,6 +194,6 @@ unique and need no project. See
 |--------|-------------------|-------------------|
 | Runner | tsx (TypeScript direct) | Node.js (single .mjs) |
 | API default | `http://localhost:3100` | `https://msscope.azurewebsites.net` |
-| Version | `0.1.0-dev` | Actual semver from CI bump |
+| Version | `0.1.0-dev` | Embedded package version (`0.0.0-dev` locally) |
 | Command name | `pnpm cli` | `scope` |
 | Update check | Disabled | Enabled |

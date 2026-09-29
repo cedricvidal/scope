@@ -23,6 +23,7 @@ interface Step {
 
 interface Job {
   if?: string;
+  needs?: string[];
   permissions?: Record<string, string>;
   env?: Record<string, string>;
   outputs?: Record<string, string>;
@@ -50,7 +51,7 @@ afterEach(() => {
 });
 
 describe("CI execution prerequisites", () => {
-  it("selects integration checks for workflow changes without marking every image changed", () => {
+  it("selects integration checks for workflow changes through a dedicated filter", () => {
     const filtersStep = jobs["detect-changes"].steps.find((candidate) => candidate.uses?.startsWith("dorny/paths-filter@"));
     const filters = parse(filtersStep!.with!.filters) as Record<string, string[]>;
     expect(filters.ci).toContain(".github/workflows/ci.yml");
@@ -72,11 +73,15 @@ describe("CI execution prerequisites", () => {
         expect(existsSync(path), path).toBe(true);
       }
       expect(worker.images).toContain(`-f ${worker.dockerfile}`);
+      expect(worker.images).toContain("--load");
+      expect(worker.images).not.toContain("--push");
+      expect(spawnSync("bash", ["-n"], { input: worker.images }).status).toBe(0);
       expect(readdirSync(join(worker.test_pattern, "src")).some((file) => file.endsWith(".integration.test.ts"))).toBe(true);
     }
+    expect(step("integration-test", "Pre-build Docker test images").run).toContain("${{ matrix.worker.images }}");
   });
 
-  it("parses the inline shell scripts, including every image-tag case arm", () => {
+  it("parses the remaining inline shell scripts", () => {
     for (const job of Object.values(jobs)) {
       for (const command of job.steps.filter((candidate) => candidate.run)) {
         const script = command.run!.replace(/\$\{\{.*?\}\}/g, "placeholder");
@@ -85,15 +90,6 @@ describe("CI execution prerequisites", () => {
         expect(result.status, command.name).toBe(0);
       }
     }
-  });
-
-  it("hashes the same existing Copilot versions file that Windows loads for its build", () => {
-    const load = step("build-windows-image", "Load pinned versions").run!;
-    const versionFile = load.match(/VERSION_FILE="([^"]+)"/)![1];
-    expect(existsSync(versionFile)).toBe(true);
-    const hash = step("build-windows-image", "Resolve deps image tag").run!;
-    expect(hash).toContain(`Dockerfile.deps ${versionFile} \${WORKER_DIR}/Dockerfile.base`);
-    expect(hash).not.toContain("${WORKER_DIR}/versions.env");
   });
 
   for (const recordings of [false, true]) {
@@ -121,10 +117,19 @@ describe("CI execution prerequisites", () => {
 });
 
 describe("CI repository and credential boundaries", () => {
-  it("retains all four canonical repository gates", () => {
-    for (const name of ["integration-test", "integration-test-queue", "build-images", "build-windows-image"]) {
-      expect(jobs[name].if).toContain("github.repository == 'microsoft/scope' &&");
+  it.each([
+    { repository: "microsoft/scope", integration: true },
+    { repository: "growth-ecosystems/scope-core", integration: false },
+    { repository: "cedricvidal/scope", integration: false },
+  ])("selects public integration checks only in their owning repository: $repository", ({ repository, integration }) => {
+    for (const name of ["integration-test", "integration-test-queue"]) {
+      const gate = jobs[name].if!.match(/github\.repository == '([^']+)' &&/);
+      expect(gate, `${name} must retain a mandatory repository gate`).not.toBeNull();
+      expect(gate![1] === repository, name).toBe(integration);
     }
+  });
+
+  it("does not run fork code through pull_request_target", () => {
     expect(workflow.on).not.toHaveProperty("pull_request_target");
   });
 
@@ -143,17 +148,36 @@ describe("CI repository and credential boundaries", () => {
     }
   });
 
-  it("reserves OIDC for trusted publishers while preserving PR reporting permissions and steps", () => {
+  it("has no cloud publishers or OIDC in OSS CI, while preserving reporting and CLI bundles", () => {
     expect(workflow.permissions).not.toHaveProperty("id-token");
     expect(workflow.permissions["pull-requests"]).toBe("write");
     expect(workflow.permissions.issues).toBe("write");
-    for (const name of ["build-images", "build-windows-image"]) {
-      expect(jobs[name].if).toContain(trusted);
-      expect(jobs[name].permissions).toEqual({ contents: "read", "id-token": "write" });
+    expect(jobs).not.toHaveProperty("build-images");
+    expect(jobs).not.toHaveProperty("build-windows-image");
+    expect(workflow.on.workflow_dispatch).toBeNull();
+    for (const job of Object.values(jobs)) {
+      expect(job.permissions?.["id-token"]).toBeUndefined();
+      expect(JSON.stringify(job)).not.toMatch(/azure\/login|az acr|ACR_NAME|scope-core/);
+      for (const dependency of job.needs ?? []) expect(jobs).toHaveProperty(dependency);
     }
     expect(jobs["llm-evals"].if).toContain(trusted);
     for (const name of ["test", "gateway"]) {
       expect(step(name, "Post test results to Pull Request").run).toContain("github-actions-ctrf pull-request");
+    }
+    expect(step("cli-bundle-test", "Build CLI bundle").run).toBe("pnpm build:cli");
+    expect(step("cli-bundle-test", "Upload CLI bundle").with?.path).toBe("apps/cli/dist/scope.mjs");
+  });
+
+  it("removes internal-only automation without removing public Pages or repository maintenance", () => {
+    for (const file of ["build-windows-base.yml", "daily-repo-status.md", "daily-repo-status.lock.yml", "publish-cli.yml"]) {
+      expect(existsSync(join(".github/workflows", file)), file).toBe(false);
+    }
+    for (const file of ["static.yml", "gitleaks.yml", "check-worker-versions.yml", "daily-test-improver.md", "daily-test-improver.lock.yml", "worker-version-upgrade.md", "worker-version-upgrade.lock.yml"]) {
+      expect(existsSync(join(".github/workflows", file)), file).toBe(true);
+    }
+    for (const file of readdirSync(".github/workflows").filter((file) => /\.ya?ml$/.test(file))) {
+      const source = readFileSync(join(".github/workflows", file), "utf8");
+      expect(source, file).not.toMatch(/github\.repository == 'growth-ecosystems\/scope-core'|vars\.ACR_NAME/);
     }
   });
 });

@@ -119,25 +119,35 @@ pnpm test:coverage                # Unit tests with a coverage report
 pnpm test:integration             # Integration tests (requires a .env file + Docker)
 ```
 
-CI's worker integration, queue recovery, and image-publishing jobs intentionally
+[CI's](./.github/workflows/ci.yml) worker integration and queue recovery jobs
 require `github.repository == 'microsoft/scope'`: they do not execute in fork
 repositories. A fork PR into upstream still runs the ACP workers' tool checks and
 the disposable MongoDB/Redis/Azurite queue tests. Worker credentials are withheld
 from fork-head code, so the existing live-auth tests skip when credentials are
 absent. Docker Hub login is optional and restricted to trusted code; public images
-can be pulled anonymously. LLM evals and Azure image publishing require trusted
-PR heads; OIDC is granted only to the publishing jobs. PR test reporting and video
+can be pulled anonymously. LLM evals require trusted PR heads.
+The OSS CI workflow does not publish container images or request OIDC;
+its ACP test images are built and loaded locally. Public CI requires no Azure/ACR
+setup. PR test reporting and video
 uploads remain enabled, with missing video directories treated as no recordings.
 
 Changes to the CI workflow select the integration checks through a dedicated
-path filter without selecting every application image. Run the focused workflow
+path filter. Run the focused workflow
 regressions with `pnpm exec vitest run scripts/ci-workflow.test.ts` and the real
 queue tests with `pnpm test:integration:queue` (Docker required).
 The ACP matrix covers the existing Copilot and Claude workers; the removed VS Code
 workers have no Dockerfiles or integration suites in this repository.
-Live-model credentials and the `integration` environment's Azure/OIDC/ACR
-configuration remain maintainer prerequisites; passing public tests does not
-validate cloud publishing or live-model access.
+Live-model credentials remain necessary for live-auth tests; passing public
+tool checks does not validate live-model access.
+
+The internal `scope-core` repository is separate. Its ACR publishers (including
+Windows base images), cross-repository infrastructure status report, and
+FLUX-token CLI publication to `scope-doc` are not OSS automation and have been
+removed here. This does not change that repository, local Docker builds, the CLI
+bundle/build tests, or public GitHub Pages. OSS automated binary-release
+publishing is not implemented by this change; legacy CLI installation/updater
+references remain a separate distribution migration topic. See
+[CLI distribution](./docs/architecture/cli-distribution.md).
 
 ## Build, lint, and typecheck
 
@@ -315,7 +325,6 @@ Automations depend on these exact names:
 | --- | --- |
 | Worker version checker and upgrade workflow | `type: worker-update` |
 | Test Improver issues, PRs, and monthly-summary searches | `type: automation`, `topic: testing` |
-| Daily repository status reports | `agentic-workflows` |
 | Dependabot | `type: dependencies`, plus `language: javascript` or `language: rust` |
 
 Use `area: reporting` for Scope's benchmark reporting component, not daily repository activity.
@@ -345,7 +354,6 @@ by hand. Use each file's recorded compiler version to avoid unrelated runtime up
 | Workflow | Compiler |
 | --- | --- |
 | `daily-test-improver` | `v0.57.1` |
-| `daily-repo-status` | `v0.60.0` |
 | `worker-version-upgrade` | `v0.63.0` |
 
 The daily schedules are explicit cron expressions preserving their existing UTC execution times.
