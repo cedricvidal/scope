@@ -32,7 +32,7 @@ import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { TaskPromptBadge } from "@/components/TaskPromptBadge";
 import { AgentBadge } from "@/components/AgentBadge";
 import { SkillRevisionLinks } from "@/components/SkillRevisionLinks";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X, Boxes } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X, Boxes } from "lucide-react";
 import { formatDate, formatId, formatDuration, cn } from "@/lib/utils";
 import {
   GATE_METADATA,
@@ -1495,13 +1495,28 @@ export function RunDetail() {
                             )
                           )}
                           {outcome?.teardownRan !== undefined && (
-                            <Badge variant="outline" className="text-xs">teardown {outcome.teardownRan ? "ran" : "not run"}</Badge>
+                            outcome.teardownRan ? (
+                              <Badge variant="outline" className="text-xs">teardown ran</Badge>
+                            ) : (
+                              // Rendered identically to "ran" before, which made the one state
+                              // worth noticing invisible: whatever setup created is still there.
+                              <Badge variant="outline" className="gap-1 border-amber-500/50 text-xs text-amber-700 dark:text-amber-300">
+                                <AlertTriangle className="h-3 w-3" /> teardown not run
+                              </Badge>
+                            )
                           )}
                           {outcome?.setupDurationMs !== undefined && (
                             <Badge variant="secondary" className="font-mono text-xs">{formatDuration(outcome.setupDurationMs)}</Badge>
                           )}
                         </div>
                         {outcome?.error && <p className="mt-2 text-xs text-destructive">{outcome.error}</p>}
+                        {outcome?.teardownRan === false && (
+                          <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                            Anything this resource created is still running. Nothing reclaims it
+                            automatically under local Docker, so remove it by name, and make the
+                            setup script do the same before it provisions.
+                          </p>
+                        )}
                         <div className="mt-2 space-y-1">
                           <span className="text-xs text-muted-foreground">Resolved parameters:</span>
                           {Object.keys(binding.params).length > 0 ? (

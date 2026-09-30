@@ -3,11 +3,12 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Boxes, Loader2, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Boxes, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ResourceDocument, ResourceParameter, ResourceRevisionDocument } from "@/types";
 import { cn } from "@/lib/utils";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -151,7 +152,7 @@ export function ResourceCreateForm({ onCreated, onCancel, className, compact = f
           className="font-mono text-xs"
           placeholder={'docker run -d --name github-sim ...\nprintf "SIMULATOR_URL=http://localhost:8080\\n" >> "$SCOPE_SETUP_ENV"'}
         />
-        <p className="text-xs text-muted-foreground">Runs with <span className="font-mono">sh -e</span> and publishes connection details through <span className="font-mono">$SCOPE_SETUP_ENV</span>.</p>
+        <p className="text-xs text-muted-foreground">Runs with <span className="font-mono">sh -e</span> and publishes connection details through <span className="font-mono">$SCOPE_SETUP_ENV</span>. Remove anything you create by name first (<span className="font-mono">docker rm -f my-sim 2&gt;/dev/null || true</span>) so a previous run that crashed before teardown cannot hold your ports.</p>
       </div>
 
       <div className="space-y-2">
@@ -164,6 +165,24 @@ export function ResourceCreateForm({ onCreated, onCancel, className, compact = f
           className="font-mono text-xs"
           placeholder="docker rm -f github-sim >/dev/null 2>&1 || true"
         />
+        <p className="text-xs text-muted-foreground">
+          Runs after the agent finishes, on success and on failure. It is best-effort: if a worker is
+          killed outright, teardown never runs and whatever setup created survives.
+        </p>
+        {teardownBody.trim().length === 0 && (
+          // A resource that provisions nothing durable legitimately needs no teardown, so this
+          // warns rather than blocks. Silence here would mean every run of a container-backed
+          // resource leaks with nothing on screen to suggest why.
+          <Alert className="border-amber-500/50 text-amber-900 dark:text-amber-200 [&>svg]:text-amber-600">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription className="text-xs">
+              No teardown script: anything this resource creates will outlive every run that uses it.
+              That is fine for a resource that provisions nothing durable. If yours starts containers
+              or allocates cloud objects, they accumulate — nothing else reclaims them under local
+              Docker, because a blanket sweep there would delete the development stack itself.
+            </AlertDescription>
+          </Alert>
+        )}
       </div>
 
       <div className="space-y-2">
