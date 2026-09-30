@@ -213,7 +213,8 @@ before changing any AI-facing instruction surface.
   create a static prompt family.
 - Whenever a user-controlled text field that reaches an AI is added or its
   insertion point, trusted wrapper, role, tools, or security boundary changes,
-  add or update its red-team surface profile and benign composition contract.
+  preserve its benign composition contract. Cloud red-team profiles and
+  execution are maintained in a separate follow-up contribution.
 
 ## Contributing (Pull Requests)
 
@@ -252,7 +253,7 @@ not open the PR against the fork unless the user explicitly asks you to.
 |----------|-------------|
 | [docs/architecture/overview.md](docs/architecture/overview.md) | System architecture, component interactions, data flow |
 | [docs/architecture/app-design.md](docs/architecture/app-design.md) | Data models, API design, package dependency graph |
-| [docs/architecture/prompt-evaluations.md](docs/architecture/prompt-evaluations.md) | Static prompt quality, user-controlled AI red teaming, datasets, commands, and maintenance rules |
+| [docs/architecture/prompt-evaluations.md](docs/architecture/prompt-evaluations.md) | Static prompt quality, datasets, commands, and maintenance rules |
 | [docs/architecture/data-organization-projects.md](docs/architecture/data-organization-projects.md) | Projects (a single container) to isolate/group data within a cluster; composes with data-tags and auth-rbac |
 | [docs/architecture/auth-rbac.md](docs/architecture/auth-rbac.md) | Explicit-login IdP auth, Redis user-access cache, Portal handshake; deferred RBAC/internal-token roadmap |
 | [docs/architecture/vscode-web-worker.md](docs/architecture/vscode-web-worker.md) | XState chat machine, GitHub auth flow, ARIA snapshots |

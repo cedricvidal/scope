@@ -242,7 +242,7 @@ Portal and a Rust AI gateway.
 | [`apps/workers/`](./apps/workers/) | Coding-agent, post-processing, and report workers |
 | [`apps/gateway/`](./apps/gateway/) and [`apps/token-manager/`](./apps/token-manager/) | AI traffic capture and credential management |
 | [`packages/`](./packages/) | Shared types, storage clients, migrations, and supporting libraries |
-| [`evaluations/`](./evaluations/) | Developer-run static prompt quality and cloud red-team tooling |
+| [`evaluations/`](./evaluations/) | Developer-run static prompt quality tooling |
 | [`config/`](./config/) and [`docs/`](./docs/) | Evaluation examples and documentation |
 
 Useful commands from the repository root:
@@ -256,7 +256,7 @@ pnpm test:integration      # Integration tests; requires .env and backing servic
 ```
 
 Evaluate Scope's own AI prompts with `pnpm eval:prompts -- --mode quality`
-(or `red-team` / `both`). See the [prompt evaluation guide](./docs/architecture/prompt-evaluations.md)
+(the default mode). See the [prompt evaluation guide](./docs/architecture/prompt-evaluations.md)
 for setup, model credentials, and offline validation.
 
 For service-by-service development, Rust commands, migrations, and code
@@ -270,7 +270,7 @@ conventions, read [CONTRIBUTING.md](./CONTRIBUTING.md).
 | Domain models and API design | [Application design](./docs/architecture/app-design.md) |
 | Project organization | [Projects](./docs/architecture/data-organization-projects.md) |
 | Evaluation and criteria DAGs | [Criteria provider](./docs/architecture/criteria-provider.md) |
-| Static prompt quality and red teaming | [Prompt evaluations](./docs/architecture/prompt-evaluations.md) |
+| Static prompt quality | [Prompt evaluations](./docs/architecture/prompt-evaluations.md) |
 | Agent context | [Skills](./docs/architecture/skills.md) and [codebases](./docs/architecture/codebases.md) |
 | Scheduling and recovery | [Queue scheduler](./docs/architecture/queue-scheduler.md) |
 | Configuration and authentication | [Environment variables](./ENV_VARIABLES.md) |

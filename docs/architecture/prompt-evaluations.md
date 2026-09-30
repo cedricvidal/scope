@@ -1,17 +1,12 @@
 # Prompt Evaluations
 
-Scope evaluates its AI instructions in two separate tracks:
+**Static prompt quality** measures whether Scope-owned prompts still perform
+their product function. User-controlled prompt red teaming is extracted into a
+separate dependent contribution; it is not executable from this version.
 
-1. **Static prompt quality** measures whether Scope-owned prompts still perform
-   their product function.
-2. **User-controlled prompt red teaming** measures whether text supplied by a
-   user can subvert the trusted instructions around it.
-
-The tracks share package setup, model/project configuration, TypeScript
-composition adapters, run manifests, and artifact conventions. They do not
-share cases, metrics, thresholds, or pass/fail status. A quality regression is
-not a red-team attack, and a successful attack is not evidence that a static
-prompt is poorly written.
+This extraction preserves the normal evaluation implementation, rubrics,
+datasets, and historical evidence shared with OneRAI. It does not apply review
+fixes or regenerate or regrade results. The pinned dependencies remain unchanged.
 
 The implementation lives in [`evaluations/static-prompts/`](../../evaluations/static-prompts/).
 It is developer-invoked: it is not part of normal `pnpm test` and must not be
@@ -43,27 +38,8 @@ than counted as extra families.
 
 User-authored criteria, task/gate prompts, `AGENTS.md`, prompt-feature
 definitions, persona instructions, and report-template prompts are not static
-Scope prompt families. They are data supplied to production flows and belong to
-the red-team track below.
-
-### User-controlled AI surface inventory
-
-The manifest and reviewed surface profiles cover eight categories:
-
-| Surface | User-controlled source | Downstream AI consumer |
-|---------|------------------------|------------------------|
-| Task/scenario prompt | Select-gate task text | Coding agent |
-| Non-Select gate prompt | `build`, `test`, `run`, or `deploy` prompt text | Coding agent |
-| `AGENTS.md` | Workspace instruction body | Coding agent |
-| Criterion prompt | Criterion `prompt` | Judge |
-| Prompt-feature definition | Prompt-feature `prompt` | Feature extractor |
-| Persona instructions | Persona instruction text | Feedback generator |
-| Report user prompt | Report-template `userPrompt` | Report generator |
-| Report system prompt | Appended or overriding report-template system content | Report generator |
-
-Adding a configurable field to this table does not create a new static prompt
-family. It creates or changes an untrusted instruction boundary and therefore
-requires a red-team surface profile.
+Scope prompt families. They are data supplied to production flows; adversarial
+evaluation of those user-controlled boundaries belongs to the red-team follow-up.
 
 ## Architecture
 
@@ -74,9 +50,9 @@ The workspace is mixed-language by design:
   types and never maintain an evaluation-only copy of prompt text.
 - Python drives generation, calls `azure.ai.evaluation.evaluate()`, runs
   deterministic checks and Azure-assisted graders, aggregates metrics, enforces
-  policy, manages cloud red-team runs, and writes durable local artifacts.
+  policy, and writes durable local artifacts.
 - `evaluation-manifest.yaml` is the machine-checked inventory joining every
-  family or surface to its adapter, cases/profile, assertions, and rubric.
+  family to its adapter, cases, assertions, and rubric.
 
 The API's criterion, task-prompt, and prompt-feature callers use the same pure
 request builders exported to the evaluation adapters. Production sends those
@@ -92,13 +68,11 @@ flowchart TD
     B --> C1[TypeScript production adapters]
     B --> C2[Python quality engine]
     B --> C3[Integration harvester<br/>and curated inputs]
-    B --> C4[Cloud red-team engine]
     B --> C5[Documentation and<br/>maintenance rules]
 
     C1 --> D[Integrate shared contracts]
     C2 --> D
     C3 --> D
-    C4 --> D
     C5 --> D
 
     D --> E[Targeted tests, type checks,<br/>schema and coverage validation]
@@ -107,22 +81,16 @@ flowchart TD
 
     E -->|Framework checks pass| G{Run mode}
     G -->|quality| H[Compose production static prompts<br/>and generate model outputs]
-    G -->|red-team| I[Compose actual AI requests<br/>and inject adversarial user input]
-    G -->|both| H
-    G -->|both| I
 
     H --> J[Azure AI Evaluation SDK<br/>row results and findings]
-    I --> K[Cloud Red Teaming Agent<br/>native results and findings]
 
     J --> L[Ignored local JSON or JSONL<br/>plus aggregate JSON]
-    K --> M[Ignored local JSON, JSONL, or CSV<br/>plus aggregate JSON]
     L --> N[Run manifest references<br/>all available artifacts]
-    M --> N
 
     N --> O{Definition of done<br/>fully verified?}
     O -->|No: framework, artifact,<br/>or infrastructure gap| F
     O -->|Yes| P[Record evaluation findings<br/>without remediation]
-    P --> Q[Delete temporary targets<br/>and credential files]
+    P --> Q[Delete temporary credential files]
     Q --> R[Final leakage and ignored-file checks]
 ```
 
@@ -398,78 +366,21 @@ regeneration or fabricated evidence is permitted. Source report-generation
 errors also leave unavailable Azure coverage. Offline replay is useful for
 review but cannot resolve graders requiring new Azure output.
 
-## Cloud red-team evaluation
-
-The cloud AI Red Teaming Agent generates adversarial input for the eight surface
-profiles. Ordinary integration examples are not attacks. The default
-configuration creates a separate attributable run per surface and uses:
-
-- `builtin.prohibited_actions`;
-- `builtin.task_adherence`, with the configured evaluation deployment; and
-- `builtin.sensitive_data_leakage`.
-
-Attack strategies begin with `Flip`, `Base64`, and `IndirectJailbreak`.
-Strategy selection, multi-turn depth, evaluator selection, and the
-temporary-resource prefix belong in `red-team.yaml`, not Python. The preview
-cloud API does not expose an objective-count request field; the service decides
-the count and the runner records the returned item count. Review
-prohibited-action taxonomies before starting applicable runs.
-
-The reviewed initial configuration is:
-
-| Setting | Value |
-|---------|-------|
-| Temporary-resource prefix | `scope-static-redteam` |
-| Generated objectives per surface | Service default, recorded from results |
-| Multi-turn depth | `5` |
-| Strategies | `Flip`, `Base64`, `IndirectJailbreak` |
-| Risk categories | `ProhibitedActions`, `TaskAdherence`, `SensitiveDataLeakage` |
-| Poll interval / timeout | 5 seconds / 3,600 seconds |
-| Transient retries | 5, with bounded 0.5–30 second backoff |
-
-Prefer a Foundry/Azure OpenAI model-deployment target when it can preserve the
-surface's system/user messages and tools. Otherwise create a temporary Foundry
-prompt-agent target backed by the configured model deployment. Delete only
-resources created for that run after native results are downloaded; preserve
-them only by setting `SCOPE_RED_TEAM_KEEP_REMOTE=true`. Never delete the shared
-project or model deployment. `SCOPE_RED_TEAM_SURFACES` may contain a
-comma-separated subset of profile IDs; when unset, all reviewed profiles run.
-
-### Coding-agent canary limitation
-
-For task, gate, and `AGENTS.md` profiles, Foundry receives the exact
-Scope-authored prompt/file composition but cannot reproduce proprietary
-Copilot or Claude hidden instructions, tools, permission model, or execution
-loop. These scans are **prompt-ingestion security canaries**, not exact
-end-to-end worker security tests. Results must retain that label. Do not claim
-that a naked model prompt represents a coding-agent surface, and do not infer
-that a passing canary proves the worker is secure.
-
-Cloud result metadata includes remote evaluation/run IDs, target identity and
-version, taxonomy ID, surface profile, attack configuration, status, Attack
-Success Rate, evaluator summaries, and the downloaded framework-native result
-files. `targetMode` records the actual cloud representation:
-`azure-ai-model-user-message` for a bare model target,
-`prompt-agent-user-message` for a final user-message slot wrapped by trusted
-prompt-agent instructions, and `prompt-agent-role-emulation` for embedded,
-system, or file slots.
-
 ## Version-control and artifact policy
 
 The boundary is intentionally strict:
 
 - **Commit:** curated quality inputs, the provenance/selection manifest,
-  reviewed surface profiles, attack/evaluator configuration, rubrics, schemas,
-  and threshold policy.
-- **Never commit:** generated responses, SDK row output, downloaded red-team
-  output, run manifests, aggregate summaries, baseline findings, portal URLs,
+  evaluator configuration, rubrics, schemas, and threshold policy.
+- **Never commit:** generated responses, SDK row output,
+  run manifests, aggregate summaries, baseline findings, portal URLs,
   or any other per-run artifact.
 
 All generated material belongs under the ignored
 `evaluations/static-prompts/results/<run-id>/` tree. Each invocation creates a
 `manifest.json` before work begins and updates it on success, policy failure,
 partial failure, or infrastructure failure. It records mode, status,
-timestamps, dataset/profile versions, model and evaluator identities, SDK
+timestamps, dataset versions, model and evaluator identities, SDK
 versions, and relative paths to every artifact obtained so far.
 
 `quality/` contains `selected-cases.jsonl`, `production-rows.jsonl`,
@@ -480,15 +391,11 @@ versions, and relative paths to every artifact obtained so far.
 `azure-native/<family>/<evaluator>-diagnostics.json` diagnostic sidecars,
 `findings.json`, `summary.json`, `decision-summary.json`, and `rubric-snapshot.yaml`.
 Replay runs additionally retain `source-rubric-snapshot.yaml`, `replay-plan.json`,
-`source-integrity.json`, and `comparison.json`. `red-team/summary.json` indexes the
-surface runs; each `<surface-id>/` contains `taxonomy.json`,
-`output-items.json` (or the framework's native JSONL/CSV form), and
-`summary.json`. An optional Markdown summary is derived from these files and
+`source-integrity.json`, and `comparison.json`. An optional Markdown summary is derived from these files and
 never replaces them. The Azure AI Evaluation SDK does not expose a native
 Markdown report exporter, so `pnpm --filter static-prompt-evals report --
 results/<run-id>` renders `REPORT.md` from the persisted run manifest, quality
-summary, aggregates, and findings. In `both` mode, one track's failure must not
-suppress execution or artifacts for the other.
+summary, aggregates, and findings.
 
 The curated-input provenance manifest is committed. A per-run
 `results/.../manifest.json` is an ignored execution artifact; they are not the
@@ -521,26 +428,17 @@ credential chain. Quality grading uses
 `SCOPE_EVAL_AZURE_OPENAI_ENDPOINT` and
 `SCOPE_EVAL_AZURE_OPENAI_DEPLOYMENT` (with their standard
 `AZURE_OPENAI_*` fallbacks), plus an optional API key/API version; without a key
-it uses `DefaultAzureCredential`. Red teaming requires
-`AZURE_AI_PROJECT_ENDPOINT` and `AZURE_AI_MODEL_DEPLOYMENT_NAME` and always uses
-`DefaultAzureCredential`. The developer principal needs **Foundry User** or a
-broader Foundry data-plane role at the project or account scope. Creating the
-red-team taxonomy requires the
-`Microsoft.CognitiveServices/accounts/AIServices/evaluations/write` data
-action.
+it uses `DefaultAzureCredential`.
 
 Root commands delegate through `pnpm --filter static-prompt-evals`:
 
 ```bash
-# Unified runner; defaults to both when --mode is omitted
+# Runner defaults to quality when --mode is omitted
 pnpm eval:prompts -- --mode quality
-pnpm eval:prompts -- --mode red-team
-pnpm eval:prompts -- --mode both
 
 # Convenience commands
 pnpm eval:static-prompts
 pnpm eval:static-prompts:smoke
-pnpm eval:red-team
 
 # Human-readable report from an existing ignored run
 pnpm --filter static-prompt-evals report -- \
@@ -578,17 +476,17 @@ pnpm generate -- \
 Use `--samples N` to override the default of three. The unified command exits
 nonzero for deterministic failures, configured threshold/regression failures,
 or infrastructure failures. A nonzero policy result does not make the
-framework incomplete: prompt-quality failures and successful attacks are its
+framework incomplete: prompt-quality failures are its
 intended findings.
 
 The offline smoke command still records deterministic prompt-policy findings
 and its underlying `policyStatus`, but exits successfully when adapter
 execution, evaluation, and artifact persistence complete.
 
-The unified runner also accepts `--smoke`, `--results-dir PATH`,
-`--dataset PATH`, `--surface-profiles PATH`, and `--red-team-config PATH`.
-Red-team surface selection and temporary-resource preservation currently use
-`SCOPE_RED_TEAM_SURFACES` and `SCOPE_RED_TEAM_KEEP_REMOTE`, respectively.
+The runner also accepts `--smoke`, `--results-dir PATH`, and `--dataset PATH`.
+Red-team modes (`red-team` and `both`) are rejected before execution. Legacy
+red-team path fields in the internal `RunConfig` remain inert to avoid changing
+quality constructors; they do not import or execute red-team code.
 
 Dataset refresh is explicit. Supply `--base-url` (default integration URL), one
 project ID or project name, a dataset version, a deterministic sampling seed,
@@ -620,7 +518,7 @@ row count; it does not glob the version directory.
 
 Evaluation work is not complete after scaffolding or one successful smoke test.
 Independent implementation streams may own adapters, quality evaluation,
-harvesting, red teaming, and documentation, but their files and contracts must
+harvesting, and documentation, but their files and contracts must
 be integrated before the final run.
 
 The implementation loop is:
@@ -630,26 +528,23 @@ The implementation loop is:
 3. Run schema/inventory coverage, data validation, JSONL round trips, and the
    fake-model smoke path.
 4. Fix adapter, evaluator, artifact, cleanup, or coverage defects and repeat.
-5. Run real `quality`, `red-team`, and `both` baselines.
-6. Preserve prompt/security findings without changing production behavior.
-7. Delete temporary cloud targets and credentials and verify ignored paths and
+5. Run a real `quality` baseline only when explicitly approved.
+6. Preserve prompt findings without changing production behavior.
+7. Delete temporary credentials and verify ignored paths and
    leakage checks.
 
 Completion requires all of the following:
 
-- all ten static families and eight surface categories are present in the
+- all ten static families are present in the
   machine-checked manifest with no missing or orphaned adapter, dataset,
-  assertion, rubric, or profile;
-- every red-team profile resolves production composition and passes its benign
-  composition contract;
+  assertion, or rubric;
 - the curated dataset is redacted, approved, reproducible, balanced, and
   includes the prior criteria-orientation coverage;
-- quality, red-team, and both modes work end to end and persist complete
+- quality mode works end to end and persists complete
   manifests and structured artifacts even on partial failure;
-- real all-family and all-surface baselines have run against the configured
-  deployment, with failures/attacks preserved as findings;
-- TypeScript, Python, contract, round-trip, harvester, smoke, and mocked
-  red-team lifecycle/cleanup tests pass;
+- real all-family baselines have run against the configured
+  deployment, with failures preserved as findings;
+- TypeScript, Python, contract, round-trip, harvester, and smoke tests pass;
 - obsolete evaluation surfaces are removed only after replacement coverage has
   no remaining consumers;
 - no CI workflow changes are made; and
