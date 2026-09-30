@@ -21,8 +21,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=("quality",),
-        default="quality",
+        choices=("quality", "red-team", "both"),
+        default="both",
     )
     parser.add_argument("--samples", type=int, default=3)
     parser.add_argument("--smoke", action="store_true")
@@ -43,6 +43,16 @@ def parse_args() -> argparse.Namespace:
         "--dataset",
         type=Path,
         default=package_root / "datasets" / "manifest.json",
+    )
+    parser.add_argument(
+        "--surface-profiles",
+        type=Path,
+        default=package_root / "red-team" / "surface-profiles.yaml",
+    )
+    parser.add_argument(
+        "--red-team-config",
+        type=Path,
+        default=package_root / "red-team" / "red-team.yaml",
     )
     return parser.parse_args([argument for argument in sys.argv[1:] if argument != "--"])
 
@@ -110,8 +120,8 @@ async def run() -> int:
         run_dir=run_dir,
         manifest_path=package_root / "evaluation-manifest.yaml",
         dataset_path=args.dataset.resolve(),
-        surface_profiles_path=package_root / "red-team" / "surface-profiles.yaml",
-        red_team_config_path=package_root / "red-team" / "red-team.yaml",
+        surface_profiles_path=args.surface_profiles.resolve(),
+        red_team_config_path=args.red_team_config.resolve(),
         samples=args.samples,
         smoke=args.smoke,
         offline=args.offline,
@@ -128,11 +138,19 @@ async def run() -> int:
     }
     write_json(manifest_path, manifest)
 
-    if args.mode == "quality":
+    if args.mode in ("quality", "both"):
         from .quality import run_quality
 
         manifest["tracks"]["quality"] = await run_track(
             "quality", run_quality, config, run_dir
+        )
+        write_json(manifest_path, manifest)
+
+    if args.mode in ("red-team", "both"):
+        from .red_team import run_red_team
+
+        manifest["tracks"]["red-team"] = await run_track(
+            "red-team", run_red_team, config, run_dir
         )
         write_json(manifest_path, manifest)
 

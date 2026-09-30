@@ -54,6 +54,7 @@
     "eval:static-prompts:smoke": "pnpm --filter static-prompt-evals evaluate:quality -- --smoke --offline",
     "eval:static-prompts:harvest": "pnpm --filter static-prompt-evals harvest",
     "eval:static-prompts:validate-data": "pnpm --filter static-prompt-evals validate-data",
+    "eval:red-team": "pnpm --filter static-prompt-evals evaluate:red-team",
     "test:watch": "vitest",
     "build:gateway": "cd apps/gateway && cargo build --release",
     "test:gateway": "cd apps/gateway && cargo test",

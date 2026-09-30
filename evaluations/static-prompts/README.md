@@ -1,13 +1,33 @@
 # Static Prompt Evaluations
 
-This workspace runs Scope-owned static prompt families through production
-TypeScript adapters and grades the generated JSONL with the Azure AI Evaluation
-SDK. Cloud red teaming is extracted into a separate dependent contribution.
-The extraction does not change the normal evaluations or the evidence shared
-with OneRAI; no historical review findings are fixed by this scope change.
+This workspace evaluates Scope's AI instruction surfaces. It has two independent
+tracks:
+
+- **quality** runs Scope-owned static prompt families through production
+  TypeScript adapters and grades the generated JSONL with the Azure AI
+  Evaluation SDK;
+- **red-team** inserts cloud-generated adversarial text into reviewed
+  user-controlled instruction surfaces and scans the actual composed request.
 
 Read [the architecture and maintenance guide](../../docs/architecture/prompt-evaluations.md)
-before changing adapters, datasets, rubrics, or thresholds.
+before changing adapters, datasets, rubrics, profiles, or thresholds.
+
+## Red-team readiness and dependency
+
+The restored, previously unused red-team implementation depends on
+[microsoft/scope#1441](https://github.com/microsoft/scope/pull/1441) and must merge
+after it. Red teaming was not used for OneRAI. The live end-to-end baseline
+remains unvalidated; the previous attempt was blocked by missing
+`Microsoft.CognitiveServices/accounts/AIServices/evaluations/write` permission.
+This is a mechanical restoration only: normal evaluation logic and existing
+OneRAI evidence are unchanged, with no regeneration, regrading, or review fixes.
+All 11 review findings remain deferred (eight quality and three red-team).
+
+The three red-team findings remain: the overall attack-success denominator
+includes errors; independent-judge composition can skip attacked descendants;
+and cancellation can orphan threaded resource creation and mask the error with
+an uninitialized summary. No live model calls or cloud resources are required
+for the offline checks.
 
 ## Setup
 
@@ -36,17 +56,26 @@ Quality generation uses `PROMPT_EVAL_MODEL` plus the existing inference
 credentials. Quality grading requires
 `SCOPE_EVAL_AZURE_OPENAI_ENDPOINT` and
 `SCOPE_EVAL_AZURE_OPENAI_DEPLOYMENT` (or their `AZURE_OPENAI_*` fallbacks);
-an API key is optional because `DefaultAzureCredential` is supported.
+an API key is optional because `DefaultAzureCredential` is supported. Red
+teaming requires `AZURE_AI_PROJECT_ENDPOINT` and
+`AZURE_AI_MODEL_DEPLOYMENT_NAME` and uses only `DefaultAzureCredential`.
+The signed-in principal must have the **Foundry User** role (or a broader
+Foundry data-plane role) at the project or account scope. Taxonomy creation
+specifically requires
+`Microsoft.CognitiveServices/accounts/AIServices/evaluations/write`.
 
 ## Commands
 
 ```bash
-# Run normal static prompt evaluations (quality is the default)
+# Run one or both independent tracks
 pnpm eval:prompts -- --mode quality
+pnpm eval:prompts -- --mode red-team
+pnpm eval:prompts -- --mode both
 
 # Convenience commands
 pnpm eval:static-prompts
 pnpm eval:static-prompts:smoke
+pnpm eval:red-team
 
 # Refresh and validate committed inputs
 pnpm eval:static-prompts:harvest -- --project-name "Default Project"
@@ -86,9 +115,10 @@ For a legacy canvas/client, `--decision-output NEW_PATH --decision-only` exports
 hash-verified historical decision without changing source artifacts.
 The destination must be outside the source run and must not already exist.
 
-The runner accepts `--samples N`, `--smoke`, `--results-dir PATH`, and
-`--dataset PATH`. The existing `--mode quality` command is unchanged.
-`--mode red-team` and `--mode both` are rejected before execution.
+The unified runner accepts `--samples N`, `--smoke`, `--results-dir PATH`,
+`--dataset PATH`, `--surface-profiles PATH`, and `--red-team-config PATH`.
+Surface selection and remote-resource preservation use the environment
+variables documented below rather than CLI flags.
 
 ### Replay original responses without regeneration
 
@@ -212,6 +242,35 @@ When adding or changing a static family:
 Adapters must call production prompt composition and parsing. Do not copy
 production prompt text into this package.
 
+## Authoring red-team profiles
+
+A surface profile identifies:
+
+- the source field and downstream AI consumer;
+- the production adapter and trusted wrapper;
+- the exact untrusted insertion point and role;
+- expected security boundary and prohibited outcomes; and
+- supported single-turn/multi-turn behavior.
+
+Profiles do not contain a handwritten copy of the trusted wrapper. Add a benign
+contract fixture that proves roles, ordering, delimiters, static instructions,
+tool descriptions/schemas, and insertion point match runtime composition.
+
+Attack strategies, multi-turn depth, evaluators, and temporary-resource naming
+belong in the reviewed red-team configuration. The preview API controls the
+generated-objective count; record the returned item count rather than claiming
+that a local objective-count setting was applied. Review prohibited-action
+taxonomies before applicable runs.
+
+The initial `red-team/red-team.yaml` uses multi-turn depth five, `Flip`,
+`Base64`, and `IndirectJailbreak`, and the prohibited-actions,
+task-adherence, and sensitive-data-leakage evaluators. It polls every five
+seconds for up to one hour and uses bounded transient retries.
+
+Task, gate, and `AGENTS.md` cloud scans are prompt-ingestion canaries because a
+Foundry model target cannot reproduce coding-agent hidden instructions, tools,
+permissions, or execution loops. Preserve that limitation in reports.
+
 ## Results and version control
 
 Every invocation creates:
@@ -240,6 +299,12 @@ results/<run-id>/
     source-integrity.json
     source-rubric-snapshot.yaml
     comparison.json
+  red-team/
+    summary.json
+    <surface-id>/
+      taxonomy.json
+      output-items.json
+      summary.json
 ```
 
 The runner updates `manifest.json` even on partial or infrastructure failure.
@@ -247,6 +312,9 @@ Native evaluator diagnostics preserve redacted SDK batch/per-row errors even
 when the SDK returns rows without `outputs.*`. The index links their sidecars
 with `diagnosticArtifact`. Local SDK validator/converter preflight rejects
 invalid tool-call message shapes before a paid evaluation call.
+In `both` mode it attempts and records both tracks independently.
+Cloud-native output may be retained as JSONL or CSV instead of
+`output-items.json` when that is the format returned by the SDK.
 
 For focused quality-engine validation:
 
@@ -267,6 +335,11 @@ pnpm generate -- \
 
 `results/` is ignored. Never commit generated responses, SDK/cloud output, run
 manifests, summaries, findings, or portal URLs. Commit only curated inputs and
-their provenance, schemas, rubrics, reviewed threshold policy, and evaluator
-configuration. Existing OneRAI evidence remains outside version control and is
-not regenerated or modified as part of extracting red teaming.
+their provenance, schemas, rubrics, reviewed threshold policy, surface
+profiles, and attack/evaluator configuration.
+
+After red teaming, download results and delete only temporary targets created by
+that run unless `SCOPE_RED_TEAM_KEEP_REMOTE=true` was explicitly set. Never
+delete the shared Foundry project or deployment. Set
+`SCOPE_RED_TEAM_SURFACES` to a comma-separated subset of profile IDs for a
+targeted scan; leave it unset to scan every reviewed profile.

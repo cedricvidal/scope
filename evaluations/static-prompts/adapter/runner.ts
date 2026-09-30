@@ -14,12 +14,16 @@ import {
   type AdapterOutputRow,
   type AdapterSuccessRow,
   type QualityCaseRow,
+  type RedTeamCaseRow,
 } from "./protocol.js";
 import {
   getPromptTarget,
   isQualityFamily,
+  isRedTeamSurface,
+  listRedTeamTargets,
   listTargets,
 } from "./registry.js";
+import { composeRedTeamSurface } from "./red-team.js";
 import {
   createFakeAdapterContext,
   createProductionAdapterContext,
@@ -46,6 +50,7 @@ async function main(): Promise<void> {
     process.stdout.write(
       `${JSON.stringify({
         qualityTargets: listTargets(),
+        redTeamTargets: listRedTeamTargets(),
       })}\n`,
     );
     return;
@@ -96,11 +101,14 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const repetitions = options.samples;
+    const repetitions = "surface" in row ? 1 : options.samples;
     for (let sampleIndex = 0; sampleIndex < repetitions; sampleIndex += 1) {
       const startedAt = performance.now();
       try {
-        const result = await runQualityRow(row, context, sampleIndex, startedAt);
+        const result =
+          "surface" in row
+            ? await runRedTeamRow(row, context.model, sampleIndex, startedAt)
+            : await runQualityRow(row, context, sampleIndex, startedAt);
         await writeRow(output, result);
       } catch (error) {
         await writeRow(
@@ -110,7 +118,8 @@ async function main(): Promise<void> {
             sampleIndex,
             error,
             classifyError(error),
-            row,
+            "family" in row ? row : undefined,
+            "surface" in row ? row : undefined,
             performance.now() - startedAt,
           ),
         );
@@ -159,6 +168,30 @@ async function runQualityRow(
   };
 }
 
+async function runRedTeamRow(
+  row: RedTeamCaseRow,
+  model: string,
+  sampleIndex: number,
+  startedAt: number,
+): Promise<AdapterSuccessRow> {
+  const result = await composeRedTeamSurface(
+    row.surface,
+    row.attack,
+    row.input,
+    model,
+  );
+  return {
+    caseId: row.id,
+    surface: row.surface,
+    sampleIndex,
+    status: "ok",
+    latencyMs: performance.now() - startedAt,
+    request: result.request,
+    compositionFingerprint: result.compositionFingerprint,
+    sourceRevision: result.sourceRevision,
+  };
+}
+
 function parseInputRow(input: unknown): AdapterInputRow {
   const value = record(input, "row");
   const id = requiredString(value.id, "row.id");
@@ -178,9 +211,17 @@ function parseInputRow(input: unknown): AdapterInputRow {
       ...("expected" in value ? { expected: value.expected } : {}),
     };
   }
-  throw new AdapterValidationError(
-    "row.family is required; red-team surfaces are not available in this package",
-  );
+  if (!isRedTeamSurface(value.surface)) {
+    throw new AdapterValidationError(
+      `row.surface '${String(value.surface)}' is not registered`,
+    );
+  }
+  return {
+    id,
+    surface: value.surface,
+    attack: requiredString(value.attack, "row.attack"),
+    input: value.input,
+  };
 }
 
 function errorRow(
@@ -189,6 +230,7 @@ function errorRow(
   error: unknown,
   classification: AdapterErrorRow["error"]["classification"],
   quality?: QualityCaseRow,
+  redTeam?: RedTeamCaseRow,
   latencyMs = 0,
 ): AdapterErrorRow {
   return {
@@ -199,6 +241,7 @@ function errorRow(
           variant: quality.variant ?? "default",
         }
       : {}),
+    ...(redTeam ? { surface: redTeam.surface } : {}),
     sampleIndex,
     status: "error",
     latencyMs,
