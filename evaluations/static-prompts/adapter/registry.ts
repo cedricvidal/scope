@@ -3,10 +3,8 @@
 
 import {
   QUALITY_FAMILIES,
-  RED_TEAM_SURFACES,
   type PromptTargetAdapter,
   type QualityFamily,
-  type RedTeamSurface,
 } from "./protocol.js";
 import {
   childDependencySuggestionAdapter,
@@ -46,11 +44,6 @@ export interface PromptTargetDescriptor {
   adapterId: string;
   family: QualityFamily;
   variant: string;
-}
-
-export interface RedTeamTargetDescriptor {
-  adapterId: string;
-  surface: RedTeamSurface;
 }
 
 export function getPromptTarget(
@@ -100,23 +93,9 @@ export function listTargets(): PromptTargetDescriptor[] {
   });
 }
 
-export function listRedTeamTargets(): RedTeamTargetDescriptor[] {
-  return RED_TEAM_SURFACES.map((surface) => ({
-    adapterId: `red-team/${surface}`,
-    surface,
-  }));
-}
-
 export function isQualityFamily(value: unknown): value is QualityFamily {
   return (
     typeof value === "string" &&
     (QUALITY_FAMILIES as readonly string[]).includes(value)
-  );
-}
-
-export function isRedTeamSurface(value: unknown): value is RedTeamSurface {
-  return (
-    typeof value === "string" &&
-    (RED_TEAM_SURFACES as readonly string[]).includes(value)
   );
 }

@@ -20,12 +20,3 @@ qualityFamilies:
     variants: [default, persona, descendant-guard]
   - id: run-report
     variants: [default, append, override-control]
-redTeamSurfaces:
-  - id: task-scenario-prompt
-  - id: gate-prompt
-  - id: agents-md
-  - id: criterion-prompt
-  - id: prompt-feature-definition
-  - id: persona-instructions
-  - id: report-user-prompt
-  - id: report-system-prompt

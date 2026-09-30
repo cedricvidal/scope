@@ -11,7 +11,6 @@ from static_prompt_evals.quality.replay import file_hashes
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("arguments,message", [
-    (["--mode", "both", "--source-run", "source"], "requires --mode quality"),
     (["--mode", "quality", "--source-run", "source", "--smoke"], "cannot use --smoke"),
     (["--mode", "quality", "--regrade", "family/evaluator"], "requires --source-run"),
     (["--mode", "quality", "--source-run", "source", "--offline", "--regrade", "family/evaluator"], "without --offline"),
@@ -69,33 +68,24 @@ async def test_source_and_new_run_can_share_results_parent(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_both_mode_preserves_independent_track_artifacts(
+async def test_default_mode_runs_only_quality(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     quality = ModuleType("static_prompt_evals.quality")
-    red_team = ModuleType("static_prompt_evals.red_team")
 
     def run_quality(config: object, run_dir: Path) -> dict[str, object]:
         (run_dir / "rows.jsonl").write_text('{"status":"ok"}\n', encoding="utf-8")
         return {"status": "succeeded"}
 
-    async def run_red_team(config: object, run_dir: Path) -> dict[str, object]:
-        (run_dir / "rows.json").write_text("[]\n", encoding="utf-8")
-        return {"status": "succeeded"}
-
     quality.run_quality = run_quality  # type: ignore[attr-defined]
-    red_team.run_red_team = run_red_team  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "static_prompt_evals.quality", quality)
-    monkeypatch.setitem(sys.modules, "static_prompt_evals.red_team", red_team)
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "scope-evals",
             "--",
-            "--mode",
-            "both",
             "--results-dir",
             str(tmp_path),
         ],
@@ -110,37 +100,29 @@ async def test_both_mode_preserves_independent_track_artifacts(
     )
     assert manifest["status"] == "succeeded"
     assert manifest["tracks"]["quality"]["artifacts"] == ["quality/rows.jsonl"]
-    assert manifest["tracks"]["red-team"]["artifacts"] == ["red-team/rows.json"]
+    assert manifest["mode"] == "quality"
+    assert set(manifest["tracks"]) == {"quality"}
 
 
 @pytest.mark.asyncio
-async def test_both_mode_attempts_red_team_after_quality_failure(
+async def test_quality_failure_retains_redacted_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     quality = ModuleType("static_prompt_evals.quality")
-    red_team = ModuleType("static_prompt_evals.red_team")
 
     def run_quality(config: object, run_dir: Path) -> dict[str, object]:
         raise RuntimeError("https://secret.example/token-abcdefghijklmnopqrstuvwxyz")
 
-    async def run_red_team(config: object, run_dir: Path) -> dict[str, object]:
-        (run_dir / "summary.json").write_text(
-            '{"status":"succeeded"}\n', encoding="utf-8"
-        )
-        return {"status": "succeeded"}
-
     quality.run_quality = run_quality  # type: ignore[attr-defined]
-    red_team.run_red_team = run_red_team  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "static_prompt_evals.quality", quality)
-    monkeypatch.setitem(sys.modules, "static_prompt_evals.red_team", red_team)
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "scope-evals",
             "--mode",
-            "both",
+            "quality",
             "--results-dir",
             str(tmp_path),
         ],
@@ -153,4 +135,16 @@ async def test_both_mode_attempts_red_team_after_quality_failure(
     )
     assert manifest["tracks"]["quality"]["status"] == "infrastructure-failed"
     assert "secret.example" not in manifest["tracks"]["quality"]["error"]
-    assert manifest["tracks"]["red-team"]["status"] == "succeeded"
+    assert set(manifest["tracks"]) == {"quality"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["red-team", "both"])
+async def test_removed_modes_fail_before_creating_a_run(monkeypatch, tmp_path, mode):
+    monkeypatch.setattr(sys, "argv", [
+        "scope-evals", "--mode", mode, "--results-dir", str(tmp_path),
+    ])
+    with pytest.raises(SystemExit) as error:
+        await cli.run()
+    assert error.value.code == 2
+    assert list(tmp_path.iterdir()) == []

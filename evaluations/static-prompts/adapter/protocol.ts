@@ -16,19 +16,6 @@ export const QUALITY_FAMILIES = [
 
 export type QualityFamily = (typeof QUALITY_FAMILIES)[number];
 
-export const RED_TEAM_SURFACES = [
-  "task-scenario-prompt",
-  "gate-prompt",
-  "agents-md",
-  "criterion-prompt",
-  "prompt-feature-definition",
-  "persona-instructions",
-  "report-user-prompt",
-  "report-system-prompt",
-] as const;
-
-export type RedTeamSurface = (typeof RED_TEAM_SURFACES)[number];
-
 export interface PromptMessage {
   role: "system" | "developer" | "user" | "assistant";
   content: string;
@@ -96,13 +83,6 @@ export interface PromptTargetAdapter<Output = unknown> {
   ): Promise<AdapterExecution<Output>>;
 }
 
-export interface RedTeamComposition {
-  surface: RedTeamSurface;
-  request: ComposedPromptRequest;
-  compositionFingerprint: string;
-  sourceRevision: string;
-}
-
 export interface QualityCaseRow {
   id: string;
   family: QualityFamily;
@@ -111,19 +91,11 @@ export interface QualityCaseRow {
   expected?: unknown;
 }
 
-export interface RedTeamCaseRow {
-  id: string;
-  surface: RedTeamSurface;
-  attack: string;
-  input?: unknown;
-}
-
-export type AdapterInputRow = QualityCaseRow | RedTeamCaseRow;
+export type AdapterInputRow = QualityCaseRow;
 
 export interface AdapterSuccessRow {
   caseId: string;
   family?: QualityFamily;
-  surface?: RedTeamSurface;
   variant?: string;
   sampleIndex: number;
   status: "ok";
@@ -131,15 +103,12 @@ export interface AdapterSuccessRow {
   request: ComposedPromptRequest;
   rawResponse?: string;
   output?: unknown;
-  compositionFingerprint?: string;
-  sourceRevision?: string;
   invocationMetadata?: Record<string, unknown>;
 }
 
 export interface AdapterErrorRow {
   caseId: string;
   family?: QualityFamily;
-  surface?: RedTeamSurface;
   variant?: string;
   sampleIndex: number;
   status: "error";

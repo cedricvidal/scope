@@ -17,17 +17,14 @@ import {
 } from "../../../apps/api/src/prompt-feature-llm.js";
 import {
   QUALITY_FAMILIES,
-  RED_TEAM_SURFACES,
   type AdapterContext,
   type ComposedPromptRequest,
 } from "./protocol.js";
 import {
   getPromptTarget,
   listPromptTargets,
-  listRedTeamTargets,
   listTargets,
 } from "./registry.js";
-import { composeRedTeamSurface } from "./red-team.js";
 
 function fakeContext(
   responder: (request: ComposedPromptRequest) => string,
@@ -98,9 +95,6 @@ describe("static prompt adapter registry", () => {
       family: "run-report",
       variant: "override-control",
     });
-    expect(listRedTeamTargets().map(({ surface }) => surface)).toEqual([
-      ...RED_TEAM_SURFACES,
-    ]);
     expect(JSON.parse(JSON.stringify(targets))).toEqual(targets);
   });
 });
@@ -427,103 +421,5 @@ describe("session prompt adapters", () => {
         "reference_insight",
       ]),
     );
-  });
-});
-
-describe("red-team composed request surfaces", () => {
-  const inputs: Record<(typeof RED_TEAM_SURFACES)[number], unknown> = {
-    "task-scenario-prompt": {},
-    "gate-prompt": {},
-    "agents-md": { taskPrompt: "Build the project." },
-    "criterion-prompt": {},
-    "prompt-feature-definition": {
-      taskText: "Build a web API.",
-      featureId: "asks_for_api",
-    },
-    "persona-instructions": {
-      criteria: [{ id: "base", prompt: "Create the project." }],
-      judgeResults: [
-        {
-          criterionId: "base",
-          passed: false,
-          evaluated: true,
-          feedback: "Missing project.",
-        },
-      ],
-    },
-    "report-user-prompt": { requestId: "request-1" },
-    "report-system-prompt": {
-      requestId: "request-1",
-      userPrompt: "Analyze {requestId}.",
-      systemPromptMode: "append",
-    },
-  };
-
-  it("composes all eight surfaces with stable fingerprints", async () => {
-    for (const surface of RED_TEAM_SURFACES) {
-      const first = await composeRedTeamSurface(
-        surface,
-        "ATTACK_PAYLOAD",
-        inputs[surface],
-        "test-model",
-      );
-      const second = await composeRedTeamSurface(
-        surface,
-        "ATTACK_PAYLOAD",
-        inputs[surface],
-        "test-model",
-      );
-      expect(first.surface).toBe(surface);
-      expect(first.compositionFingerprint).toBe(
-        second.compositionFingerprint,
-      );
-      expect(JSON.stringify(first.request)).toContain("ATTACK_PAYLOAD");
-      expect(first.request.metadata.productionSources.length).toBeGreaterThan(
-        0,
-      );
-      expect(JSON.parse(JSON.stringify(first))).toEqual(first);
-
-      switch (surface) {
-        case "task-scenario-prompt":
-        case "gate-prompt":
-          expect(first.request.messages).toEqual([
-            { role: "user", content: "ATTACK_PAYLOAD" },
-          ]);
-          break;
-        case "agents-md":
-          expect(first.request.files).toEqual([
-            {
-              path: "AGENTS.md",
-              content: "ATTACK_PAYLOAD",
-              trust: "untrusted",
-            },
-          ]);
-          expect(first.request.metadata.fidelity).toBe("partial");
-          break;
-        case "criterion-prompt":
-        case "prompt-feature-definition":
-          expect(first.request.messages[0].content).not.toContain(
-            "ATTACK_PAYLOAD",
-          );
-          expect(first.request.messages[1].content).toContain(
-            "ATTACK_PAYLOAD",
-          );
-          break;
-        case "persona-instructions":
-        case "report-system-prompt":
-          expect(first.request.messages[0].content).toContain(
-            "ATTACK_PAYLOAD",
-          );
-          break;
-        case "report-user-prompt":
-          expect(first.request.messages[1].content).toContain(
-            "ATTACK_PAYLOAD",
-          );
-          expect(first.request.messages[0].content).not.toContain(
-            "ATTACK_PAYLOAD",
-          );
-          break;
-      }
-    }
   });
 });
