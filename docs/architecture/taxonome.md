@@ -41,6 +41,12 @@ The package root does not import Ax or the SDK. Prompt execution is explicitly
 provided by `taxonomy-evaluation/copilot`, so a deterministic-only process does
 not initialize the SDK and needs no token.
 
+Built-in deterministic implementations live in dedicated handler folders.
+Timeout is implemented in
+`packages/taxonomy-evaluation/src/handlers/timeout/handler.ts`, with its
+co-located unit tests in `handler.test.ts`; `handlers.ts` remains the central
+registry that binds the stable YAML ID `scope/timeout-v1`.
+
 ## Build and run
 
 From the repository root:

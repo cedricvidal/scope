@@ -3,7 +3,7 @@
 
 export * from "./contracts.js";
 export * from "./engine.js";
-export * from "./timeout.js";
+export * from "./handlers/timeout/handler.js";
 export * from "./input.js";
 export * from "./readout.js";
 export * from "./readout-v2.js";

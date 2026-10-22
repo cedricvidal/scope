@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { LegacyTaxonomyInput, TimeoutResult } from "./contracts.js";
+import type { LegacyTaxonomyInput, TimeoutResult } from "../../contracts.js";
 import { z } from "zod";
-import type { DeterministicHandler } from "./handlers.js";
-import type { TaxonomyInput as LoadedTaxonomyInput } from "./scope-atif.js";
+import type { DeterministicHandler } from "../../handlers.js";
+import type { TaxonomyInput as LoadedTaxonomyInput } from "../../scope-atif.js";
 
 export const timeoutConfigSchema = z.object({
   threshold_ms: z.number().finite().positive().optional(),

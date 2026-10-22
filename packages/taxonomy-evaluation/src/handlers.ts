@@ -4,7 +4,7 @@
 import { createHash } from "node:crypto";
 import type { ScopeAtif } from "./scope-atif.js";
 import type { TaxonomySurface } from "./taxonomy.js";
-import { timeoutHandler } from "./timeout.js";
+import { timeoutHandler } from "./handlers/timeout/handler.js";
 
 export const TAXONOME_PLUGIN_API_VERSION = "scope/taxonome-plugin/v1";
 
