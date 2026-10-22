@@ -8,7 +8,7 @@
     "test:handler": "vitest run --config vitest.config.ts --reporter=default"
   },
   "dependencies": {
-    "taxonomy-evaluation": "workspace:*",
+    "taxonomy-engine": "workspace:*",
     "zod": "3.25.76"
   },
   "devDependencies": {

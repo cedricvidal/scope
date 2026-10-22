@@ -16,7 +16,8 @@ packages:
   - packages/model-scanning
   - packages/db-migrations
   - packages/llm-eval
-  - packages/taxonomy-evaluation
+  - packages/taxonomy-engine
+  - packages/ax-taxonomy
   - packages/telemetry
   - packages/test-utils
   - evaluations/*

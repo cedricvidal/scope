@@ -27,7 +27,7 @@ standaloneFamilies:
     variants: [default]
     transport: copilot-sdk
     adapter: adapter/standalone.ts
-    cases: ../../packages/taxonomy-evaluation/fixtures/v2/inputs.jsonl
-    assertions: ../../packages/taxonomy-evaluation/fixtures/v2/gold.json
+    cases: ../../packages/ax-taxonomy/fixtures/inputs.jsonl
+    assertions: ../../packages/ax-taxonomy/fixtures/gold.json
     command: pnpm --silent taxonome eval
     rubric: exact state/polarity, occurrence cardinality, grounded source/turn/call identities, schema validity

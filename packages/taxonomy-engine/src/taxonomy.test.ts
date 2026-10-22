@@ -5,7 +5,8 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createBuiltInHandlerRegistry } from "./handlers.js";
+import { z } from "zod";
+import { HandlerRegistry } from "./handlers.js";
 import {
   loadTaxonomy,
   serializableTaxonomy,
@@ -33,7 +34,7 @@ label: Timeout
 category_id: invocation
 implementation:
   type: deterministic
-  handler: scope/timeout-v1
+  handler: acme/test-v1
   config:
     threshold_ms: 2500
 evidence:
@@ -42,6 +43,23 @@ output_schema:
   type: object
   additionalProperties: true
 `;
+
+/** Creates a neutral deterministic registry for loader normalization tests. */
+function testHandlers(): HandlerRegistry {
+  const registry = new HandlerRegistry();
+  registry.register({
+    "acme/test-v1": {
+      configSchema: z.object({
+        threshold_ms: z.number().positive().optional(),
+      }).strict(),
+      evaluate: () => ({ state: "completed", observed: false }),
+    },
+  }, {
+    name: "taxonomy-engine-test",
+    origin: "local",
+  });
+  return registry;
+}
 
 describe("scope/taxonomy/v1 loader", () => {
   it("normalizes embedded and referenced elements to the same canonical digest", async () => {
@@ -69,10 +87,10 @@ surfaces:
     id: surface-mcp
 `);
 
-    const handlers = createBuiltInHandlerRegistry();
+    const handlers = testHandlers();
     const referenced = await loadTaxonomy(join(root, "referenced.yaml"), { handlers });
     const embedded = await loadTaxonomy(join(root, "embedded.yaml"), {
-      handlers: createBuiltInHandlerRegistry(),
+      handlers: testHandlers(),
     });
 
     expect(referenced.digest).toBe(embedded.digest);
@@ -80,25 +98,10 @@ surfaces:
     expect(referenced.elementById.get("beh-timeout")).toMatchObject({
       implementation: {
         type: "deterministic",
-        handler: "scope/timeout-v1",
+        handler: "acme/test-v1",
         config: { threshold_ms: 2500 },
       },
     });
-  });
-
-  it("loads the production taxonomy and resolves both implementation strategies", async () => {
-    const taxonomy = await loadTaxonomy(
-      new URL("../taxonomies/agent-behavior/taxonomy.yaml", import.meta.url).pathname,
-      { handlers: createBuiltInHandlerRegistry() },
-    );
-
-    expect(taxonomy.schema_version).toBe("scope/taxonomy/v1");
-    expect(taxonomy.elements.map(element => [element.id, element.implementation.type]))
-      .toEqual([
-        ["beh-skipped-invocation", "prompt"],
-        ["beh-timeout", "deterministic"],
-      ]);
-    expect(taxonomy.elementById.get("beh-timeout")?.resolvedHandler).toBeDefined();
   });
 
   it("rejects traversal, symlink escape, aliases, duplicates, unknown handlers, and invalid schemas", async () => {
@@ -120,12 +123,12 @@ ${elements}
 
     await writeFile(join(root, "traversal.yaml"), manifest("  - path: ../outside.yaml"));
     await expect(loadTaxonomy(join(root, "traversal.yaml"), {
-      handlers: createBuiltInHandlerRegistry(),
+      handlers: testHandlers(),
     })).rejects.toThrow("Unsafe taxonomy element path");
 
     await writeFile(join(root, "symlink.yaml"), manifest("  - path: linked.yaml"));
     await expect(loadTaxonomy(join(root, "symlink.yaml"), {
-      handlers: createBuiltInHandlerRegistry(),
+      handlers: testHandlers(),
     })).rejects.toThrow("cannot be a symlink");
 
     await writeFile(join(root, "alias.yaml"), `
@@ -138,14 +141,14 @@ surfaces: &surfaces
 elements: *surfaces
 `);
     await expect(loadTaxonomy(join(root, "alias.yaml"), {
-      handlers: createBuiltInHandlerRegistry(),
+      handlers: testHandlers(),
     })).rejects.toThrow(/anchors|aliases/);
 
     await writeFile(join(root, "duplicate.yaml"), manifest(
       `  - ${timeoutElement.trim().replaceAll("\n", "\n    ")}\n  - ${timeoutElement.trim().replaceAll("\n", "\n    ")}`,
     ));
     await expect(loadTaxonomy(join(root, "duplicate.yaml"), {
-      handlers: createBuiltInHandlerRegistry(),
+      handlers: testHandlers(),
     })).rejects.toThrow("Duplicate taxonomy element ID");
 
     await writeFile(join(root, "unknown.yaml"), manifest(`
@@ -158,7 +161,7 @@ elements: *surfaces
       type: object
 `));
     await expect(loadTaxonomy(join(root, "unknown.yaml"), {
-      handlers: createBuiltInHandlerRegistry(),
+      handlers: testHandlers(),
     })).rejects.toThrow("Unknown deterministic handler");
 
     await writeFile(join(root, "schema.yaml"), manifest(`
@@ -171,7 +174,7 @@ elements: *surfaces
       $ref: https://example.invalid/schema
 `));
     await expect(loadTaxonomy(join(root, "schema.yaml"), {
-      handlers: createBuiltInHandlerRegistry(),
+      handlers: testHandlers(),
     })).rejects.toThrow();
   });
 

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, expect, it } from "vitest";
-import { createBuiltInHandlerRegistry } from "./handlers.js";
+import { createHandlerRegistry } from "./handlers.js";
 import {
   OPTIMIZATION_ARTIFACT_VERSION,
   promptContractHash,
@@ -11,28 +11,27 @@ import {
 } from "./optimization-v2.js";
 import { loadTaxonomy } from "./taxonomy.js";
 
-async function loadProductionTaxonomy() {
+async function neutralTaxonomy() {
   return loadTaxonomy(
-    new URL("../taxonomies/agent-behavior/taxonomy.yaml", import.meta.url).pathname,
-    { handlers: createBuiltInHandlerRegistry() },
+    new URL("../fixtures/test-taxonomy.yaml", import.meta.url).pathname,
+    { handlers: createHandlerRegistry() },
   );
 }
 
-describe("v2 optimization artifact compatibility", () => {
-  it("rejects historical artifacts instead of silently reinterpreting them", async () => {
-    const taxonomy = await loadProductionTaxonomy();
-
+describe("generic v2 optimization compatibility", () => {
+  it("rejects historical artifacts instead of reinterpreting them", async () => {
+    const taxonomy = await neutralTaxonomy();
     expect(() => restoreOptimizationArtifactV2(
       { format: "taxonome.ax.v1" },
       taxonomy,
-      "beh-skipped-invocation",
+      "test-observation",
       "gpt-4.1",
     )).toThrow(/incompatible/);
   });
 
-  it("restores only an exact taxonomy, element, model, and prompt contract", async () => {
-    const taxonomy = await loadProductionTaxonomy();
-    const element = taxonomy.elementById.get("beh-skipped-invocation")!;
+  it("requires the exact taxonomy, element, model, and prompt contract", async () => {
+    const taxonomy = await neutralTaxonomy();
+    const element = taxonomy.elementById.get("test-observation")!;
     const artifact = {
       format: OPTIMIZATION_ARTIFACT_VERSION,
       taxonomy: {
@@ -49,7 +48,7 @@ describe("v2 optimization artifact compatibility", () => {
       sdk_version: "1.0.1",
       train_ids: ["case-a"],
       validation_ids: ["case-b"],
-      settings: { maxMetricCalls: 48, seed: 42, bootstrap: true },
+      settings: { maxMetricCalls: 4, seed: 42, bootstrap: true },
       transport_settings: {
         reasoning_effort: "low",
         sampling: "sdk-managed",
@@ -62,7 +61,6 @@ describe("v2 optimization artifact compatibility", () => {
         optimizationTime: 1,
         totalRounds: 1,
         converged: true,
-        instruction: "Preserved learned instruction.",
         demos: [{ evidence: "case-a" }],
       },
       metric_trace: [],
@@ -74,7 +72,6 @@ describe("v2 optimization artifact compatibility", () => {
       element.id,
       "gpt-4.1",
     ).optimized).toMatchObject({
-      instruction: "Preserved learned instruction.",
       demos: [{ evidence: "case-a" }],
     });
     expect(() => restoreOptimizationArtifactV2(

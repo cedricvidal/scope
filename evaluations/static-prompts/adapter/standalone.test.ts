@@ -1,36 +1,33 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   assertObservationV2,
   loadCasesV2,
   loadGoldV2,
-} from "./cases-v2.js";
-import { createBuiltInHandlerRegistry } from "./handlers.js";
-import { standaloneTargets, listStandaloneTargets } from "../../../evaluations/static-prompts/adapter/standalone.js";
+} from "taxonomy-engine/cases-v2";
 import {
   YAML_OBSERVATION_CONTRACT,
-} from "./prompt.js";
-import { loadTaxonomy } from "./taxonomy.js";
-
-/**
- * Resolves prompt case assets relative to this test module.
- *
- * @param name - Fixture filename under the package fixtures directory.
- */
-const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
+} from "taxonomy-engine/prompt";
+import {
+  agentBehaviorFixturePath,
+  loadAgentBehaviorTaxonomy,
+} from "ax-taxonomy";
+import {
+  standaloneTargets,
+  listStandaloneTargets,
+} from "./standalone.js";
 
 describe("static prompt family composition and curated contract (offline, not model evidence)", () => {
   it("registers the real SDK-only family and invokes the production program unchanged", async () => {
     // The fake transport captures the exact production composition without substituting a prompt copy.
-    const taxonomy = await loadTaxonomy(
-      new URL("../taxonomies/agent-behavior/taxonomy.yaml", import.meta.url).pathname,
-      { handlers: createBuiltInHandlerRegistry() },
+    const taxonomy = await loadAgentBehaviorTaxonomy();
+    const cases = await loadCasesV2(
+      agentBehaviorFixturePath("inputs.jsonl"),
+      taxonomy,
     );
-    const cases = await loadCasesV2(fixture("v2/inputs.jsonl"), taxonomy);
-    const gold = await loadGoldV2(fixture("v2/gold.json"));
+    const gold = await loadGoldV2(agentBehaviorFixturePath("gold.json"));
     const row = cases.find(c => c.id === "train-none")!;
     expect(listStandaloneTargets()).toContainEqual({
       adapterId: "taxonome-skipped-invocation/default",
@@ -64,11 +61,11 @@ describe("static prompt family composition and curated contract (offline, not mo
   });
   it("keeps identifiers opaque and renaming does not alter evidence/gold or the contract", async () => {
     // Rename only opaque identities and assert semantic evidence still drives the same validated output.
-    const taxonomy = await loadTaxonomy(
-      new URL("../taxonomies/agent-behavior/taxonomy.yaml", import.meta.url).pathname,
-      { handlers: createBuiltInHandlerRegistry() },
+    const taxonomy = await loadAgentBehaviorTaxonomy();
+    const rows = await loadCasesV2(
+      agentBehaviorFixturePath("inputs.jsonl"),
+      taxonomy,
     );
-    const rows = await loadCasesV2(fixture("v2/inputs.jsonl"), taxonomy);
     for (const row of rows) expect(row.atif.session_id).toMatch(/^traj-\d+$/);
     const input = structuredClone(rows[0].atif);
     const original = structuredClone(input);

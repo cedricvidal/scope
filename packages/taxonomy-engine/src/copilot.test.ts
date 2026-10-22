@@ -3,12 +3,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type { CopilotSession, SessionEvent } from "@github/copilot-sdk";
-import { copilotAI, skippedExecutor, closeTransports } from "./copilot.js";
+import { copilotAI, closeTransports } from "./copilot.js";
 import { executeSdkCall } from "./sdk-call.js";
-import { loadCases } from "./cases.js";
-import { fileURLToPath } from "node:url";
-import { OBSERVATION_CONTRACT, SKIPPED_INSTRUCTIONS } from "./prompt.js";
-import { createSkippedProgram } from "./prompt.js";
 
 /** @returns Observable SDK session/ledger mocks for lifecycle failure tests. */
 function fixture() {
@@ -24,33 +20,6 @@ function fixture() {
   return { session, ledger, deleted };
 }
 describe("Ax custom SDK provider contract (offline)", () => {
-  it("uses the actual typed program/parser and fixed wrapper with exactly one request", async () => {
-    const complete = vi.fn(async (_system: string, _user: string, _signal?: AbortSignal) => ({ content: 'Observation: {"state":"completed","observed":false}' }));
-    const ai = copilotAI({ complete, close: async () => { } });
-    const input = (await loadCases(fileURLToPath(new URL("../fixtures/inputs.jsonl", import.meta.url)))).find(c => c.id === "train-none")!.input;
-    expect(await skippedExecutor(ai).evaluate("beh-skipped-invocation", input)).toEqual({ state: "completed", observed: false });
-    expect(complete).toHaveBeenCalledTimes(1);
-    const [system, user] = complete.mock.calls[0];
-    expect(system.startsWith(OBSERVATION_CONTRACT)).toBe(true);
-    expect(system.split(OBSERVATION_CONTRACT)).toHaveLength(2);
-    expect(system).toContain(SKIPPED_INSTRUCTIONS);
-    expect(user).toContain(input.atif.session_id);
-    expect(user).not.toContain("expected");
-    expect(ai.getFeatures().functions).toBe(false);
-  });
-  it("does not repair malformed output or silently substitute providers", async () => {
-    const complete = vi.fn(async () => ({ content: "not valid Ax output" }));
-    const ai = copilotAI({ complete, close: async () => { } });
-    const input = (await loadCases(fileURLToPath(new URL("../fixtures/inputs.jsonl", import.meta.url))))[0].input;
-    await expect(skippedExecutor(ai).evaluate("beh-skipped-invocation", input)).rejects.toThrow();
-    expect(complete).toHaveBeenCalledTimes(1);
-  });
-  it("enforces one call even when Ax BootstrapFewShot supplies a retry override", async () => {
-    const complete = vi.fn(async () => ({ content: "malformed output" }));
-    const ai = copilotAI({ complete, close: async () => { } });
-    await expect(createSkippedProgram().forward(ai, { evidence: "{}" }, { maxRetries: 1, maxSteps: 2 })).rejects.toThrow();
-    expect(complete).toHaveBeenCalledTimes(1);
-  });
   it("forwards cancellation and rejects unsupported tools/streaming", async () => {
     const complete = vi.fn(async (_system: string, _user: string, _signal?: AbortSignal) => ({ content: "ok" }));
     const ai = copilotAI({ complete, close: async () => { } });

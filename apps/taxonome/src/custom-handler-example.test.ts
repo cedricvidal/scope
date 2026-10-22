@@ -7,12 +7,12 @@ import {
   HandlerRegistry,
   loadTaxonomy,
   type ScopeSource,
-} from "taxonomy-evaluation";
+} from "taxonomy-engine";
 import {
   loadCasesV2,
   loadGoldV2,
-} from "taxonomy-evaluation/cases-v2";
-import { taxonomyPromptEvidence } from "../../../packages/taxonomy-evaluation/src/prompt.js";
+} from "taxonomy-engine/cases-v2";
+import { taxonomyPromptEvidence } from "../../../packages/taxonomy-engine/src/prompt.js";
 import {
   retryHandler,
   retryOutputSchema,

@@ -5,6 +5,10 @@
   "type": "module",
   "bin": { "taxonome": "dist/index.js" },
   "scripts": { "build": "tsc", "lint": "tsc --noEmit" },
-  "dependencies": { "taxonomy-evaluation": "workspace:*", "commander": "14.0.3" },
+  "dependencies": {
+    "ax-taxonomy": "workspace:*",
+    "taxonomy-engine": "workspace:*",
+    "commander": "14.0.3"
+  },
   "devDependencies": { "@types/node": "^22.7.0", "typescript": "^5.6.2" }
 }

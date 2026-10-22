@@ -2,16 +2,17 @@
 // Licensed under the MIT License.
 
 import { describe, expect, it } from "vitest";
-import { evaluate } from "../../engine.js";
-import { createBuiltInHandlerRegistry } from "../../handlers.js";
-import { parseScopeAtif, type ScopeAtif } from "../../scope-atif.js";
-import { loadTaxonomy } from "../../taxonomy.js";
+import {
+  evaluate,
+  parseScopeAtif,
+  type ScopeAtif,
+} from "taxonomy-engine";
+import {
+  loadAgentBehaviorTaxonomy,
+} from "../../index.js";
 
 async function taxonomy() {
-  return loadTaxonomy(
-    new URL("../../../taxonomies/agent-behavior/taxonomy.yaml", import.meta.url).pathname,
-    { handlers: createBuiltInHandlerRegistry() },
-  );
+  return loadAgentBehaviorTaxonomy();
 }
 
 /** Creates one minimal call whose namespaced evidence can be varied per test. */

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, expect, it } from "vitest";
-import type { DeterministicHandlerInput } from "taxonomy-evaluation";
+import type { DeterministicHandlerInput } from "taxonomy-engine";
 import {
   retryHandler,
   retryOutputSchema,

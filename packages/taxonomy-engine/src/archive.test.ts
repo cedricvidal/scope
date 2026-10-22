@@ -5,7 +5,7 @@ import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
 import { stringify as yamlStringify } from "yaml";
 import { describe, expect, it } from "vitest";
-import { createBuiltInHandlerRegistry } from "./handlers.js";
+import { createHandlerRegistry } from "./handlers.js";
 import { normalizeScopeArchive } from "./archive.js";
 import { loadTaxonomy } from "./taxonomy.js";
 
@@ -170,8 +170,8 @@ function iterationAtif(iteration: number) {
 
 async function taxonomy() {
   return loadTaxonomy(
-    new URL("../taxonomies/agent-behavior/taxonomy.yaml", import.meta.url).pathname,
-    { handlers: createBuiltInHandlerRegistry() },
+    new URL("../fixtures/test-taxonomy.yaml", import.meta.url).pathname,
+    { handlers: createHandlerRegistry() },
   );
 }
 

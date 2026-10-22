@@ -37,15 +37,16 @@ flowchart LR
     Result --> Readout[Deterministic readout]
 ```
 
-The package root does not import Ax or the SDK. Prompt execution is explicitly
-provided by `taxonomy-evaluation/copilot`, so a deterministic-only process does
-not initialize the SDK and needs no token.
+The `taxonomy-engine` package root does not import Ax or the SDK. Prompt
+execution is explicitly provided by `taxonomy-engine/copilot`, so a
+deterministic-only process does not initialize the SDK and needs no token.
 
-Built-in deterministic implementations live in dedicated handler folders.
-Timeout is implemented in
-`packages/taxonomy-evaluation/src/handlers/timeout/handler.ts`, with its
-co-located unit tests in `handler.test.ts`; `handlers.ts` remains the central
-registry that binds the stable YAML ID `scope/timeout-v1`.
+The shipped taxonomy is the separate `ax-taxonomy` catalog package. It owns
+only taxonomy definitions, concrete handlers, focused catalog tests/fixtures,
+and minimal asset/registration exports. Timeout lives in
+`packages/ax-taxonomy/src/handlers/timeout/handler.ts`, with co-located
+`handler.test.ts`. The CLI explicitly composes both packages; the engine never
+imports the catalog, so the dependency remains one-way.
 
 ## Build and run
 
@@ -53,11 +54,12 @@ From the repository root:
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm --filter taxonomy-evaluation build
+pnpm --filter taxonomy-engine build
+pnpm --filter ax-taxonomy build
 pnpm --filter taxonome build
 pnpm --silent taxonome run \
-  packages/taxonomy-evaluation/fixtures/v2/timeout.atif.json \
-  --taxonomy packages/taxonomy-evaluation/taxonomies/agent-behavior/taxonomy.yaml \
+  packages/ax-taxonomy/fixtures/timeout.atif.json \
+  --taxonomy packages/ax-taxonomy/taxonomy/taxonomy.yaml \
   --elements beh-timeout
 ```
 
@@ -144,7 +146,7 @@ programmatic registry. A plugin exports the exact versioned contract
 validator and implementation:
 
 ```typescript
-import { defineTaxonomePlugin } from "taxonomy-evaluation/plugins";
+import { defineTaxonomePlugin } from "taxonomy-engine/plugins";
 
 export const taxonomePlugin = defineTaxonomePlugin({
   api_version: "scope/taxonome-plugin/v1",
@@ -271,13 +273,15 @@ unknown distinctions across iterations without treating configuration as use.
 ```typescript
 import { readFile } from "node:fs/promises";
 import {
-  createBuiltInHandlerRegistry,
   evaluate,
   loadTaxonomy,
   parseScopeAtif,
-} from "taxonomy-evaluation";
+} from "taxonomy-engine";
+import {
+  createAgentBehaviorHandlerRegistry,
+} from "ax-taxonomy";
 
-const handlers = createBuiltInHandlerRegistry();
+const handlers = createAgentBehaviorHandlerRegistry();
 const taxonomy = await loadTaxonomy("taxonomy.yaml", { handlers });
 const atif = parseScopeAtif(JSON.parse(await readFile("run.atif.json", "utf8")));
 const results = await evaluate({ atif, taxonomy }, ["beh-timeout"]);
@@ -350,6 +354,37 @@ accurately labeled for its original contracts and source commits. New inputs,
 results, and optimization artifacts are versioned separately. Compatibility is
 explicit conversion or rejection; there is no silent reinterpretation.
 
+The current private package boundary is intentionally explicit:
+
+- `taxonomy-engine` owns loading, normalization, execution, case/gold
+  assertions, prompt/SDK plumbing, optimization/artifact compatibility,
+  deterministic readout, archive conversion, and generic neutral tests.
+- `ax-taxonomy` owns only the shipped `agent-behavior` YAML, catalog fixtures,
+  `scope/timeout-v1`, focused definition/handler tests, and minimal
+  asset/handler registration exports.
+- `taxonome` depends on both and explicitly registers `ax-taxonomy` before
+  loading trusted third-party plugins.
+
+The earlier experimental package name `taxonomy-evaluation` was renamed to
+`taxonomy-engine`. Current callers import generic APIs from `taxonomy-engine`,
+and catalog APIs such as `createAgentBehaviorHandlerRegistry()` or
+`loadAgentBehaviorTaxonomy()` from `ax-taxonomy`. The old
+`createBuiltInHandlerRegistry()` convenience and unused hard-coded legacy
+catalog facades were retired rather than preserved through a dependency cycle
+or hidden fallback. Frozen evidence still records the source paths and API
+surface that were true at its historical commits.
+
+Both packages have package-local Vitest configuration:
+
+```bash
+cd packages/taxonomy-engine && pnpm test
+cd packages/ax-taxonomy && pnpm test
+```
+
+The engine command runs only generic neutral-fixture tests; the catalog command
+runs only focused agent-behavior definition and Timeout tests. Neither command
+requires model credentials or scans the rest of the monorepo.
+
 ## Recorded spike findings (2026-10-21)
 
 **Recommendation: retain the simplified structured occurrence model for the
@@ -360,7 +395,7 @@ and per-call drilldowns; adding confidence or repeated category metadata did
 not solve a concrete consumer need.
 
 All raw evidence is in
-[`packages/taxonomy-evaluation/evidence/`](../../packages/taxonomy-evaluation/evidence/).
+[`packages/taxonomy-engine/evidence/`](../../packages/taxonomy-engine/evidence/).
 `manifest.json` records hashes, settings, per-phase usage, and the full
 cumulative ledger. Model evals are distinct from the offline tests.
 
@@ -472,7 +507,7 @@ throughput advantage or causal speedup.
 
 ### Readout fitness and budget
 
-The generated [`readout-preview.md`](../../packages/taxonomy-evaluation/evidence/readout-preview.md)
+The generated [`readout-preview.md`](../../packages/taxonomy-engine/evidence/readout-preview.md)
 uses an actual restored mixed result plus a separate deterministic run, with
 explicit matching scenario/profile context. Timeout occurs in **2 distinct
 runs / 4 occurrences**. `account/query` contributes **2 runs / 3 occurrences**,
@@ -495,22 +530,34 @@ the required technical evidence was complete, not because the budget ran out.
 Offline verification (no credentials/inference):
 
 ```bash
-pnpm --filter taxonomy-evaluation build
+pnpm --filter taxonomy-engine build
+pnpm --filter ax-taxonomy build
 pnpm --filter taxonome build
-pnpm exec vitest run packages/taxonomy-evaluation/src apps/taxonome/src --reporter=default
+(
+  cd packages/taxonomy-engine
+  pnpm test
+)
+(
+  cd packages/ax-taxonomy
+  pnpm test
+)
+pnpm exec vitest run \
+  packages/taxonomy-engine/src \
+  packages/ax-taxonomy/src \
+  apps/taxonome/src --reporter=default
 pnpm --filter static-prompt-evals exec vitest run --config adapter/vitest.config.ts --reporter=default
 pnpm --silent taxonome readout \
-  packages/taxonomy-evaluation/evidence/readout-input.json \
+  packages/taxonomy-engine/evidence/readout-input.json \
   --markdown /tmp/taxonome-preview.md
 ```
 
-Recorded current verification: **67 tests / 11 files** for the standalone slice,
-**36 tests / 6 files** for the merged static-eval TypeScript suite; both
-standalone builds/type checks and static-eval type checking passed. The latter
-requires `pnpm --filter 'static-prompt-evals^...' build` first. License-header,
-manifest coverage, and regenerated notice checks passed. The test suite also
-restores the complete learned artifact offline and checks training-only
-provenance and actual preview counts.
+Recorded current verification: package-local `taxonomy-engine` **44 tests / 13
+files**, package-local `ax-taxonomy` **18 tests / 2 files**, combined
+engine/catalog/CLI **76 tests / 18 files**, example deterministic handler **2
+tests / 1 file**, and static-eval TypeScript **38 tests / 7 files**. Builds,
+type checks, static-eval Python tests, manifest coverage, license headers, and
+regenerated notice checks also passed. Package-local commands use source
+conditions and still pass with both package `dist/` directories absent.
 
 For a separately authorized live review, use the earlier `eval` commands
 with `fixtures/final-inputs.jsonl`, `fixtures/final-gold.json`, and
@@ -520,7 +567,7 @@ permission to reset the overnight budget.
 
 ## Production impact and limits
 
-This package is not wired into Judge, API, Portal, or post-processing. If a
+These packages are not wired into Judge, API, Portal, or post-processing. If a
 later accepted design adopts these findings, #1206 would need an explicit
 occurrence-capable result union rather than one Boolean/criterion row per
 run. Judge would host the core without changing its DAG/attempt protection;

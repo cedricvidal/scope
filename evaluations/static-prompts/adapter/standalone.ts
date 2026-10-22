@@ -2,25 +2,18 @@
 // Licensed under the MIT License.
 
 import {
-  createBuiltInHandlerRegistry,
   evaluate,
-  loadTaxonomy,
   parseScopeAtif,
   validateScopeAtif,
-} from "taxonomy-evaluation";
+} from "taxonomy-engine";
+import { loadAgentBehaviorTaxonomy } from "ax-taxonomy";
 import {
   copilotAI,
   taxonomyPromptExecutor,
   type CopilotTransport,
-} from "taxonomy-evaluation/copilot";
+} from "taxonomy-engine/copilot";
 
-const productionTaxonomy = loadTaxonomy(
-  new URL(
-    "../../../packages/taxonomy-evaluation/taxonomies/agent-behavior/taxonomy.yaml",
-    import.meta.url,
-  ).pathname,
-  { handlers: createBuiltInHandlerRegistry() },
-);
+const productionTaxonomy = loadAgentBehaviorTaxonomy();
 
 /** JSONL target registry for standalone SDK-only families (not the Azure runner). */
 export const standaloneTargets = {
@@ -28,8 +21,8 @@ export const standaloneTargets = {
     family: "taxonome-skipped-invocation",
     variant: "default",
     transport: "copilot-sdk",
-    cases: "packages/taxonomy-evaluation/fixtures/v2/inputs.jsonl",
-    assertions: "packages/taxonomy-evaluation/fixtures/v2/gold.json",
+    cases: "packages/ax-taxonomy/fixtures/inputs.jsonl",
+    assertions: "packages/ax-taxonomy/fixtures/gold.json",
     /**
      * Runs one case through the production Ax/SDK adapter and shared grounding validator.
      *

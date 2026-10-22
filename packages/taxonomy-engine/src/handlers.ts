@@ -1,10 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { createHash } from "node:crypto";
 import type { ScopeAtif } from "./scope-atif.js";
 import type { TaxonomySurface } from "./taxonomy.js";
-import { timeoutHandler } from "./handlers/timeout/handler.js";
 
 export const TAXONOME_PLUGIN_API_VERSION = "scope/taxonome-plugin/v1";
 
@@ -137,17 +135,7 @@ export function defineTaxonomePlugin<const Handlers extends Record<string, Deter
   return plugin;
 }
 
-/** Creates a fresh registry containing only reviewed built-in handlers. */
-export function createBuiltInHandlerRegistry(): HandlerRegistry {
-  const registry = new HandlerRegistry();
-  registry.register(
-    { "scope/timeout-v1": timeoutHandler },
-    {
-      name: "taxonomy-evaluation",
-      version: "0.1.0",
-      origin: "builtin",
-      integrity: createHash("sha256").update("scope/timeout-v1").digest("hex"),
-    },
-  );
-  return registry;
+/** Creates an empty registry for explicit catalog/plugin composition. */
+export function createHandlerRegistry(): HandlerRegistry {
+  return new HandlerRegistry();
 }

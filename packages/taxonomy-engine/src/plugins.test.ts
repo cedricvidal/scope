@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  createBuiltInHandlerRegistry,
+  createHandlerRegistry,
   HandlerRegistry,
   TAXONOME_PLUGIN_API_VERSION,
 } from "./handlers.js";
@@ -51,7 +51,7 @@ export const taxonomePlugin = {
 };`,
     );
 
-    const registry = createBuiltInHandlerRegistry();
+    const registry = createHandlerRegistry();
     await loadPlugins(["./dist/handlers.mjs"], cwd, registry);
     const registered = registry.resolve("acme/custom-v1");
 
@@ -90,7 +90,7 @@ export default {
   }
 };`);
 
-    const registry = createBuiltInHandlerRegistry();
+    const registry = createHandlerRegistry();
     await loadPlugins(["@acme/taxonome-handlers"], cwd, registry);
     expect(registry.resolve("acme/package-v1").provider).toMatchObject({
       name: "@acme/taxonome-handlers",
@@ -113,7 +113,7 @@ export default {api_version:"${TAXONOME_PLUGIN_API_VERSION}",provider:{name:"bad
     await expect(loadPlugins(
       [reserved],
       cwd,
-      createBuiltInHandlerRegistry(),
+      createHandlerRegistry(),
     )).rejects.toThrow("reserved handler ID");
 
     const duplicate = await writePlugin("duplicate", `

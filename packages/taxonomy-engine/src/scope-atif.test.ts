@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, expect, it } from "vitest";
-import { createBuiltInHandlerRegistry } from "./handlers.js";
+import { createHandlerRegistry } from "./handlers.js";
 import { parseScopeAtif, validateScopeAtif } from "./scope-atif.js";
 import { loadTaxonomy } from "./taxonomy.js";
 
@@ -17,8 +17,8 @@ const plainAtif = {
 
 async function taxonomy() {
   return loadTaxonomy(
-    new URL("../taxonomies/agent-behavior/taxonomy.yaml", import.meta.url).pathname,
-    { handlers: createBuiltInHandlerRegistry() },
+    new URL("../fixtures/test-taxonomy.yaml", import.meta.url).pathname,
+    { handlers: createHandlerRegistry() },
   );
 }
 

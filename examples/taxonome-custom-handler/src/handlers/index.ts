@@ -6,8 +6,8 @@ import {
   defineTaxonomePlugin,
   type DeterministicHandler,
   type HandlerConfigSchema,
-} from "taxonomy-evaluation/plugins";
-import type { ScopeSource } from "taxonomy-evaluation";
+} from "taxonomy-engine/plugins";
+import type { ScopeSource } from "taxonomy-engine";
 
 interface RetryConfig {
   /** Minimum explicit attempt count that qualifies as a retry. */
