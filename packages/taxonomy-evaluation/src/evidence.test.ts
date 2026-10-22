@@ -234,6 +234,19 @@ describe("committed real experiment artifacts (offline verification only)", () =
 
   it("records clear current paths and separate code-versus-prompt testing", async () => {
     const manifest = z.object({
+      capture: z.object({
+        head: z.literal("dec7cc8f6d0e26b8f99197c29fa9e200107dcf05"),
+        first_reserved_at: z.literal("2026-10-22T22:16:38.337Z"),
+        last_reserved_at: z.literal("2026-10-22T22:17:59.537Z"),
+      }).passthrough(),
+      post_capture_validation: z.object({
+        timeout_organization_commit: z.literal(
+          "1788683d7ea1715c462f1f6444b550e8c26f49e9",
+        ),
+        model_visible_inputs_changed: z.literal(false),
+        handler_behavior_changed: z.literal(false),
+        additional_model_calls: z.literal(0),
+      }).passthrough(),
       previous_cumulative_used: z.literal(278),
       new_calls: z.literal(11),
       cumulative_used: z.literal(289),

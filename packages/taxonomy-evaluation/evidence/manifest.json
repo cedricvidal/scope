@@ -737,10 +737,16 @@
     }
   },
   "yaml_prompt_readable_paths_revision": {
-    "source_commit": "1788683d7ea1715c462f1f6444b550e8c26f49e9",
+    "capture_head": "dec7cc8f6d0e26b8f99197c29fa9e200107dcf05",
+    "capture_first_reserved_at": "2026-10-22T22:16:38.337Z",
+    "capture_last_reserved_at": "2026-10-22T22:17:59.537Z",
+    "post_capture_timeout_organization_commit": "1788683d7ea1715c462f1f6444b550e8c26f49e9",
+    "post_capture_model_visible_inputs_changed": false,
+    "post_capture_handler_behavior_changed": false,
+    "post_capture_additional_model_calls": 0,
     "evidence_commit": "0e2967fb470b0fcc2ae20bbb6a098ee026102826",
     "evidence_path": "packages/taxonomy-evaluation/evidence/yaml-prompt-readable-paths-control",
-    "evidence_manifest_sha256": "e20e0cb46734fcea4351ef6f1257098436e34019bd8dd37d7aba39513df47212",
+    "evidence_manifest_sha256": "10195d156cd464db3c467f40c6636e4f88d05a5e6a6e9d4f4e130f21a0a2ce9d",
     "starting_cumulative_used": 278,
     "new_calls": 11,
     "cumulative_used": 289,
@@ -793,7 +799,7 @@
       "examples/taxonome-custom-handler/tests/retry-loop-handler.test.ts": "b1c3db84ca4c6f85066060078c6c31875407b8f54de6c783d0e678adad20006b",
       "packages/taxonomy-evaluation/src/handlers/timeout/handler.ts": "31185f8bb072fca577e5bb4524455ac4e6461eebfa9599a2239d517a53167af3",
       "packages/taxonomy-evaluation/src/handlers/timeout/handler.test.ts": "58176598581f42a0ce63d7c8ed277f3ab9c340c4963780fecd87d5caa1624e7d",
-      "packages/taxonomy-evaluation/src/evidence.test.ts": "9f2350e279788e315da389ebd8d0585e5d0ca7524f0229ce6dcda495d3ab03d3"
+      "packages/taxonomy-evaluation/src/evidence.test.ts": "60bb4837482ec729a961debc1918c9ab1f66ce69f64663c2a547461b72b04398"
     }
   }
 }
