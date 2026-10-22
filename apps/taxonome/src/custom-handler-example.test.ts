@@ -125,11 +125,17 @@ describe("custom retry handler output contract", () => {
       { handlers },
     );
     const cases = await loadCasesV2(
-      new URL("cases/neutral-prompt-cases.jsonl", root).pathname,
+      new URL(
+        "datasets/repeated-request/trajectory-cases.jsonl",
+        root,
+      ).pathname,
       taxonomy,
     );
     const gold = await loadGoldV2(
-      new URL("cases/neutral-prompt-gold.json", root).pathname,
+      new URL(
+        "datasets/repeated-request/expected-judgments.json",
+        root,
+      ).pathname,
     );
 
     expect(taxonomy.elementById.get("acme-repeated-request")?.implementation)

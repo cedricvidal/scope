@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "test:handler": "vitest run --config vitest.config.ts --reporter=default"
   },
   "dependencies": {
     "taxonomy-evaluation": "workspace:*",
@@ -13,6 +14,7 @@
   "devDependencies": {
     "@types/node": "^22.7.0",
     "taxonome": "workspace:*",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "vitest": "^4.1.0"
   }
 }

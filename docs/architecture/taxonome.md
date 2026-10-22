@@ -172,6 +172,8 @@ declares a Zod output schema, infers the `RetryOutput` type, types each
 occurrence, and returns `indeterminate` when explicit recovered-retry evidence
 lacks required source attribution. A focused test checks representative
 producer outputs against both the TypeScript schema and the YAML runtime schema.
+The example exposes that offline code test as `pnpm test:handler`; it executes
+the TypeScript handler directly and makes no SDK calls.
 
 The same example also contains a custom prompt element and a small disjoint
 train/validation/held-out packet. From the example directory, a real
@@ -183,6 +185,14 @@ families and originating runs, separate gold, and no element ID or label in
 trajectory text. A regression serializes each case with the production
 `taxonomyPromptEvidence()` projection and verifies that case/family/origin
 metadata is absent and every forwarded identity is outcome-neutral.
+Current user-facing paths name the subject and role explicitly:
+`datasets/repeated-request/trajectory-cases.jsonl`,
+`datasets/repeated-request/expected-judgments.json`,
+`inputs/repeated-request/example-run.atif.json`,
+`results/repeated-request/held-out/original-prompt-results.json`,
+`artifacts/repeated-request/optimized-prompt.ax.json`, and
+`results/repeated-request/held-out/optimized-prompt-results.json`. Historical
+evidence files retain their original names and hashes.
 
 The first 11-call YAML prompt demo under `evidence/yaml-prompt-demo/` is retained
 as historical execution evidence but is **ID-confounded**: its model-visible
@@ -297,6 +307,12 @@ Cases and gold remain separate. Every case records split, family, originating
 run, ATIF, and requested elements. Loading rejects family or originating-run
 leakage across train, validation, and held-out sets. Fixed assertions validate
 state, polarity, cardinality, source, turn, call, and extension-point identity.
+An `eval` PASS means the detector output matches the reviewed judgment; an
+expected completed `false`, `indeterminate`, or `inapplicable` result can pass.
+`passed` / `total` counts case executions, including repeated `--samples`, not
+successful agent tasks or model-call count. Each prompt-backed evaluation makes
+fresh SDK calls. Supplying an artifact restores optimized prompt components and
+demos, but never reuses cached answers from an earlier evaluation.
 
 Optimization artifacts use `scope/taxonome-ax/v2` and bind the complete Ax
 serialization, including learned demos, to the exact taxonomy digest, element,
