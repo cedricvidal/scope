@@ -735,5 +735,65 @@
       "apps/taxonome/src/custom-handler-example.test.ts": "d3ffd46238600bfcbce52eb96c5c5ff6183ab521b167700a5a14c6c0a0f6464d",
       "packages/taxonomy-evaluation/src/evidence.test.ts": "a04403f3beee0bbd662e4f683ef59837ec12a309b3748fe55254478c4c0e4f1f"
     }
+  },
+  "yaml_prompt_readable_paths_revision": {
+    "source_commit": "1788683d7ea1715c462f1f6444b550e8c26f49e9",
+    "evidence_commit": "0e2967fb470b0fcc2ae20bbb6a098ee026102826",
+    "evidence_path": "packages/taxonomy-evaluation/evidence/yaml-prompt-readable-paths-control",
+    "evidence_manifest_sha256": "e20e0cb46734fcea4351ef6f1257098436e34019bd8dd37d7aba39513df47212",
+    "starting_cumulative_used": 278,
+    "new_calls": 11,
+    "cumulative_used": 289,
+    "remaining": 211,
+    "fresh_usage": {
+      "input_tokens": 13691,
+      "output_tokens": 275,
+      "model_attempts": 11,
+      "failed_calls": 0,
+      "usd_cost": null
+    },
+    "clear_current_paths": {
+      "trajectory_dataset": "datasets/repeated-request/trajectory-cases.jsonl",
+      "expected_judgments": "datasets/repeated-request/expected-judgments.json",
+      "original_prompt_results": "results/repeated-request/held-out/original-prompt-results.json",
+      "optimized_prompt_artifact": "artifacts/repeated-request/optimized-prompt.ax.json",
+      "optimized_prompt_results": "results/repeated-request/held-out/optimized-prompt-results.json"
+    },
+    "testing_surfaces": {
+      "custom_handler": "examples/taxonome-custom-handler/tests/retry-loop-handler.test.ts",
+      "built_in_timeout_folder": "packages/taxonomy-evaluation/src/handlers/timeout",
+      "custom_handler_result": "2/2 offline, zero model calls",
+      "built_in_timeout_result": "15/15 offline, zero model calls",
+      "prompt_eval_result": "2/2 original prompt and 2/2 optimized prompt, fresh calls"
+    },
+    "evaluation_semantics": {
+      "pass_means_detector_matches_gold": true,
+      "expected_false_or_indeterminate_can_pass": true,
+      "passed_total_counts_case_executions": true,
+      "fresh_calls_only_when_model_invoked": true,
+      "authoritative_preflight_can_avoid_call": true,
+      "artifact_restore_caches_answers": false
+    },
+    "results": {
+      "original_prompt_heldout": "2/2",
+      "optimized_prompt_heldout": "2/2",
+      "accuracy_gain": false,
+      "learned_traces": 3,
+      "examples": 2,
+      "metric_entries": 5,
+      "instruction_proposals": 0,
+      "early_stopped": false,
+      "built_in_taxonomy_elements": 2
+    },
+    "historical_packets_rewritten": false,
+    "current_source_hashes": {
+      "examples/taxonome-custom-handler/datasets/repeated-request/trajectory-cases.jsonl": "9d7adef679325414a20a6e89635f32ea547807ed3d6b15968925d5bde6d831f7",
+      "examples/taxonome-custom-handler/datasets/repeated-request/expected-judgments.json": "4fae12fb1d62e19d848fdc3e385aa5731f84c49ae47de7223721946737ecf0b6",
+      "examples/taxonome-custom-handler/inputs/repeated-request/example-run.atif.json": "5b762feb519865dca56c0456d3ee2a660b9759c154069d097b4f7a1fd4857838",
+      "examples/taxonome-custom-handler/tests/retry-loop-handler.test.ts": "b1c3db84ca4c6f85066060078c6c31875407b8f54de6c783d0e678adad20006b",
+      "packages/taxonomy-evaluation/src/handlers/timeout/handler.ts": "31185f8bb072fca577e5bb4524455ac4e6461eebfa9599a2239d517a53167af3",
+      "packages/taxonomy-evaluation/src/handlers/timeout/handler.test.ts": "58176598581f42a0ce63d7c8ed277f3ab9c340c4963780fecd87d5caa1624e7d",
+      "packages/taxonomy-evaluation/src/evidence.test.ts": "9f2350e279788e315da389ebd8d0585e5d0ca7524f0229ce6dcda495d3ab03d3"
+    }
   }
 }
