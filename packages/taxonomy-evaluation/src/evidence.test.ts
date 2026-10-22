@@ -231,4 +231,90 @@ describe("committed real experiment artifacts (offline verification only)", () =
     expect(events.filter(event => event.type === "finished")
       .every(event => event.ok === true)).toBe(true);
   });
+
+  it("records clear current paths and separate code-versus-prompt testing", async () => {
+    const manifest = z.object({
+      previous_cumulative_used: z.literal(278),
+      new_calls: z.literal(11),
+      cumulative_used: z.literal(289),
+      cap: z.literal(500),
+      remaining: z.literal(211),
+      clear_current_paths: z.object({
+        trajectory_dataset: z.literal(
+          "datasets/repeated-request/trajectory-cases.jsonl",
+        ),
+        expected_judgments: z.literal(
+          "datasets/repeated-request/expected-judgments.json",
+        ),
+        original_prompt_results: z.literal(
+          "results/repeated-request/held-out/original-prompt-results.json",
+        ),
+        optimized_prompt_artifact: z.literal(
+          "artifacts/repeated-request/optimized-prompt.ax.json",
+        ),
+        optimized_prompt_results: z.literal(
+          "results/repeated-request/held-out/optimized-prompt-results.json",
+        ),
+      }).passthrough(),
+      code_handler_tests: z.object({
+        custom_retry_loop: z.object({
+          passed: z.literal(2),
+          total: z.literal(2),
+          model_calls: z.literal(0),
+        }).passthrough(),
+        built_in_timeout: z.object({
+          folder: z.literal(
+            "packages/taxonomy-evaluation/src/handlers/timeout",
+          ),
+          passed: z.literal(15),
+          total: z.literal(15),
+          model_calls: z.literal(0),
+        }).passthrough(),
+      }),
+      evaluation_semantics: z.object({
+        false_or_indeterminate_can_pass: z.literal(true),
+        passed_total_unit: z.literal("case executions including samples"),
+        fresh_calls_when_model_invoked: z.literal(true),
+        authoritative_preflight_can_avoid_call: z.literal(true),
+        artifact_restore_caches_answers: z.literal(false),
+      }).passthrough(),
+      results: z.object({
+        heldout_original_prompt: z.object({
+          passed: z.literal(2),
+          total: z.literal(2),
+        }).passthrough(),
+        heldout_optimized_prompt: z.object({
+          passed: z.literal(2),
+          total: z.literal(2),
+          accuracy_gain: z.literal(false),
+        }).passthrough(),
+      }).passthrough(),
+      historical_packets_rewritten: z.literal(false),
+      artifact_sha256: z.record(z.string()),
+    }).passthrough().parse(
+      await json("evidence/yaml-prompt-readable-paths-control/manifest.json"),
+    );
+
+    for (const [name, expected] of Object.entries(manifest.artifact_sha256)) {
+      expect(createHash("sha256")
+        .update(await readFile(
+          file(`evidence/yaml-prompt-readable-paths-control/${name}`),
+        ))
+        .digest("hex")).toBe(expected);
+    }
+    const events = (await readFile(
+      file("evidence/yaml-prompt-readable-paths-control/call-ledger-delta.jsonl"),
+      "utf8",
+    )).trim().split("\n").map(line => JSON.parse(line) as {
+      type: string;
+      id: number;
+      ok?: boolean;
+    });
+    expect(events.filter(event => event.type === "reserved").map(event => event.id))
+      .toEqual(Array.from({ length: 11 }, (_, index) => index + 279));
+    expect(events.filter(event => event.type === "finished"))
+      .toHaveLength(11);
+    expect(events.filter(event => event.type === "finished")
+      .every(event => event.ok === true)).toBe(true);
+  });
 });
