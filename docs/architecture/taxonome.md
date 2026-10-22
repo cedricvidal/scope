@@ -310,9 +310,11 @@ state, polarity, cardinality, source, turn, call, and extension-point identity.
 An `eval` PASS means the detector output matches the reviewed judgment; an
 expected completed `false`, `indeterminate`, or `inapplicable` result can pass.
 `passed` / `total` counts case executions, including repeated `--samples`, not
-successful agent tasks or model-call count. Each prompt-backed evaluation makes
-fresh SDK calls. Supplying an artifact restores optimized prompt components and
-demos, but never reuses cached answers from an earlier evaluation.
+successful agent tasks or model-call count. When a prompt element reaches model
+execution, each evaluation makes a fresh SDK call; authoritative preflights can
+resolve a case without one. Supplying an artifact restores optimized prompt
+components and demos, but never reuses cached answers from an earlier
+evaluation.
 
 Optimization artifacts use `scope/taxonome-ax/v2` and bind the complete Ax
 serialization, including learned demos, to the exact taxonomy digest, element,

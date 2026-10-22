@@ -57,9 +57,10 @@ taxonome optimize --taxonomy taxonomy.yaml \
 `eval` measures detector correctness against the reviewed judgments. A
 completed `false` or `indeterminate` result can pass when that is the expected
 judgment. `passed` / `total` counts case executions (including `--samples`
-repeats), not successful agent tasks or SDK calls. Prompt-backed evaluation
-makes fresh SDK calls each time; artifact evaluation restores the optimized
-prompt/demos but does not cache prior answers.
+repeats), not successful agent tasks or SDK calls. When a prompt element reaches
+model execution, each evaluation makes a fresh SDK call; authoritative
+preflights can resolve a case without one. Artifact evaluation restores the
+optimized prompt/demos but does not cache prior answers.
 
 Omitting `--plugin` fails with a concise unknown-handler error. Taxonome never scans
 directories, installs packages, performs network lookup, or imports a path from
