@@ -4,11 +4,9 @@
 import { Command, Option } from "commander";
 import EventSource from "eventsource";
 import { execSync } from "child_process";
-import { mkdtempSync, mkdirSync, createWriteStream, rmSync, readFileSync, readdirSync, existsSync, statSync } from "fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, readdirSync, existsSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve, dirname, basename } from "path";
-import { pipeline } from "stream/promises";
-import { Readable } from "stream";
 import { resolveScenarioAndPersona } from "../config-loader.js";
 import { configureHelp } from "../utils/helpFormatter.js";
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "../utils/style.js";
@@ -20,6 +18,10 @@ import { requireProjectId } from "../utils/config.js";
 import { apiFetch, getApiBasePath } from "../utils/api-client.js";
 import { parseGatesOption } from "../utils/gates.js";
 import { buildResourceBindingSpecs, collectRepeatable } from "../utils/resources.js";
+import {
+  createArchiveProgressReporter,
+  downloadArchiveAtomic,
+} from "../utils/archive-download.js";
 import {
   assertBatchArchiveLimit,
   assertResolvedRequestIds,
@@ -759,9 +761,11 @@ run
       }
 
       const outputPath = resolve(outputFile);
-      mkdirSync(dirname(outputPath), { recursive: true });
-      const fileStream = createWriteStream(outputPath);
-      await pipeline(Readable.fromWeb(archiveResp.body as any), fileStream);
+      await downloadArchiveAtomic({
+        response: archiveResp,
+        outputPath,
+        onProgress: createArchiveProgressReporter(),
+      });
       console.log(`${successText('Archive:')} ${value(outputPath)}`);
 
       // Step 3: Optionally extract
@@ -860,9 +864,11 @@ run
       }
 
       const outputPath = resolve(outputFile);
-      mkdirSync(dirname(outputPath), { recursive: true });
-      const fileStream = createWriteStream(outputPath);
-      await pipeline(Readable.fromWeb(archiveResp.body as any), fileStream);
+      await downloadArchiveAtomic({
+        response: archiveResp,
+        outputPath,
+        onProgress: createArchiveProgressReporter(),
+      });
       console.log(`${successText('Archive:')} ${value(outputPath)}`);
 
       // Optionally extract

@@ -149,6 +149,12 @@ scope run download-batch --submission-id <id> -e -d ./batch
 require a project and may resolve at most 100 runs, matching the batch archive
 endpoint limit.
 
+Archive downloads report compressed-byte progress and are published
+atomically. The CLI first writes a temporary file beside the destination,
+checks `Content-Length` when supplied, validates the complete gzip stream, and
+only then renames it to the requested output. A truncated or corrupt transfer
+leaves no invalid destination file and preserves any existing archive.
+
 ## Retry a failed run
 
 ```bash

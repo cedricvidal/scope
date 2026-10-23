@@ -113,6 +113,12 @@ scope run --help
 `--experiment-id`. Submission/experiment selectors require a project and must
 resolve to at most 100 runs, matching the batch archive endpoint limit.
 
+Run archives download to an exclusive same-directory temporary file while
+stderr reports compressed-byte progress. Scope validates a declared
+`Content-Length` and the complete gzip stream/trailer before atomically
+renaming the file into place. Interrupted or corrupt downloads remove the
+temporary file and never overwrite an existing archive.
+
 ### Provider secrets
 
 `scope secret` manages provider credentials (GitHub tokens, Anthropic keys,
