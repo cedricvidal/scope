@@ -801,5 +801,58 @@
       "packages/taxonomy-evaluation/src/handlers/timeout/handler.test.ts": "58176598581f42a0ce63d7c8ed277f3ab9c340c4963780fecd87d5caa1624e7d",
       "packages/taxonomy-evaluation/src/evidence.test.ts": "60bb4837482ec729a961debc1918c9ab1f66ce69f64663c2a547461b72b04398"
     }
+  },
+  "package_extraction_revision": {
+    "commit": "3f8abe477cf5c817ecf21fe3884d74cd96fc7cb0",
+    "model_calls": 0,
+    "cumulative_ledger_used": 289,
+    "dependency_direction": "taxonome -> taxonomy-engine + ax-taxonomy; ax-taxonomy -> taxonomy-engine; taxonomy-engine has no catalog dependency",
+    "packages": {
+      "taxonomy-engine": {
+        "role": "generic loading, execution, cases/gold, prompt/SDK, optimization, readout, archive and neutral tests",
+        "local_test": "44 tests / 13 files"
+      },
+      "ax-taxonomy": {
+        "role": "agent-behavior YAML, fixtures, scope/timeout-v1 and focused catalog tests",
+        "local_test": "18 tests / 2 files"
+      }
+    },
+    "api_changes": [
+      "taxonomy-evaluation renamed to taxonomy-engine",
+      "createBuiltInHandlerRegistry retired; CLI explicitly uses createAgentBehaviorHandlerRegistry from ax-taxonomy",
+      "Timeout exports moved to ax-taxonomy/timeout",
+      "unused hard-coded legacy catalog facades retired"
+    ],
+    "wire_contracts_changed": false,
+    "historical_evidence_bytes_changed": false,
+    "historical_source_path_records_rewritten": false,
+    "validation": [
+      "cd packages/taxonomy-engine && pnpm test: 44 tests / 13 files",
+      "cd packages/ax-taxonomy && pnpm test: 18 tests / 2 files",
+      "combined engine/catalog/CLI: 76 tests / 18 files",
+      "static prompt TypeScript: 38 tests / 7 files",
+      "static prompt Python: 94 tests",
+      "both package-local tests and source CLI pass with taxonomy-engine/dist and ax-taxonomy/dist absent",
+      "clean built engine/catalog/CLI and built catalog asset loading pass",
+      "1100 license headers",
+      "NOTICE current"
+    ],
+    "current_source_hashes": {
+      "packages/taxonomy-engine/package.json": "5045ba76386a3a017ee30efce80f84ef1346d9b5d20964d1c399721f9f8b3e38",
+      "packages/taxonomy-engine/src/index.ts": "22de56b33824dd90bb79fdc9986926da25438e7121548d2d8b0ae1411ce7abd9",
+      "packages/taxonomy-engine/src/handlers.ts": "614e1592b368417b6772805358af9a181ec04dfd05bab8665b7152d261255726",
+      "packages/taxonomy-engine/src/cases-v2.test.ts": "ff346586bdcfeeaad70be95723ab86dc9b28cf943c24a35621ab35d9a65a5ae1",
+      "packages/taxonomy-engine/src/optimization-v2.test.ts": "747803b7d143d70b0748b170a33d17f0827c443621a36821851274048a5283a7",
+      "packages/taxonomy-engine/vitest.config.ts": "a855a2b23ce00c2bf8cbd74d7db245ab780481c83af4c752d4b309f1ab6dc76c",
+      "packages/ax-taxonomy/package.json": "b1d8481479af7e2d70f8fa424a89d0a2e9bebd29393dba3ce6fa979abf0810ea",
+      "packages/ax-taxonomy/src/index.ts": "8b1e5e450cb685cf2b33fd02d24faceb2292d5b686e5d832017f79d6846495fd",
+      "packages/ax-taxonomy/src/handlers/timeout/handler.ts": "35a3c96165a8c43067e70907c4bf427f32a963a7cb87595998001b1a51289727",
+      "packages/ax-taxonomy/src/handlers/timeout/handler.test.ts": "b45094affdadb422148b99462c4c66ecb58c2e689b7068a86bb06169dae1a53a",
+      "packages/ax-taxonomy/src/agent-behavior-evaluation.test.ts": "6b89821c783af262d7e58dd4ebd2b14e7add6b29fbd3ae63e2bc59a413cad77b",
+      "packages/ax-taxonomy/taxonomy/taxonomy.yaml": "ac5605febbb8d068c19acba7721b5f5f54243922b40a7f682eb6d4d0929f96b7",
+      "packages/ax-taxonomy/vitest.config.ts": "a855a2b23ce00c2bf8cbd74d7db245ab780481c83af4c752d4b309f1ab6dc76c",
+      "apps/taxonome/src/cli.ts": "9c6927829d0686ff5d73fed7fb367ee0c5fb620080351911cf486b27e9eae5c6",
+      "evaluations/static-prompts/adapter/standalone.ts": "74d92e498b5b1485ea733efd3192b517f96f6604f6301227f605046e774397b7"
+    }
   }
 }
