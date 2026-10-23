@@ -7,12 +7,12 @@ import {
   HandlerRegistry,
   loadTaxonomy,
   type ScopeSource,
-} from "taxonomy-evaluation";
+} from "taxonomy-engine";
 import {
   loadCasesV2,
   loadGoldV2,
-} from "taxonomy-evaluation/cases-v2";
-import { taxonomyPromptEvidence } from "../../../packages/taxonomy-evaluation/src/prompt.js";
+} from "taxonomy-engine/cases-v2";
+import { taxonomyPromptEvidence } from "../../../packages/taxonomy-engine/src/prompt.js";
 import {
   retryHandler,
   retryOutputSchema,
@@ -125,11 +125,17 @@ describe("custom retry handler output contract", () => {
       { handlers },
     );
     const cases = await loadCasesV2(
-      new URL("cases/neutral-prompt-cases.jsonl", root).pathname,
+      new URL(
+        "datasets/repeated-request/trajectory-cases.jsonl",
+        root,
+      ).pathname,
       taxonomy,
     );
     const gold = await loadGoldV2(
-      new URL("cases/neutral-prompt-gold.json", root).pathname,
+      new URL(
+        "datasets/repeated-request/expected-judgments.json",
+        root,
+      ).pathname,
     );
 
     expect(taxonomy.elementById.get("acme-repeated-request")?.implementation)

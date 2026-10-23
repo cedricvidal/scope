@@ -103,7 +103,7 @@ describe("YAML/archive/plugin CLI process contract", () => {
     const commands = [
       [
         "run",
-        "packages/taxonomy-evaluation/fixtures/v2/timeout.atif.json",
+        "packages/ax-taxonomy/fixtures/timeout.atif.json",
       ],
       ["eval", "--cases", "cases.jsonl", "--gold", "gold.json"],
       [
@@ -131,9 +131,9 @@ describe("YAML/archive/plugin CLI process contract", () => {
   it("runs a built-in deterministic YAML element without credentials or SDK calls", async () => {
     const { stdout, stderr } = await runCli([
       "run",
-      "packages/taxonomy-evaluation/fixtures/v2/timeout.atif.json",
+      "packages/ax-taxonomy/fixtures/timeout.atif.json",
       "--taxonomy",
-      "packages/taxonomy-evaluation/taxonomies/agent-behavior/taxonomy.yaml",
+      "packages/ax-taxonomy/taxonomy/taxonomy.yaml",
       "--elements",
       "beh-timeout",
     ]);
@@ -318,9 +318,9 @@ describe("YAML/archive/plugin CLI process contract", () => {
       "--silent",
       "taxonome",
       "run",
-      "packages/taxonomy-evaluation/fixtures/v2/timeout.atif.json",
+      "packages/ax-taxonomy/fixtures/timeout.atif.json",
       "--taxonomy",
-      "packages/taxonomy-evaluation/taxonomies/agent-behavior/taxonomy.yaml",
+      "packages/ax-taxonomy/taxonomy/taxonomy.yaml",
       "--elements",
       "beh-timeout",
     ], {

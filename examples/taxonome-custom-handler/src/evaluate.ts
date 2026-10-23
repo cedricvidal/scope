@@ -2,15 +2,15 @@
 // Licensed under the MIT License.
 
 import {
-  createBuiltInHandlerRegistry,
   evaluate,
+  HandlerRegistry,
   loadAtifInput,
   loadPlugins,
   loadTaxonomy,
-} from "taxonomy-evaluation";
+} from "taxonomy-engine";
 
 // Programmatic callers use the same registry, loader, and engine as the CLI.
-const handlers = createBuiltInHandlerRegistry();
+const handlers = new HandlerRegistry();
 await loadPlugins(["./dist/handlers/index.js"], process.cwd(), handlers);
 
 const taxonomy = await loadTaxonomy("taxonomy.yaml", { handlers });

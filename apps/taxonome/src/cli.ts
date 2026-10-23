@@ -5,7 +5,6 @@ import { readFile, writeFile } from "node:fs/promises";
 import { Command, Option } from "commander";
 import {
   buildReadoutV2,
-  createBuiltInHandlerRegistry,
   evaluate,
   loadAtifInput,
   loadPlugins,
@@ -15,14 +14,17 @@ import {
   type NormalizedTaxonomy,
   type PromptExecutor,
   type ScopeAtif,
-} from "taxonomy-evaluation";
+} from "taxonomy-engine";
+import {
+  createAgentBehaviorHandlerRegistry,
+} from "ax-taxonomy";
 import {
   checkCaseV2,
   loadCasesV2,
   loadGoldV2,
-} from "taxonomy-evaluation/cases-v2";
-import type { CallLedger } from "taxonomy-evaluation/ledger";
-import type { CopilotTransport } from "taxonomy-evaluation/copilot";
+} from "taxonomy-engine/cases-v2";
+import type { CallLedger } from "taxonomy-engine/ledger";
+import type { CopilotTransport } from "taxonomy-engine/copilot";
 import {
   configureTaxonomeHelp,
   createTaxonomeStyle,
@@ -119,7 +121,8 @@ function addExecutionOptions(command: Command): Command {
 async function loadExecutionTaxonomy(
   options: Pick<ExecutionOptions, "taxonomy" | "plugin">,
 ): Promise<NormalizedTaxonomy> {
-  const handlers = createBuiltInHandlerRegistry();
+  // The CLI explicitly composes the shipped catalog before trusted plugins.
+  const handlers = createAgentBehaviorHandlerRegistry();
   await loadPlugins(options.plugin, process.cwd(), handlers);
   return loadTaxonomy(options.taxonomy, { handlers });
 }
@@ -162,7 +165,7 @@ async function createRuntime(
     if (!options.ledger) {
       throw new Error("--ledger is required when selected elements use prompts");
     }
-    const { CallLedger } = await import("taxonomy-evaluation/ledger");
+    const { CallLedger } = await import("taxonomy-engine/ledger");
     const ledger = new CallLedger(options.ledger);
     await ledger.initialize();
     return ledger;
@@ -174,9 +177,9 @@ async function createRuntime(
       copilotAI,
       openCopilotTransport,
       taxonomyPromptExecutor,
-    } = await import("taxonomy-evaluation/copilot");
+    } = await import("taxonomy-engine/copilot");
     const { restoreOptimizationArtifactV2 } =
-      await import("taxonomy-evaluation/optimization-v2");
+      await import("taxonomy-engine/optimization-v2");
     const ledger = await openLedger();
     const artifacts = new Map();
     if (options.artifact) {
@@ -420,14 +423,14 @@ export function createCli(style: TaxonomeStyle = createTaxonomeStyle()): Command
       throw new Error("--max-metric-calls must be 1..100");
     }
 
-    const { CallLedger } = await import("taxonomy-evaluation/ledger");
+    const { CallLedger } = await import("taxonomy-engine/ledger");
     const {
       closeTransports,
       copilotAI,
       openCopilotTransport,
-    } = await import("taxonomy-evaluation/copilot");
+    } = await import("taxonomy-engine/copilot");
     const { optimizePromptElementV2 } =
-      await import("taxonomy-evaluation/optimization-v2");
+      await import("taxonomy-engine/optimization-v2");
     const ledger = new CallLedger(options.ledger);
     await ledger.initialize();
     const student = await openCopilotTransport(

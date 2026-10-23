@@ -43,7 +43,7 @@ documented in [taxonome.md](taxonome.md). It intentionally does not use the
 Azure quality runner or add another model transport. Run its live evals with
 `pnpm --silent taxonome eval --taxonomy ... --cases ... --gold ... --ledger ...`;
 the offline composition check is
-`pnpm exec vitest run packages/taxonomy-evaluation/src/prompt.test.ts --reporter=default`.
+`pnpm --filter static-prompt-evals test:ts`.
 
 Judge and report tool descriptions are static AI-facing instructions, but they
 are evaluated through their owning end-to-end judge and report families rather
