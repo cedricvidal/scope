@@ -73,3 +73,16 @@ condition = "AND"
 regexTarget = "secret"
 paths = ['''^evaluations/static-prompts/datasets/manifest\.json$''']
 regexes = ['''^4f6776ac4602e279c8723acd9a6cb22fa504c95538ab9491e0b5acab267c6a6b$''']
+
+# This identifier is intentionally shipped to browsers for telemetry ingestion;
+# it is public routing metadata, not an authentication credential.
+[[allowlists]]
+description = "Public browser telemetry ingestion identifier (generic-api-key false positive)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = [
+  '''^website/src/scripts/analytics\.ts$''',
+  '''^website/tests/analytics\.spec\.ts$''',
+]
+regexes = ['''^d73f4c6d7bfd4f54ab769e2baaf3156b-3241346c-4fe3-4bd7-a8b6-7ca73da60140-7462$''']
