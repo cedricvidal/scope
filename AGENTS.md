@@ -266,6 +266,8 @@ not open the PR against the fork unless the user explicitly asks you to.
 | [docs/architecture/app-design.md](docs/architecture/app-design.md) | Data models, API design, package dependency graph |
 | [docs/architecture/experiments.md](docs/architecture/experiments.md) | Canonical Experiment revisions, execution attempts, fixed-vector storage, publication, and client contract |
 | [docs/architecture/prompt-evaluations.md](docs/architecture/prompt-evaluations.md) | Static prompt quality, datasets, commands, and maintenance rules |
+| [docs/architecture/taxonome.md](docs/architecture/taxonome.md) | Standalone Taxonome engine, catalog, CLI, ATIF/JSON API, evals and replay |
+| [docs/architecture/trajectory-taxonomy-format.md](docs/architecture/trajectory-taxonomy-format.md) | Normative taxonomy authoring, shared assessments, typed ATIF evidence, JSONPath, hashing, and interoperability contract |
 | [docs/architecture/data-organization-projects.md](docs/architecture/data-organization-projects.md) | Projects (a single container) to isolate/group data within a cluster; composes with data-tags and auth-rbac |
 | [docs/architecture/auth-rbac.md](docs/architecture/auth-rbac.md) | Explicit-login IdP auth, Redis user-access cache, Portal handshake; deferred RBAC/internal-token roadmap |
 | [docs/architecture/vscode-web-worker.md](docs/architecture/vscode-web-worker.md) | XState chat machine, GitHub auth flow, ARIA snapshots |
