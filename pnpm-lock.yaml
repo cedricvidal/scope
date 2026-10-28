@@ -761,6 +761,9 @@ importers:
       atifact:
         specifier: ^0.10.1
         version: 0.10.1
+      ax-taxonomy:
+        specifier: workspace:*
+        version: link:../../../packages/ax-taxonomy
       dotenv:
         specifier: 16.6.1
         version: 16.6.1
@@ -770,6 +773,9 @@ importers:
       shared:
         specifier: workspace:*
         version: link:../../../packages/shared
+      taxonomy-engine:
+        specifier: workspace:*
+        version: link:../../../packages/taxonomy-engine
       telemetry:
         specifier: workspace:*
         version: link:../../../packages/telemetry

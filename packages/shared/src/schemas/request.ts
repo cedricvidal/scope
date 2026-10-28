@@ -279,6 +279,16 @@ export const RunStateSchema = z
     observationResults: z.array(CriterionResultSchema).optional(),
     /** Canonical run-scoped report-template IDs frozen for this exact attempt. */
     reportTemplateIds: z.array(z.string().min(1)).optional(),
+    /** Immutable compressed Taxonome SDK result for this exact run attempt. */
+    taxonomyEvaluation: z
+      .object({
+        url: z.string().min(1),
+        schemaVersion: z.string().min(1),
+        contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        sizeBytes: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .openapi("RunState");
 

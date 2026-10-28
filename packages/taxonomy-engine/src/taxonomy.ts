@@ -405,6 +405,78 @@ export function serializableTaxonomy(taxonomy: Omit<NormalizedTaxonomy, "digest"
   };
 }
 
+/** Normalizes already-resolved taxonomy and element documents from a trusted store. */
+export function normalizeTaxonomyDocuments(
+  taxonomy: unknown,
+  elementDocuments: readonly unknown[],
+  options: TaxonomyLoadOptions,
+): NormalizedTaxonomy {
+  const document = taxonomyDocumentSchema.parse(taxonomy);
+  const authoredElements = elementDocuments.map((element, index) =>
+    parseAuthoredElement(element, `stored element ${index + 1}`),
+  );
+  if (document.elements.length !== authoredElements.length) {
+    throw new Error(
+      `Taxonomy declares ${document.elements.length} elements but ${authoredElements.length} were resolved`,
+    );
+  }
+
+  const surfaceIds = new Set<string>();
+  for (const surface of document.surfaces) {
+    if (surfaceIds.has(surface.id)) {
+      throw new Error(`Duplicate taxonomy surface ID '${surface.id}'`);
+    }
+    surfaceIds.add(surface.id);
+  }
+
+  const elementIds = new Set<string>();
+  const elements: NormalizedElement[] = authoredElements.map(authored => {
+    if (authored.schema_version && authored.schema_version !== document.schema_version) {
+      throw new Error(`Element '${authored.id}' schema version conflicts with taxonomy`);
+    }
+    if (elementIds.has(authored.id)) {
+      throw new Error(`Duplicate taxonomy element ID '${authored.id}'`);
+    }
+    elementIds.add(authored.id);
+
+    const output = validateOutputContract(authored.id, authored.output);
+    if (authored.implementation.type === "prompt") {
+      return { ...authored, implementation: authored.implementation, output };
+    }
+    const registered = options.handlers.resolve(authored.implementation.handler);
+    const config = registered.handler.configSchema.parse(authored.implementation.config ?? {});
+    return {
+      ...authored,
+      implementation: {
+        type: "deterministic" as const,
+        handler: authored.implementation.handler,
+        config,
+      },
+      output,
+      resolvedHandler: registered.handler,
+      handlerProvider: registered.provider,
+    };
+  });
+
+  const withoutDigest = {
+    schema_version: TAXONOMY_SCHEMA_VERSION,
+    id: document.id,
+    version: document.version,
+    surfaces: document.surfaces,
+    elements,
+    elementById: new Map(elements.map(element => [element.id, element])),
+    surfaceById: new Map(document.surfaces.map(surface => [surface.id, surface])),
+  } satisfies Omit<NormalizedTaxonomy, "digest">;
+  const normalized: NormalizedTaxonomy = {
+    ...withoutDigest,
+    digest: taxonomyDigest(serializableTaxonomy(withoutDigest)),
+  };
+  Object.freeze(normalized.surfaces);
+  Object.freeze(normalized.elements);
+  Object.freeze(normalized);
+  return normalized;
+}
+
 /**
  * Loads embedded/referenced YAML forms into one immutable normalized taxonomy.
  *
@@ -455,64 +527,9 @@ export async function loadTaxonomy(
     }
   }
 
-  const surfaceIds = new Set<string>();
-  for (const surface of document.surfaces) {
-    if (surfaceIds.has(surface.id)) {
-      throw new Error(`Duplicate taxonomy surface ID '${surface.id}'`);
-    }
-    surfaceIds.add(surface.id);
-  }
-
-  const elementIds = new Set<string>();
-  const elements: NormalizedElement[] = authoredElements.map(authored => {
-    if (authored.schema_version && authored.schema_version !== document.schema_version) {
-      throw new Error(`Element '${authored.id}' schema version conflicts with taxonomy`);
-    }
-    if (elementIds.has(authored.id)) {
-      throw new Error(`Duplicate taxonomy element ID '${authored.id}'`);
-    }
-    elementIds.add(authored.id);
-
-    const output = validateOutputContract(authored.id, authored.output);
-    if (authored.implementation.type === "prompt") {
-      return {
-        ...authored,
-        implementation: authored.implementation,
-        output,
-      };
-    }
-
-    const registered = options.handlers.resolve(authored.implementation.handler);
-    const config = registered.handler.configSchema.parse(authored.implementation.config ?? {});
-    return {
-      ...authored,
-      implementation: {
-        type: "deterministic" as const,
-        handler: authored.implementation.handler,
-        config,
-      },
-      output,
-      resolvedHandler: registered.handler,
-      handlerProvider: registered.provider,
-    };
-  });
-
-  const withoutDigest = {
-    schema_version: TAXONOMY_SCHEMA_VERSION,
-    id: document.id,
-    version: document.version,
-    surfaces: document.surfaces,
-    elements,
-    elementById: new Map(elements.map(element => [element.id, element])),
-    surfaceById: new Map(document.surfaces.map(surface => [surface.id, surface])),
-  } satisfies Omit<NormalizedTaxonomy, "digest">;
-  const normalized: NormalizedTaxonomy = {
-    ...withoutDigest,
-    digest: taxonomyDigest(serializableTaxonomy(withoutDigest)),
-  };
-
-  Object.freeze(normalized.surfaces);
-  Object.freeze(normalized.elements);
-  Object.freeze(normalized);
-  return normalized;
+  return normalizeTaxonomyDocuments(
+    { ...document, elements: authoredElements },
+    authoredElements,
+    options,
+  );
 }

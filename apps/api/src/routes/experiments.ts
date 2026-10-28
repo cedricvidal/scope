@@ -61,6 +61,7 @@ const CreateExperimentInputSchema = z
     requests: z.array(ExperimentRequestInputSchema).max(250_000).default([]),
     requestIds: z.array(z.string().min(1)).max(250_000).default([]),
     reportTemplateIds: z.array(z.string().min(1)).max(1_000).default([]),
+    taxonomyRevisionId: z.string().min(1).optional(),
   })
   .superRefine((value, ctx) => {
     if (
@@ -166,6 +167,13 @@ const ExperimentResponseSchema = z
       revisionNumber: z.number().int(),
       memberCount: z.number().int(),
       reportTemplateIds: z.array(z.string()),
+      taxonomy: z
+        .object({
+          taxonomyRevisionId: z.string(),
+          ref: z.string(),
+          contentSha256: z.string(),
+        })
+        .optional(),
       createdAt: z.coerce.date(),
     }),
     currentExecution: z.object({
@@ -683,6 +691,7 @@ function experimentResponse(experiment: ExperimentDocument) {
       revisionNumber: experiment.revision.revisionNumber,
       memberCount: experiment.revision.memberCount,
       reportTemplateIds: experiment.revision.reportTemplateIds,
+      taxonomy: experiment.revision.taxonomy,
       createdAt: experiment.revision.createdAt,
     },
     currentExecution: executionResponse(experiment.execution),
@@ -827,6 +836,39 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
       const reportTemplateIds = canonicalTemplateIds(
         req.body.reportTemplateIds,
       );
+      let taxonomy:
+        | {
+            taxonomyRevisionId: string;
+            ref: string;
+            contentSha256: string;
+          }
+        | undefined;
+      if (req.body.taxonomyRevisionId) {
+        const enabled = await ctx.featureFlagCollection.findOne({
+          key: "taxonome",
+          enabled: true,
+        });
+        if (!enabled) {
+          res.status(404).json({ error: "Taxonome is not enabled" });
+          return;
+        }
+        const revision = await ctx.taxonomyRevisionStore.get(
+          req.body.taxonomyRevisionId,
+        );
+        if (!revision) {
+          res.status(400).json({ error: "Taxonomy revision not found" });
+          return;
+        }
+        if (revision.projectId !== projectId) {
+          res.status(400).json({ error: "Taxonomy revision project mismatch" });
+          return;
+        }
+        taxonomy = {
+          taxonomyRevisionId: revision._id,
+          ref: revision.ref,
+          contentSha256: revision.contentSha256,
+        };
+      }
       const invalidReportTemplateIds =
         await invalidManualExperimentTemplateIds(
           ctx,
@@ -854,6 +896,7 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
             metadata: req.body.metadata,
             requestIds: req.body.requestIds,
             reportTemplateIds,
+            taxonomy,
             now,
           });
           res.status(201).json({
@@ -918,7 +961,9 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
             metadata,
             requests: req.body.requests,
             reportTemplateIds,
+            taxonomy,
           }),
+          ...(taxonomy ? { taxonomy } : {}),
           createdAt: now,
         },
         experimentExecutionId,
