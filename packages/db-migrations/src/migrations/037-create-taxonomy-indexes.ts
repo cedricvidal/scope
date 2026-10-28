@@ -64,9 +64,9 @@ export class CreateTaxonomyIndexes implements MigrationInterface {
         }
       }
 
-      const indexes = await collection.indexes();
+      const indexes = await collection.listIndexes().toArray();
       console.log(
-        `  Verified ${definition.collection} indexes: ${indexes.map((index) => index.name).join(", ")}`,
+        `  Verified ${definition.collection} getIndexes(): ${indexes.map((index) => index.name).join(", ")}`,
       );
     }
   }
