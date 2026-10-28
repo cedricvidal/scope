@@ -1153,7 +1153,11 @@ export class ExperimentStore {
         metadata: experiment.metadata,
         requestIds: requests.map(({ requestId }) => requestId).sort(),
         reportTemplateIds,
+        taxonomy: experiment.revision.taxonomy,
       }),
+      ...(experiment.revision.taxonomy
+        ? { taxonomy: experiment.revision.taxonomy }
+        : {}),
       createdAt: now,
     }) as ExperimentRevision;
     const reusableHandlerSummary: ExperimentExecution["handlerSummary"] =

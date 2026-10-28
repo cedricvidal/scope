@@ -78,6 +78,31 @@ function portableTaxonomyRevision(revision: {
   };
 }
 
+async function validateResolvedTaxonomyElements(
+  ctx: RouteContext,
+  projectId: string,
+  content: PortableTaxonomyDocument,
+): Promise<string | undefined> {
+  const elementIds = new Set<string>();
+  for (const reference of content.elements) {
+    if ("path" in reference) {
+      return `Unresolved element path '${reference.path}'; use the YAML import endpoint`;
+    }
+    const revision = await ctx.taxonomyElementRevisionStore.getByRef(
+      projectId,
+      reference.ref,
+    );
+    if (!revision) {
+      return `Element revision '${reference.ref}' was not found in this project`;
+    }
+    if (elementIds.has(revision.id)) {
+      return `Duplicate element id '${revision.id}'`;
+    }
+    elementIds.add(revision.id);
+  }
+  return undefined;
+}
+
 /** Registers the complete project-scoped taxonomy and element product API. */
 export function registerTaxonomyRoutes(ctx: RouteContext): void {
   apiRoute(ctx.app, ctx.registry, {
@@ -218,6 +243,15 @@ export function registerTaxonomyRoutes(ctx: RouteContext): void {
         }
         if (req.body.id && req.body.id !== req.body.content.id) {
           res.status(400).json({ error: "Root id must match content id" });
+          return;
+        }
+        const elementError = await validateResolvedTaxonomyElements(
+          ctx,
+          getQueryProjectId(req),
+          req.body.content,
+        );
+        if (elementError) {
+          res.status(400).json({ error: elementError });
           return;
         }
         const root = await ctx.taxonomyStore.create({
@@ -490,6 +524,17 @@ export function registerTaxonomyRoutes(ctx: RouteContext): void {
           if (req.body.content.id !== root.id) {
             res.status(400).json({ error: "Revision id must match root id" });
             return;
+          }
+          if (!operation.element) {
+            const elementError = await validateResolvedTaxonomyElements(
+              ctx,
+              root.projectId,
+              req.body.content as PortableTaxonomyDocument,
+            );
+            if (elementError) {
+              res.status(400).json({ error: elementError });
+              return;
+            }
           }
           const result = await revisionStore.create(
             root._id,

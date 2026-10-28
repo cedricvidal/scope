@@ -65,6 +65,8 @@ An **Experiment revision** describes the composition itself:
 - the canonical, deduplicated, sorted `reportTemplateIds` selected from active
   manual Experiment templates;
 - immutable creation time.
+- an optional exact taxonomy pin:
+  `{ taxonomyRevisionId, ref, contentSha256 }`.
 
 An **Experiment execution** is one processing attempt over that revision:
 
@@ -73,6 +75,35 @@ An **Experiment execution** is one processing attempt over that revision:
 - the exact request/run vector and its `vectorFingerprint`;
 - handler status, blockers, and processing timestamps;
 - freeze, discard, and supersession state.
+- the same bounded exact taxonomy pin copied from its revision.
+
+### Exact taxonomy selection and typed readout
+
+Taxonomy-enabled Experiments select one immutable `taxonomyRevisionId`.
+Creation verifies the revision belongs to the Experiment project and stores
+its canonical ref and content SHA alongside the database ID. Membership,
+report-template, and execution retries preserve that pin; no execution
+duplicates the taxonomy's element vector.
+
+Each exact request/run pair is evaluated by `pp-taxonomy`. The complete SDK
+result is stored as gzip-compressed JSON in Blob Storage and the run stores only:
+
+```typescript
+taxonomyEvaluation?: {
+  url: string;
+  schemaVersion: string;
+  contentSha256: string;
+  sizeBytes: number;
+}
+```
+
+The typed Experiment readout traverses the immutable request/run vector and
+keeps `completed`, `runtime-failure`, and `missing` states distinct. Successful
+run bodies retain Taxonome's passed/negative and unknown/indeterminate
+assessment semantics. Readout generation emits structured JSON and deterministic
+Markdown without an additional generic LLM synthesis call. Publication is
+guarded by the exact execution ID and a readout claim token so a stale attempt
+cannot replace a newer execution's result.
 
 Retry creates a new execution attempt over the same stored request vector. It
 does not create a new revision or retry member runs. A membership replacement

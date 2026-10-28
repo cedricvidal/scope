@@ -6,7 +6,6 @@ import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { createAgentBehaviorHandlerRegistry } from "ax-taxonomy";
 import {
-  EVALUATION_SCHEMA_VERSION,
   evaluate,
   normalizeTaxonomyDocuments,
   parseScopeAtif,
@@ -34,6 +33,7 @@ import type {
 import { POST_PROCESSOR_VERSION } from "../version.js";
 
 const gzipAsync = promisify(gzip);
+const RUN_RESULT_SCHEMA_VERSION = "scope/taxonomy-run-result/v1";
 
 interface PromptExecutorLease {
   executor?: PromptExecutor;
@@ -252,7 +252,7 @@ export class TaxonomyHandler implements PostProcessHandler {
           $set: {
             "run.taxonomyEvaluation": {
               url,
-              schemaVersion: EVALUATION_SCHEMA_VERSION,
+              schemaVersion: RUN_RESULT_SCHEMA_VERSION,
               contentSha256,
               sizeBytes: json.byteLength,
             },

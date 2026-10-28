@@ -79,7 +79,7 @@ function renderMarkdown(readout: {
   return lines.join("\n");
 }
 
-async function buildReadout(
+export async function buildTaxonomyReadout(
   ctx: RouteContext,
   input: {
     projectId: string;
@@ -244,7 +244,7 @@ export function registerTaxonomyReadoutRoutes(ctx: RouteContext): void {
           experimentExecutionId: experiment.execution.experimentExecutionId,
         });
         if (!requests) throw new Error("Experiment request vector is unavailable");
-        const readout = await buildReadout(ctx, {
+        const readout = await buildTaxonomyReadout(ctx, {
           projectId,
           experimentId: experiment.experimentId,
           executionId: experiment.execution.experimentExecutionId,

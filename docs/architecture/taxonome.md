@@ -4,8 +4,9 @@ The normative interoperable authoring/result/reference contract is
 [Trajectory Taxonomy Format](trajectory-taxonomy-format.md). This guide covers
 the Taxonome implementation, CLI, experiments, and evidence.
 
-Taxonome is a **standalone, draft experimental slice**, not the production
-Observation model or a dependency on the Experiment stack. It loads authored
+Taxonome began as a standalone experimental slice and remains independently
+usable through its CLI. Scope now also integrates the same engine as the
+production taxonomy catalog and Experiment post-processor. It loads authored
 taxonomy definitions from YAML, validates/upcasts ATIF v1.6-v1.8 trajectories,
 and returns
 schema-validated structured observations. The current catalog slice contains:
@@ -18,9 +19,75 @@ schema-validated structured observations. The current catalog slice contains:
 - plain ATIF JSON and existing Scope run archive inputs;
 - deterministic JSON/Markdown readout previews.
 
-No Scope API, Judge, database, Redis, queue, or token manager is required.
-Production adoption, the remaining taxonomy, generated-code execution,
-sandboxed plugins, and narrative readout generation remain out of scope.
+The standalone CLI still requires no Scope API, Judge, database, Redis, queue,
+or token manager. The production integration uses the API, Cosmos-compatible
+MongoDB collections, post-processor queue, and Blob Storage, but invokes the
+Taxonome programmatic API directly; it never shells out to this CLI or parses
+CLI output.
+
+## Scope production integration
+
+The production catalog consists of exactly four project-scoped collections:
+`taxonomies`, `taxonomy-revisions`, `taxonomy-elements`, and
+`taxonomy-element-revisions`. Roots are mutable metadata records. Revisions
+are immutable, monotonically numbered, and addressed as `{id}@rN`.
+
+The canonical `packages/ax-taxonomy/taxonomy/taxonomy.yaml` and referenced
+element files seed a per-project **Default Taxonomy** as `sourceType: builtin`.
+Built-ins are read-only. Copying an exact built-in revision creates a new user
+root at revision 1. User edits always append revisions.
+
+The API validates explicit element references and rejects ambiguous objects,
+bare IDs, malformed refs, absolute/traversing paths, missing YAML files,
+duplicate element IDs, cross-project refs, and implicit-latest resolution.
+Portable YAML contains the established top-level Taxonome schema without a
+database-only definition wrapper. Database revisions additionally carry
+`contentSha256` for latest-revision deduplication and integrity verification;
+exports omit it.
+
+### Experiment and exact-run flow
+
+```mermaid
+flowchart LR
+    Catalog[Exact taxonomy revision] --> Experiment[Experiment revision and execution pin]
+    Experiment --> Run[Exact request and run pair]
+    Run --> ATIF[pp-atif exact-run artifacts]
+    ATIF --> Handler[pp-taxonomy programmatic SDK]
+    Catalog --> Handler
+    Handler --> Blob[claim-specific result.json.gz]
+    Blob --> Ref[run.taxonomyEvaluation]
+    Ref --> Readout[Typed Experiment JSON and Markdown readout]
+```
+
+`pp-taxonomy` resolves every element by exact canonical ref and rechecks the
+taxonomy revision's database ID, project, ref, and content SHA. Deterministic
+taxonomies create no Copilot model transport. Prompt execution is injectable;
+tests use fake executors and make no paid or live calls. Production opens an
+isolated Copilot transport lazily only when at least one selected element is
+prompt-based.
+
+Artifact paths are attempt/claim specific:
+
+```text
+{requestId}/runs/{runId}/taxonomy-evaluation/{claimId}/result.json.gz
+```
+
+The worker publishes the complete bounded run reference atomically only while
+the exact run and `pp-taxonomy` claim still match. Duplicate queue delivery,
+stale claims, and historical attempts therefore cannot overwrite one another.
+
+### Feature flag and product surfaces
+
+The DB-backed `taxonome` feature flag is seeded idempotently with label
+`Taxonome and Taxonomies` and `enabled: false`. It gates only user entry points:
+taxonomy APIs, taxonomy-bearing Experiment mutations, Portal navigation/routes/
+queries, and CLI calls through those APIs. Workers, schedulers, and internal
+pollers do not consult it, so disabling the flag does not interrupt accepted
+work. Portal behavior is fail-closed while flag state is unresolved.
+
+The API is the source of truth for taxonomy roots, revisions, copy, YAML
+import/export, elements, exact-run artifacts, and typed readouts. Portal and
+CLI clients use those routes and add no client-only capabilities.
 
 ### Standalone foundation extraction
 

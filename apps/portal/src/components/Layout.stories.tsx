@@ -112,6 +112,7 @@ export const Expanded: Story = {
     ).toBeVisible();
     // With a project selected, scoped nav is present.
     await expect(canvas.getByRole("link", { name: "Runs" })).toBeVisible();
+    await expect(canvas.queryByRole("link", { name: "Taxonomies" })).toBeNull();
     const experimentsLink = canvas.getByRole("link", { name: "Experiments" });
     const runsLink = canvas.getByRole("link", { name: "Runs" });
     const criteriaLink = canvas.getByRole("link", { name: "Criteria" });

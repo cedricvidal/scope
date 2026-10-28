@@ -26,6 +26,15 @@ const FeatureFlagContext = createContext<FeatureFlagContextValue>({
   isFeatureEnabledFailClosed: () => false,
 });
 
+export function featureEnabledFailClosed(
+  flags: FeatureFlag[],
+  isLoading: boolean,
+  key: string,
+): boolean {
+  if (isLoading) return false;
+  return flags.find((flag) => flag.key === key)?.enabled === true;
+}
+
 export function FeatureFlagProvider({ children }: { children: ReactNode }) {
   const auth = useContext(AuthContext);
   const enabled = !isAuthEnabled || Boolean(auth?.isReady && auth.isAuthenticated);
@@ -45,8 +54,7 @@ export function FeatureFlagProvider({ children }: { children: ReactNode }) {
   }
 
   function isFeatureEnabledFailClosed(key: string): boolean {
-    if (isLoading) return false;
-    return flags.find((flag) => flag.key === key)?.enabled === true;
+    return featureEnabledFailClosed(flags, isLoading, key);
   }
 
   return (

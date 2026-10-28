@@ -14,6 +14,17 @@ and source-mode CLIs fail before making an API request when no URL is configured
 Help, version, and CLI updates do not require a Scope API URL. The CLI no longer
 derives a localhost URL from `SCOPE_API_PORT` or uses `SCOPE_DEFAULT_API_URL`.
 
+## Taxonome post-processing
+
+### TAXONOME_MODEL
+**Default:** `claude-haiku-4.5`
+**Type:** model identifier
+
+Model used by the post-processor's lazy Taxonome prompt executor. The worker
+does not resolve credentials or initialize a Copilot SDK transport for
+deterministic-only taxonomies. Prompt execution uses the taxonomy engine's
+isolated, tool-free Copilot transport and normal credential resolution.
+
 ## Docker Development
 
 ### API_DEBUG_PORT
