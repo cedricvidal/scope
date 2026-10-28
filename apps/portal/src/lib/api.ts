@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTemplateVersion, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ResourceDocument, ResourceRevisionDocument, ResourceBindingSpec, CreateResourceBody, CreateResourceRevisionBody, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, RunFacetsResponse, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType, RunSortField, RunSortDir, CriterionKind, TaxonomyElementId, CriterionSubject } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTemplateVersion, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, TaxonomyDocument, TaxonomyRevisionDocument, TaxonomyElementDocument, TaxonomyElementRevisionDocument, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ResourceDocument, ResourceRevisionDocument, ResourceBindingSpec, CreateResourceBody, CreateResourceRevisionBody, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, RunFacetsResponse, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType, RunSortField, RunSortDir, CriterionKind, TaxonomyElementId, CriterionSubject } from "@/types";
 
 import type { Project, CreateProjectRequest, UpdateProjectRequest } from "@/types";
 import { qs } from "./url";
@@ -277,7 +277,7 @@ export const api = {
   },
 
   createExperiment: async (
-    body: { metadata: ExperimentMetadataView; reportTemplateIds?: string[] } & (
+    body: { metadata: ExperimentMetadataView; reportTemplateIds?: string[]; taxonomyRevisionId?: string } & (
       | { request: RunCreateInput; empty?: never }
       | { empty: true; request?: never }
     ),
@@ -299,6 +299,9 @@ export const api = {
           metadata: body.metadata,
           requests: requestBody ? [requestBody] : [],
           reportTemplateIds: body.reportTemplateIds ?? [],
+          ...(body.taxonomyRevisionId
+            ? { taxonomyRevisionId: body.taxonomyRevisionId }
+            : {}),
         }),
       },
       { scoped: true },
@@ -313,6 +316,7 @@ export const api = {
     metadata: ExperimentMetadataView;
     requestIds: string[];
     reportTemplateIds?: string[];
+    taxonomyRevisionId?: string;
   }): Promise<ExistingRunExperimentCreateView> => {
     const value = await request<unknown>(
       "/experiments",
@@ -324,6 +328,9 @@ export const api = {
           requests: [],
           requestIds: body.requestIds,
           reportTemplateIds: body.reportTemplateIds ?? [],
+          ...(body.taxonomyRevisionId
+            ? { taxonomyRevisionId: body.taxonomyRevisionId }
+            : {}),
         }),
       },
       { scoped: true },
@@ -1393,6 +1400,88 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ enabled }),
     });
+  },
+
+  // ─── Taxonomies ────────────────────────────────────────────────────────────
+
+  listTaxonomies: (): Promise<TaxonomyDocument[]> => {
+    return request("/taxonomies", undefined, { scoped: true });
+  },
+
+  getTaxonomy: (id: string): Promise<TaxonomyDocument> => {
+    return request(`/taxonomies/${encodeURIComponent(id)}`);
+  },
+
+  listTaxonomyRevisions: (id: string): Promise<TaxonomyRevisionDocument[]> => {
+    return request(`/taxonomies/${encodeURIComponent(id)}/revisions`);
+  },
+
+  createTaxonomy: (input: {
+    name: string;
+    description?: string;
+    content: unknown;
+  }): Promise<TaxonomyDocument> => {
+    return request("/taxonomies", {
+      method: "POST",
+      body: JSON.stringify({ ...input, sourceType: "user" }),
+    }, { scoped: true });
+  },
+
+  copyTaxonomyRevision: (
+    revisionId: string,
+    input: { name: string; id?: string },
+  ): Promise<TaxonomyDocument> => {
+    return request(
+      `/taxonomy-revisions/${encodeURIComponent(revisionId)}/copy`,
+      { method: "POST", body: JSON.stringify(input) },
+      { scoped: true },
+    );
+  },
+
+  deleteTaxonomy: (id: string): Promise<void> => {
+    return request(`/taxonomies/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
+  listTaxonomyElements: (): Promise<TaxonomyElementDocument[]> => {
+    return request("/taxonomy-elements", undefined, { scoped: true });
+  },
+
+  listTaxonomyElementRevisions: (
+    id: string,
+  ): Promise<TaxonomyElementRevisionDocument[]> => {
+    return request(`/taxonomy-elements/${encodeURIComponent(id)}/revisions`);
+  },
+
+  createTaxonomyElementRevision: (
+    id: string,
+    content: unknown,
+  ): Promise<TaxonomyElementRevisionDocument> => {
+    return request(`/taxonomy-elements/${encodeURIComponent(id)}/revisions`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  },
+
+  getTaxonomyReadout: (experimentId: string): Promise<{
+    status: "processing" | "done" | "failed";
+    jsonUrl?: string;
+    markdownUrl?: string;
+    error?: string;
+  }> => {
+    return request(`/experiments/${encodeURIComponent(experimentId)}/taxonomy-readout`, undefined, { scoped: true });
+  },
+
+  retryTaxonomyReadout: (experimentId: string): Promise<{
+    status: "processing" | "done" | "failed";
+    jsonUrl?: string;
+    markdownUrl?: string;
+    error?: string;
+  }> => {
+    return request(`/experiments/${encodeURIComponent(experimentId)}/taxonomy-readout/retry`, {
+      method: "POST",
+    }, { scoped: true });
   },
 
   // ─── Skills ───────────────────────────────────────────────────────────────

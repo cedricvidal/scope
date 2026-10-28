@@ -64,6 +64,7 @@ import type {
 } from "@/lib/experiments";
 import { formatDate, truncate } from "@/lib/utils";
 import type { ReportTemplate } from "@/types";
+import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 
 const RUN_COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "requestId", label: "ID", required: true },
@@ -278,6 +279,8 @@ export function ExperimentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isFeatureEnabledFailClosed } = useFeatureFlags();
+  const taxonomeEnabled = isFeatureEnabledFailClosed("taxonome");
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedRequestIds, setSelectedRequestIds] = useState<Set<string>>(new Set());
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
@@ -372,6 +375,23 @@ export function ExperimentDetail() {
       }
       return 5_000;
     },
+  });
+  const taxonomyReadoutQuery = useQuery({
+    queryKey: ["experiment-taxonomy-readout", id],
+    queryFn: () => api.getTaxonomyReadout(id!),
+    enabled: Boolean(id && taxonomeEnabled && !isViewingHistorical),
+    retry: false,
+  });
+  const retryTaxonomyReadout = useMutation({
+    mutationFn: () => api.retryTaxonomyReadout(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["experiment-taxonomy-readout", id],
+      });
+      toast.success("Taxonome readout generated");
+    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Readout failed"),
   });
   const retry = useMutation({
     mutationFn: () =>
@@ -1188,7 +1208,55 @@ export function ExperimentDetail() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="reports" className="mt-4">
+          <TabsContent value="reports" className="mt-4 space-y-4">
+            {taxonomeEnabled && !isViewingHistorical && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between gap-4">
+                    <span>Taxonome readout</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={retryTaxonomyReadout.isPending}
+                      onClick={() => retryTaxonomyReadout.mutate()}
+                    >
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                      {taxonomyReadoutQuery.data ? "Retry" : "Generate"}
+                    </Button>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {taxonomyReadoutQuery.data ? (
+                    <>
+                      <Badge variant={taxonomyReadoutQuery.data.status === "done" ? "default" : "secondary"}>
+                        {taxonomyReadoutQuery.data.status}
+                      </Badge>
+                      {taxonomyReadoutQuery.data.error && (
+                        <p className="text-destructive">{taxonomyReadoutQuery.data.error}</p>
+                      )}
+                      {taxonomyReadoutQuery.data.status === "done" && (
+                        <div className="flex gap-2">
+                          <Button asChild size="sm" variant="outline">
+                            <a href={`/api/v1/experiments/${encodeURIComponent(id!)}/taxonomy-readout/json?projectId=${encodeURIComponent(experiment.projectId)}`}>
+                              JSON
+                            </a>
+                          </Button>
+                          <Button asChild size="sm" variant="outline">
+                            <a href={`/api/v1/experiments/${encodeURIComponent(id!)}/taxonomy-readout/markdown?projectId=${encodeURIComponent(experiment.projectId)}`}>
+                              Markdown
+                            </a>
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      Generate a typed readout after exact-run taxonomy evaluations finish.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
             <ExperimentReportCard
               experimentId={experiment.experimentId}
               experimentExecutionId={activeExecution.experimentExecutionId}

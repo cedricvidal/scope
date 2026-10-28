@@ -123,6 +123,32 @@ export const Expanded: Story = {
   },
 };
 
+export const TaxonomeEnabled: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        ...mswHandlers,
+        http.get("/api/v1/feature-flags", () =>
+          HttpResponse.json([
+            {
+              key: "taxonome",
+              label: "Taxonome and Taxonomies",
+              enabled: true,
+              updatedAt: "2026-10-28T00:00:00.000Z",
+            },
+          ]),
+        ),
+      ],
+    },
+  },
+  play: async ({ canvas }) => {
+    localStorage.setItem("scope:layout:sidebar-expanded", "true");
+    await expect(
+      await canvas.findByRole("link", { name: "Taxonomies" }),
+    ).toHaveAttribute("href", "/taxonomies");
+  },
+};
+
 // No project selected: only global entries (Projects + Platform) remain; the
 // scoped groups and the New Run CTA are hidden until a project is picked.
 export const NoProjectSelected: Story = {

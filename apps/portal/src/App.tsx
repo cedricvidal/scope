@@ -67,6 +67,7 @@ import { FeatureRoute } from "@/components/FeatureRoute";
 import { ProjectGate } from "@/components/ProjectGate";
 import { HomeRoute } from "@/components/HomeRoute";
 import { useFavicon } from "@/hooks/useFavicon";
+import { TaxonomyList } from "@/pages/TaxonomyList";
 
 export function App() {
   useFavicon();
@@ -146,6 +147,7 @@ export function App() {
         <Route path="/codebases" element={<ProjectGate><CodebaseList /></ProjectGate>} />
         <Route path="/codebases/:id" element={<CodebaseDetail />} />
         <Route path="/codebases/:id/revisions/:revisionId" element={<CodebaseDetail />} />
+        <Route path="/taxonomies" element={<FeatureRoute featureKey="taxonome" failClosed><ProjectGate><TaxonomyList /></ProjectGate></FeatureRoute>} />
         <Route path="/resources" element={<ProjectGate><ResourceList /></ProjectGate>} />
         <Route path="/resources/new" element={<ProjectGate><CreateResource /></ProjectGate>} />
         <Route path="/resources/:id" element={<ProjectGate><ResourceDetail /></ProjectGate>} />

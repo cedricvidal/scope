@@ -179,6 +179,12 @@ export interface RunState {
    * tracks pp-atif and is kept for backward compatibility.
    */
   handlerStatus?: Record<string, HandlerRunStatus>;
+  taxonomyEvaluation?: {
+    url: string;
+    schemaVersion: string;
+    contentSha256: string;
+    sizeBytes: number;
+  };
   /**
    * Whole-run observation results — one entry per selected `subject:"run"`
    * observation criterion, evaluated once against the final snapshot + the
@@ -1212,6 +1218,57 @@ export interface FeatureFlag {
   label: string;
   enabled: boolean;
   updatedAt: string;
+}
+
+export interface TaxonomyDocument {
+  _id: string;
+  projectId: string;
+  id: string;
+  name: string;
+  description?: string;
+  sourceType: "builtin" | "user";
+  revisionCounter: number;
+  latestRevisionId?: string;
+  latestRevision?: number;
+  createdAt: string;
+  deletedAt?: string;
+}
+
+export interface TaxonomyRevisionDocument {
+  _id: string;
+  taxonomyId: string;
+  projectId: string;
+  id: string;
+  version: string;
+  sourceType: "builtin" | "user";
+  revision: number;
+  ref: string;
+  contentSha256: string;
+  schema_version: "scope/taxonomy/v1";
+  surfaces: Array<{ id: string; label: string; description?: string }>;
+  elements: Array<{ path: string } | { ref: string }>;
+  createdAt: string;
+}
+
+export interface TaxonomyElementDocument extends TaxonomyDocument {}
+
+export interface TaxonomyElementRevisionDocument {
+  _id: string;
+  elementId: string;
+  projectId: string;
+  id: string;
+  label: string;
+  description?: string;
+  sourceType: "builtin" | "user";
+  revision: number;
+  ref: string;
+  contentSha256: string;
+  implementation:
+    | { type: "prompt"; prompt: string }
+    | { type: "deterministic"; handler: string; config?: unknown };
+  preconditions: Record<string, boolean>;
+  output: { evidence_roles: Record<string, unknown>; constraints?: unknown[] };
+  createdAt: string;
 }
 
 // =============================================================================

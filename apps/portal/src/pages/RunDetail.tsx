@@ -535,6 +535,7 @@ export function RunDetail() {
     (activeRun?.turns ?? []).some((turn) => (turn.observationResults?.length ?? 0) > 0) ||
     (activeRun?.observationResults?.length ?? 0) > 0;
   const hasConfiguredObservations = (run?.observations?.length ?? 0) > 0;
+  const hasTaxonomyEvaluation = Boolean(activeRun?.taxonomyEvaluation);
   // Aggregate enrichment status across the whole post-processing DAG so the
   // "Enriched" badge waits for pp-observations instead of flipping after pp-atif.
   const enrichmentStatus = useMemo(
@@ -1178,7 +1179,7 @@ export function RunDetail() {
           {hasHarData && <TabsTrigger value="network">Network</TabsTrigger>}
           {hasHarData && <TabsTrigger value="tool-calls">Tool Calls</TabsTrigger>}
           {hasVideoData && <TabsTrigger value="video"><Video className="h-3.5 w-3.5 mr-1" />Videos ({videoCount})</TabsTrigger>}
-          {(hasConfiguredObservations || hasObservationResults) && (
+          {(hasConfiguredObservations || hasObservationResults || hasTaxonomyEvaluation) && (
             <TabsTrigger value="taxonomy">
               Taxonomy {hasObservationResults ? `(${((activeRun?.turns?.reduce((count, turn) => count + (turn.observationResults?.length ?? 0), 0) ?? 0) + (activeRun?.observationResults?.length ?? 0))})` : ""}
             </TabsTrigger>
@@ -1278,8 +1279,28 @@ export function RunDetail() {
           </TabsContent>
         )}
 
-        {(hasConfiguredObservations || hasObservationResults) && (
+        {(hasConfiguredObservations || hasObservationResults || hasTaxonomyEvaluation) && (
           <TabsContent value="taxonomy" className="mt-4 space-y-6">
+            {activeRun?.taxonomyEvaluation && (
+              <section className="space-y-3 rounded-lg border p-4">
+                <div>
+                  <h3 className="text-lg font-medium">Taxonome evaluation</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Full SDK result for this exact run attempt.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                  <span>{activeRun.taxonomyEvaluation.schemaVersion}</span>
+                  <span>{activeRun.taxonomyEvaluation.sizeBytes.toLocaleString()} bytes</span>
+                  <span className="font-mono">{activeRun.taxonomyEvaluation.contentSha256.slice(0, 12)}</span>
+                  <Button asChild size="sm" variant="outline">
+                    <a href={`/api/v1/requests/${encodeURIComponent(id!)}/runs/${encodeURIComponent(activeRun._id)}/taxonomy-evaluation/content`}>
+                      Download JSON
+                    </a>
+                  </Button>
+                </div>
+              </section>
+            )}
             <section className="space-y-3">
               <div>
                 <h3 className="text-lg font-medium">Observations</h3>
