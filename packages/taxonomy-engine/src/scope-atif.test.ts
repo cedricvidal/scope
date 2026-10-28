@@ -9,7 +9,7 @@ import { loadTaxonomy } from "./taxonomy.js";
 const plainAtif = {
   schema_version: "ATIF-v1.7",
   session_id: "scope-atif-test",
-  agent: { name: "test-agent" },
+  agent: { name: "test-agent", version: "1.0.0" },
   steps: [
     { step_id: 1, source: "user", message: "Inspect the configured source." },
   ],
@@ -55,6 +55,62 @@ describe("extra.scope ATIF validation", () => {
     expect(parsed.steps[0].extra?.scope?.discoveries).toBeUndefined();
   });
 
+  it("preserves strict machine-readable tool input validation evidence", async () => {
+    const parsed = parseScopeAtif({
+      ...plainAtif,
+      steps: [{
+        step_id: 1,
+        source: "agent",
+        message: "Calling a source.",
+        tool_calls: [{
+          tool_call_id: "call-1",
+          function_name: "source/query",
+          arguments: { count: "many" },
+          extra: {
+            scope: {
+              input_validation: {
+                status: "invalid",
+                issues: [{
+                  code: "invalid_type",
+                  path: "$.count",
+                  message: "Expected a number.",
+                }],
+              },
+            },
+          },
+        }],
+      }],
+    });
+
+    expect(parsed.steps[0].tool_calls?.[0].extra?.scope?.input_validation)
+      .toEqual({
+        status: "invalid",
+        issues: [{
+          code: "invalid_type",
+          path: "$.count",
+          message: "Expected a number.",
+        }],
+      });
+    expect(() => parseScopeAtif({
+      ...plainAtif,
+      steps: [{
+        step_id: 1,
+        source: "agent",
+        message: "Invalid evidence.",
+        tool_calls: [{
+          tool_call_id: "call-1",
+          function_name: "source/query",
+          arguments: {},
+          extra: {
+            scope: {
+              input_validation: { status: "invalid", issues: [] },
+            },
+          },
+        }],
+      }],
+    })).toThrow();
+  });
+
   it("rejects unknown surfaces, ungrounded discoveries, call links, and non-monotonic steps", async () => {
     const loaded = await taxonomy();
     const withScope = (steps: unknown[], availableSources: unknown[] = []) =>
@@ -86,7 +142,7 @@ describe("extra.scope ATIF validation", () => {
     expect(() => validateScopeAtif(withScope([{
       ...plainAtif.steps[0],
       observation: { results: [{ source_call_id: "missing", content: "none" }] },
-    }]), loaded)).toThrow(/unknown tool call/);
+    }]), loaded)).toThrow(/unknown tool_call_id/);
     expect(() => validateScopeAtif(withScope([
       { ...plainAtif.steps[0], step_id: 2 },
       { ...plainAtif.steps[0], step_id: 1 },

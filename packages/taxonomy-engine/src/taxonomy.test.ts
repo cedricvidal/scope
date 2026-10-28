@@ -37,11 +37,14 @@ implementation:
   handler: acme/test-v1
   config:
     threshold_ms: 2500
-evidence:
-  complete_for_negative: false
-output_schema:
-  type: object
-  additionalProperties: true
+preconditions:
+  requires_complete_trajectory: false
+output:
+  evidence_roles:
+    call:
+      type: atif.tool_call
+      max: 1
+      description: Timed-out call.
 `;
 
 /** Creates a neutral deterministic registry for loader normalization tests. */
@@ -101,7 +104,64 @@ surfaces:
         handler: "acme/test-v1",
         config: { threshold_ms: 2500 },
       },
+      preconditions: {
+        requires_recorded_discovery: false,
+        requires_complete_trajectory: false,
+        requires_task: false,
+      },
     });
+  });
+
+  it("normalizes omitted preconditions and includes changed values in the digest", async () => {
+    const root = await tempProject();
+    const manifest = (preconditions: string) => `
+schema_version: scope/taxonomy/v1
+id: preconditions
+version: 1.0.0
+surfaces: []
+elements:
+  - id: prompt
+    label: Prompt
+    implementation:
+      type: prompt
+      prompt: Test.
+${preconditions}
+    output:
+      evidence_roles:
+        step:
+          type: atif.step
+          min: 0
+          description: Optional step.
+`;
+    await writeFile(join(root, "omitted.yaml"), manifest(""));
+    await writeFile(join(root, "explicit.yaml"), manifest(`
+    preconditions:
+      requires_recorded_discovery: false
+      requires_complete_trajectory: false
+      requires_task: false
+`));
+    await writeFile(join(root, "changed.yaml"), manifest(`
+    preconditions:
+      requires_recorded_discovery: false
+      requires_complete_trajectory: false
+      requires_task: true
+`));
+    const omitted = await loadTaxonomy(join(root, "omitted.yaml"), {
+      handlers: testHandlers(),
+    });
+    const explicit = await loadTaxonomy(join(root, "explicit.yaml"), {
+      handlers: testHandlers(),
+    });
+    const changed = await loadTaxonomy(join(root, "changed.yaml"), {
+      handlers: testHandlers(),
+    });
+    expect(omitted.elementById.get("prompt")?.preconditions).toEqual({
+      requires_recorded_discovery: false,
+      requires_complete_trajectory: false,
+      requires_task: false,
+    });
+    expect(omitted.digest).toBe(explicit.digest);
+    expect(changed.digest).not.toBe(omitted.digest);
   });
 
   it("rejects traversal, symlink escape, aliases, duplicates, unknown handlers, and invalid schemas", async () => {
@@ -157,8 +217,11 @@ elements: *surfaces
     implementation:
       type: deterministic
       handler: acme/missing-v1
-    output_schema:
-      type: object
+    output:
+      evidence_roles:
+        step:
+          type: atif.step
+          description: Step.
 `));
     await expect(loadTaxonomy(join(root, "unknown.yaml"), {
       handlers: testHandlers(),
@@ -171,11 +234,66 @@ elements: *surfaces
       type: prompt
       prompt: Test.
     output_schema:
-      $ref: https://example.invalid/schema
+      type: object
 `));
     await expect(loadTaxonomy(join(root, "schema.yaml"), {
       handlers: testHandlers(),
-    })).rejects.toThrow();
+    })).rejects.toThrow("output.evidence_roles");
+
+    await writeFile(join(root, "stale-evidence.yaml"), manifest(`
+  - id: custom
+    label: Custom
+    implementation:
+      type: prompt
+      prompt: Test.
+    evidence:
+      requires_task: true
+    output:
+      evidence_roles:
+        step:
+          type: atif.step
+          description: Step.
+`));
+    await expect(loadTaxonomy(join(root, "stale-evidence.yaml"), {
+      handlers: testHandlers(),
+    })).rejects.toThrow("author preconditions instead");
+
+    await writeFile(join(root, "stale-precondition-names.yaml"), manifest(`
+  - id: custom
+    label: Custom
+    implementation:
+      type: prompt
+      prompt: Test.
+    preconditions:
+      complete_for_negative: true
+      requires_discovery_event: true
+    output:
+      evidence_roles:
+        step:
+          type: atif.step
+          description: Step.
+`));
+    await expect(loadTaxonomy(join(root, "stale-precondition-names.yaml"), {
+      handlers: testHandlers(),
+    })).rejects.toThrow("requires_complete_trajectory");
+
+    await writeFile(join(root, "stale-discovery-name.yaml"), manifest(`
+  - id: custom
+    label: Custom
+    implementation:
+      type: prompt
+      prompt: Test.
+    preconditions:
+      requires_discovery_event: true
+    output:
+      evidence_roles:
+        step:
+          type: atif.step
+          description: Step.
+`));
+    await expect(loadTaxonomy(join(root, "stale-discovery-name.yaml"), {
+      handlers: testHandlers(),
+    })).rejects.toThrow("requires_recorded_discovery");
   });
 
   it("canonical digest ignores object key order but includes semantic fields", () => {

@@ -1,17 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { isAlias, parseDocument, visit } from "yaml";
 import { z } from "zod";
+import {
+  evidenceConstraintSchema,
+  evidenceRoleSchema,
+  type EvidenceContract,
+} from "./assessment.js";
+import { canonicalJsonSha256 } from "./canonical-json.js";
+import { parseDefiniteJsonPath } from "./evidence.js";
 import type { DeterministicHandler, HandlerProvider, HandlerRegistry } from "./handlers.js";
 import {
-  parseTaxonomyJsonSchema,
-  validateTaxonomyJson,
-  type TaxonomyJsonSchema,
-} from "./json-schema.js";
+  preconditionsSchema,
+  type ElementPreconditions,
+} from "./preconditions/index.js";
 
 export const TAXONOMY_SCHEMA_VERSION = "scope/taxonomy/v1";
 
@@ -24,12 +29,6 @@ const surfaceSchema = z.object({
   description: z.string().min(1).optional(),
 }).strict();
 
-const evidenceSchema = z.object({
-  requires_discovery_event: z.boolean().default(false),
-  complete_for_negative: z.boolean().default(false),
-  requires_task: z.boolean().default(false),
-}).strict().default({});
-
 const promptImplementationSchema = z.object({
   type: z.literal("prompt"),
   prompt: z.string().min(1),
@@ -39,6 +38,15 @@ const deterministicImplementationSchema = z.object({
   type: z.literal("deterministic"),
   handler: z.string().min(1),
   config: z.unknown().optional(),
+}).strict();
+
+const roleNameSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/);
+const elementOutputSchema = z.object({
+  evidence_roles: z.record(roleNameSchema, evidenceRoleSchema)
+    .refine(value => Object.keys(value).length > 0, {
+      message: "At least one evidence role is required",
+    }),
+  constraints: z.array(evidenceConstraintSchema).default([]),
 }).strict();
 
 const authoredElementSchema = z.object({
@@ -51,8 +59,8 @@ const authoredElementSchema = z.object({
     promptImplementationSchema,
     deterministicImplementationSchema,
   ]),
-  evidence: evidenceSchema,
-  output_schema: z.unknown(),
+  preconditions: preconditionsSchema,
+  output: elementOutputSchema,
 }).strict();
 
 const elementReferenceSchema = z.object({
@@ -64,11 +72,11 @@ const taxonomyDocumentSchema = z.object({
   id: idSchema,
   version: semanticVersionSchema,
   surfaces: z.array(surfaceSchema).max(100),
-  elements: z.array(z.union([authoredElementSchema, elementReferenceSchema])).min(1).max(200),
+  elements: z.array(z.unknown()).min(1).max(200),
 }).strict();
 
 export type TaxonomySurface = z.infer<typeof surfaceSchema>;
-export type ElementEvidenceRequirements = z.infer<typeof evidenceSchema>;
+export type { ElementPreconditions } from "./preconditions/index.js";
 
 /** Serializable prompt implementation authored in YAML. */
 export interface NormalizedPromptImplementation {
@@ -100,12 +108,10 @@ export interface NormalizedElement {
   category_id?: string;
   /** Prompt or deterministic implementation config. */
   implementation: NormalizedPromptImplementation | NormalizedDeterministicImplementation;
-  /** Evidence/preflight requirements. */
-  evidence: ElementEvidenceRequirements;
-  /** Parsed supported JSON Schema subset. */
-  output_schema: TaxonomyJsonSchema;
-  /** Validates untrusted output and returns semantic diagnostics. */
-  validateOutput(value: unknown): string[];
+  /** Evidence-presence preconditions evaluated before classification. */
+  preconditions: ElementPreconditions;
+  /** Shared evidence-role and constraint contract. */
+  output: EvidenceContract;
   /** Resolved handler; present only for deterministic implementations. */
   resolvedHandler?: DeterministicHandler;
   /** Provider provenance; present only for deterministic implementations. */
@@ -150,22 +156,167 @@ export interface TaxonomyLoadOptions {
   limits?: TaxonomyLoadLimits;
 }
 
-/** Canonically sorts object keys without changing array order. */
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, child]) => [key, canonicalize(child)]),
-  );
-}
-
 /** Computes a stable semantic digest independent of YAML formatting/key order. */
 export function taxonomyDigest(value: unknown): string {
-  return createHash("sha256")
-    .update(JSON.stringify(canonicalize(value)))
-    .digest("hex");
+  return canonicalJsonSha256(value);
+}
+
+/** Rejects the obsolete draft output schema with an actionable diagnostic. */
+function parseAuthoredElement(
+  value: unknown,
+  location: string,
+): z.infer<typeof authoredElementSchema> {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "output_schema" in value
+  ) {
+    throw new Error(
+      `Element '${location}' uses obsolete output_schema; author output.evidence_roles instead.`,
+    );
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "evidence" in value
+  ) {
+    throw new Error(
+      `Element '${location}' uses obsolete element-level evidence; author preconditions instead. Occurrence evidence and output.evidence_roles are unchanged.`,
+    );
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "preconditions" in value
+  ) {
+    const preconditions = (value as Record<string, unknown>).preconditions;
+    if (
+      preconditions &&
+      typeof preconditions === "object" &&
+      !Array.isArray(preconditions)
+    ) {
+      const keys = preconditions as Record<string, unknown>;
+      if ("complete_for_negative" in keys) {
+        throw new Error(
+          `Element '${location}' uses obsolete preconditions.complete_for_negative; author preconditions.requires_complete_trajectory instead.`,
+        );
+      }
+      if ("requires_discovery_event" in keys) {
+        throw new Error(
+          `Element '${location}' uses obsolete preconditions.requires_discovery_event; author preconditions.requires_recorded_discovery instead.`,
+        );
+      }
+    }
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "output" in value
+  ) {
+    const output = (value as Record<string, unknown>).output;
+    if (
+      output &&
+      typeof output === "object" &&
+      !Array.isArray(output) &&
+      "relationships" in output
+    ) {
+      throw new Error(
+        `Element '${location}' uses obsolete output.relationships; author output.constraints instead.`,
+      );
+    }
+    if (
+      output &&
+      typeof output === "object" &&
+      !Array.isArray(output) &&
+      Array.isArray((output as Record<string, unknown>).constraints) &&
+      ((output as Record<string, unknown>).constraints as unknown[]).some(
+        constraint =>
+          constraint &&
+          typeof constraint === "object" &&
+          !Array.isArray(constraint) &&
+          (constraint as Record<string, unknown>).kind === "step_after",
+      )
+    ) {
+      throw new Error(
+        `Element '${location}' uses obsolete step_after; author an after constraint with an explicit within array JSONPath.`,
+      );
+    }
+  }
+  return authoredElementSchema.parse(value);
+}
+
+/** Validates role references and the exact supported constraint contracts. */
+function validateOutputContract(
+  elementId: string,
+  output: z.infer<typeof elementOutputSchema>,
+): EvidenceContract {
+  const constraints: EvidenceContract["constraints"][number][] = [];
+  for (const constraint of output.constraints) {
+    const role = output.evidence_roles[constraint.role];
+    if (!role) {
+      throw new Error(
+        `Element '${elementId}' constraint references unknown role '${constraint.role}'`,
+      );
+    }
+    if (constraint.kind === "owned_by") {
+      const owner = output.evidence_roles[constraint.owner_role];
+      if (!owner) {
+        throw new Error(
+          `Element '${elementId}' constraint references unknown owner role '${constraint.owner_role}'`,
+        );
+      }
+      if (owner.type !== "atif.tool_call") {
+        throw new Error(
+          `Element '${elementId}' owned_by owner role '${constraint.owner_role}' must target atif.tool_call`,
+        );
+      }
+      if (
+        ![
+          "scope.input_validation_issue",
+          "atif.observation_result",
+          "atif.content_part",
+          "atif.image_source",
+          "atif.audio_source",
+        ].includes(role.type)
+      ) {
+        throw new Error(
+          `Element '${elementId}' role '${constraint.role}' has no tool-call ownership`,
+        );
+      }
+    } else {
+      const reference = output.evidence_roles[constraint.reference_role];
+      if (!reference) {
+        throw new Error(
+          `Element '${elementId}' constraint references unknown reference role '${constraint.reference_role}'`,
+        );
+      }
+      if (constraint.kind === "after") {
+        try {
+          const within = parseDefiniteJsonPath(constraint.within).canonical;
+          constraints.push({ ...constraint, within });
+        } catch (error) {
+          throw new Error(
+            `Element '${elementId}' after constraint has invalid within JSONPath: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      } else {
+        constraints.push(constraint);
+      }
+    }
+    if (constraint.kind === "owned_by") {
+      constraints.push(constraint);
+    }
+  }
+  return {
+    evidence_roles: output.evidence_roles,
+    constraints,
+  };
 }
 
 /** Rejects aliases/anchors so authored YAML cannot expand unexpectedly. */
@@ -248,8 +399,8 @@ export function serializableTaxonomy(taxonomy: Omit<NormalizedTaxonomy, "digest"
       ...(element.description ? { description: element.description } : {}),
       ...(element.category_id ? { category_id: element.category_id } : {}),
       implementation: element.implementation,
-      evidence: element.evidence,
-      output_schema: element.output_schema,
+      preconditions: element.preconditions,
+      output: element.output,
     })),
   };
 }
@@ -283,20 +434,24 @@ export async function loadTaxonomy(
   const authoredElements: z.infer<typeof authoredElementSchema>[] = [];
   const loadedReferences = new Set<string>();
   for (const entry of document.elements) {
-    if ("path" in entry) {
+    const reference = elementReferenceSchema.safeParse(entry);
+    if (reference.success) {
       if (loadedReferences.size >= limits.maxReferences) {
         throw new Error(`Taxonomy exceeds maximum reference count ${limits.maxReferences}`);
       }
-      const elementPath = await resolveElementPath(root, entry.path);
+      const elementPath = await resolveElementPath(root, reference.data.path);
       if (loadedReferences.has(elementPath)) {
-        throw new Error(`Duplicate or cyclic taxonomy element reference '${entry.path}'`);
+        throw new Error(`Duplicate or cyclic taxonomy element reference '${reference.data.path}'`);
       }
       loadedReferences.add(elementPath);
       authoredElements.push(
-        authoredElementSchema.parse(await readYamlFile(elementPath, limits, byteState)),
+        parseAuthoredElement(
+          await readYamlFile(elementPath, limits, byteState),
+          reference.data.path,
+        ),
       );
     } else {
-      authoredElements.push(entry);
+      authoredElements.push(parseAuthoredElement(entry, "inline element"));
     }
   }
 
@@ -318,13 +473,12 @@ export async function loadTaxonomy(
     }
     elementIds.add(authored.id);
 
-    const outputSchema = parseTaxonomyJsonSchema(authored.output_schema);
+    const output = validateOutputContract(authored.id, authored.output);
     if (authored.implementation.type === "prompt") {
       return {
         ...authored,
         implementation: authored.implementation,
-        output_schema: outputSchema,
-        validateOutput: (value: unknown) => validateTaxonomyJson(outputSchema, value),
+        output,
       };
     }
 
@@ -337,8 +491,7 @@ export async function loadTaxonomy(
         handler: authored.implementation.handler,
         config,
       },
-      output_schema: outputSchema,
-      validateOutput: (value: unknown) => validateTaxonomyJson(outputSchema, value),
+      output,
       resolvedHandler: registered.handler,
       handlerProvider: registered.provider,
     };

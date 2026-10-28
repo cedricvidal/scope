@@ -1,6 +1,6 @@
 schema_version: scope/taxonomy/v1
 id: agent-behavior
-version: 2.0.0
+version: 3.0.0
 surfaces:
   - id: surface-skills
     label: Skills
@@ -19,5 +19,9 @@ surfaces:
   - id: surface-base-model
     label: Base model
 elements:
+  - path: elements/discovered.yaml
   - path: elements/skipped-invocation.yaml
+  - path: elements/wrong-discovery.yaml
+  - path: elements/content-misused.yaml
+  - path: elements/malformed-invocation.yaml
   - path: elements/timeout.yaml

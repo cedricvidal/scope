@@ -18,10 +18,21 @@
       "source": "./src/handlers/timeout/handler.ts",
       "types": "./dist/handlers/timeout/handler.d.ts",
       "import": "./dist/handlers/timeout/handler.js"
+    },
+    "./discovered": {
+      "source": "./src/handlers/discovered/handler.ts",
+      "types": "./dist/handlers/discovered/handler.d.ts",
+      "import": "./dist/handlers/discovered/handler.js"
+    },
+    "./malformed-invocation": {
+      "source": "./src/handlers/malformed-invocation/handler.ts",
+      "types": "./dist/handlers/malformed-invocation/handler.d.ts",
+      "import": "./dist/handlers/malformed-invocation/handler.js"
     }
   },
   "scripts": {
     "build": "tsc",
+    "eval": "pnpm --dir ../.. --silent taxonome eval --taxonomy packages/ax-taxonomy/taxonomy/taxonomy.yaml --inputs \"packages/ax-taxonomy/fixtures/*-inputs.jsonl\" --ground-truth \"packages/ax-taxonomy/fixtures/*-ground-truth.json\"",
     "lint": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts --reporter=default"
   },

@@ -3,6 +3,7 @@
 
 import { z } from "zod";
 import type {
+  Assessment,
   DeterministicHandler,
   TaxonomyInput as LoadedTaxonomyInput,
 } from "taxonomy-engine";
@@ -21,19 +22,14 @@ export type TimeoutConfig = z.infer<typeof timeoutConfigSchema>;
 function evaluateTimeout(
   input: LoadedTaxonomyInput,
   config: TimeoutConfig,
-): unknown {
-  const sources = new Map(
-    (input.atif.extra?.scope?.available_sources ?? []).map(source => [source.id, source]),
-  );
+): Assessment {
   const occurrences: Array<{
-    source?: { id: string; label: string; surface_id: string };
-    related_turns: number[];
-    tool_call_id: string;
+    evidence: Array<{ role: string; path: string }>;
   }> = [];
   let hasUnknownEvidence = input.atif.extra?.scope?.trajectory_state !== "complete";
 
-  for (const step of input.atif.steps) {
-    for (const call of step.tool_calls ?? []) {
+  for (const [stepIndex, step] of input.atif.steps.entries()) {
+    for (const [callIndex, call] of (step.tool_calls ?? []).entries()) {
       const evidence = call.extra?.scope;
       const startedAt = evidence?.started_at ? Date.parse(evidence.started_at) : undefined;
       const endedAt = evidence?.ended_at ? Date.parse(evidence.ended_at) : undefined;
@@ -57,11 +53,11 @@ function evaluateTimeout(
         evidence?.outcome === "pending";
 
       if (explicitTimeout || (exceedsPolicy && interrupted)) {
-        const source = evidence?.source_id ? sources.get(evidence.source_id) : undefined;
         occurrences.push({
-          related_turns: [step.step_id],
-          tool_call_id: call.tool_call_id,
-          ...(source ? { source } : {}),
+          evidence: [{
+            role: "call",
+            path: `$.steps[${stepIndex}].tool_calls[${callIndex}]`,
+          }],
         });
       } else if (
         durationMs === undefined ||
@@ -88,7 +84,7 @@ function evaluateTimeout(
 }
 
 /** Built-in registry entry referenced by YAML as `scope/timeout-v1`. */
-export const timeoutHandler: DeterministicHandler<TimeoutConfig> = {
+export const timeoutHandler: DeterministicHandler<TimeoutConfig, Assessment> = {
   configSchema: timeoutConfigSchema,
   evaluate: evaluateTimeout,
 };

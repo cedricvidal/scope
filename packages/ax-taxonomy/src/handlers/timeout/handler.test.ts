@@ -23,7 +23,7 @@ function input(
   return parseScopeAtif({
     schema_version: "ATIF-v1.7",
     session_id: "timeout-test",
-    agent: { name: "fixture" },
+    agent: { name: "fixture", version: "1.0.0" },
     steps: [
       { step_id: 1, source: "user", message: "Query the service." },
       {
@@ -54,10 +54,14 @@ async function result(
   trajectoryState: "complete" | "partial" | "unknown" = "complete",
 ) {
   const loaded = await taxonomy();
-  return (await evaluate(
+  const evaluation = (await evaluate(
     { atif: input(evidence, trajectoryState), taxonomy: loaded },
     ["beh-timeout"],
-  ))[0].result as Record<string, unknown>;
+  ))[0];
+  if (evaluation.status !== "succeeded") {
+    throw new Error(evaluation.error.message);
+  }
+  return evaluation.result as Record<string, unknown>;
 }
 
 describe("scope/timeout-v1", () => {
@@ -107,6 +111,8 @@ describe("scope/timeout-v1", () => {
       { atif, taxonomy: loaded },
       ["beh-timeout"],
     ))[0];
+    expect(evaluation.status).toBe("succeeded");
+    if (evaluation.status !== "succeeded") return;
     expect(evaluation.result).toMatchObject({
       state: "completed",
       observed: true,

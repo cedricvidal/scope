@@ -7,8 +7,7 @@
     ".": { "source": "./src/index.ts", "types": "./dist/index.d.ts", "import": "./dist/index.js" },
     "./copilot": { "source": "./src/copilot.ts", "types": "./dist/copilot.d.ts", "import": "./dist/copilot.js" },
     "./optimization-v2": { "source": "./src/optimization-v2.ts", "types": "./dist/optimization-v2.d.ts", "import": "./dist/optimization-v2.js" },
-    "./ledger": { "source": "./src/ledger.ts", "types": "./dist/ledger.d.ts", "import": "./dist/ledger.js" },
-    "./cases-v2": { "source": "./src/cases-v2.ts", "types": "./dist/cases-v2.d.ts", "import": "./dist/cases-v2.js" },
+    "./evaluation-inputs": { "source": "./src/evaluation-inputs.ts", "types": "./dist/evaluation-inputs.d.ts", "import": "./dist/evaluation-inputs.js" },
     "./prompt": { "source": "./src/prompt.ts", "types": "./dist/prompt.d.ts", "import": "./dist/prompt.js" },
     "./plugins": { "source": "./src/plugins.ts", "types": "./dist/plugins.d.ts", "import": "./dist/plugins.js" }
   },

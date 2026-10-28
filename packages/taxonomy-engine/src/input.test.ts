@@ -6,7 +6,7 @@ import { afterEach, expect, it } from "vitest";
 import { loadJson } from "./input.js";
 const servers: Server[] = [];
 
-// Each test owns a loopback server; force-close connections so timeout cases cannot leak handles.
+// Each test owns a loopback server; force-close connections so timeout scenarios cannot leak handles.
 afterEach(async () => {
   for (const server of servers) await new Promise<void>((resolve, reject) => {
     server.close(e => e ? reject(e) : resolve());

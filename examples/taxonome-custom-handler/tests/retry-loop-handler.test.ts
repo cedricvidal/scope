@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import type { DeterministicHandlerInput } from "taxonomy-engine";
 import {
   retryHandler,
-  retryOutputSchema,
 } from "../src/handlers/index.js";
 
 /** Creates one complete deterministic input with explicit retry evidence. */
@@ -65,29 +64,31 @@ describe("retry-loop deterministic handler", () => {
       { min_attempts: 2 },
     );
 
-    expect(retryOutputSchema.parse(result)).toEqual({
+    expect(result).toEqual({
       state: "completed",
       observed: true,
       occurrences: [{
-        source: {
-          id: "account/query",
-          label: "account/query",
-          surface_id: "surface-mcp",
-        },
-        related_turns: [1],
-        tool_call_id: "retry-1",
-        attempts: 3,
+        evidence: [{
+          role: "call",
+          path: "$.steps[0].tool_calls[0]",
+        }],
       }],
     });
   });
 
-  it("returns indeterminate when positive evidence lacks attribution", () => {
+  it("keeps positive call evidence when source attribution is unavailable", () => {
     expect(retryHandler.evaluate(
       retryInput(),
       { min_attempts: 2 },
     )).toEqual({
-      state: "indeterminate",
-      reason: "Recovered retry evidence is missing source attribution.",
+      state: "completed",
+      observed: true,
+      occurrences: [{
+        evidence: [{
+          role: "call",
+          path: "$.steps[0].tool_calls[0]",
+        }],
+      }],
     });
   });
 });

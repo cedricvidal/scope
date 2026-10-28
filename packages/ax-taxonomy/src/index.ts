@@ -8,8 +8,14 @@ import {
   loadTaxonomy,
   type NormalizedTaxonomy,
 } from "taxonomy-engine";
+import { discoveredHandler } from "./handlers/discovered/handler.js";
+import {
+  malformedInvocationHandler,
+} from "./handlers/malformed-invocation/handler.js";
 import { timeoutHandler } from "./handlers/timeout/handler.js";
 
+export * from "./handlers/discovered/handler.js";
+export * from "./handlers/malformed-invocation/handler.js";
 export * from "./handlers/timeout/handler.js";
 
 /** Absolute path to the shipped agent-behavior taxonomy manifest. */
@@ -31,13 +37,21 @@ export function registerAgentBehaviorHandlers(
   registry: HandlerRegistry,
 ): HandlerRegistry {
   registry.register(
-    { "scope/timeout-v1": timeoutHandler },
+    {
+      "scope/discovered-v1": discoveredHandler,
+      "scope/malformed-invocation-v1": malformedInvocationHandler,
+      "scope/timeout-v1": timeoutHandler,
+    },
     {
       name: "ax-taxonomy",
       version: "0.1.0",
       origin: "builtin",
       integrity: createHash("sha256")
-        .update("scope/timeout-v1")
+        .update([
+          "scope/discovered-v1",
+          "scope/malformed-invocation-v1",
+          "scope/timeout-v1",
+        ].join("\n"))
         .digest("hex"),
     },
   );

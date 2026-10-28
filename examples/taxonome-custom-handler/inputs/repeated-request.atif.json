@@ -2,7 +2,8 @@
   "schema_version": "ATIF-v1.7",
   "session_id": "session-9f31",
   "agent": {
-    "name": "fixture-agent"
+    "name": "fixture-agent",
+    "version": "1.0.0"
   },
   "steps": [
     {

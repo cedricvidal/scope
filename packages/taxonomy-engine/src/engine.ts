@@ -2,166 +2,154 @@
 // Licensed under the MIT License.
 
 import type {
+  Assessment,
+  AttemptProvenance,
+  EvaluationError,
+  InputIdentity,
+  ValidationDiagnostic,
+} from "./assessment.js";
+import {
+  assessmentSchema,
+  attemptProvenanceSchema,
+  evaluationErrorSchema,
+  inputIdentitySchema,
+} from "./assessment.js";
+import {
+  validateAssessment,
+  validateParsedAssessment,
+} from "./evidence.js";
+import { boundedErrorMessage } from "./errors.js";
+import type {
   DeterministicHandlerInput,
   HandlerProvider,
 } from "./handlers.js";
 import {
+  createInputIdentity,
+  type InputIdentityContext,
+} from "./input-identity.js";
+import {
   freezeTaxonomyInput,
   type TaxonomyInput,
 } from "./scope-atif.js";
+import { evaluatePreconditions } from "./preconditions/index.js";
 import type {
   NormalizedElement,
   NormalizedTaxonomy,
 } from "./taxonomy.js";
+import { z } from "zod";
+import { originalAtifPath } from "./atif/index.js";
 
 export const EVALUATION_SCHEMA_VERSION = "scope/taxonomy-evaluation/v1";
 
-/** Serializable taxonomy identity embedded in every new evaluation envelope. */
+/** Serializable taxonomy identity embedded in every evaluation envelope. */
 export interface EvaluationTaxonomyIdentity {
-  /** Authored taxonomy ID. */
   id: string;
-  /** Authored semantic version. */
   version: string;
-  /** Canonical semantic digest. */
   digest: string;
 }
 
-/** Serializable element metadata embedded for readout/replay without reloading YAML. */
+/** Serializable element metadata embedded in every evaluation envelope. */
 export interface EvaluationElementIdentity {
-  /** Stable element ID. */
   id: string;
-  /** Reviewer-facing label. */
   label: string;
-  /** Optional static category derived by reports. */
   category_id?: string;
 }
 
-/** Execution provenance kept separate from semantic result fields. */
+/** Execution provenance kept separate from semantic assessment fields. */
 export interface EvaluationImplementation {
-  /** Prompt or deterministic execution strategy. */
   type: "prompt" | "deterministic";
-  /** Deterministic handler ID, when applicable. */
   handler?: string;
-  /** Provider provenance, when applicable. */
   provider?: HandlerProvider;
+  attempts: AttemptProvenance[];
 }
 
-/** New YAML-taxonomy evaluation envelope. */
-export interface Evaluation {
-  /** Version of this result envelope. */
+interface EvaluationBase {
   schema_version: typeof EVALUATION_SCHEMA_VERSION;
-  /** Taxonomy identity/digest used for interpretation. */
   taxonomy: EvaluationTaxonomyIdentity;
-  /** Element identity/metadata used by readouts. */
   element: EvaluationElementIdentity;
-  /** Strategy and deterministic provider provenance. */
   implementation: EvaluationImplementation;
-  /** Output validated against the element's authored YAML schema. */
-  result: unknown;
+  input: InputIdentity;
 }
+
+/** Successful execution containing one fully validated shared assessment. */
+export interface SucceededEvaluation extends EvaluationBase {
+  status: "succeeded";
+  result: Assessment;
+}
+
+/** Failed execution containing only engine-owned error information. */
+export interface FailedEvaluation extends EvaluationBase {
+  status: "failed";
+  error: EvaluationError;
+}
+
+export type Evaluation = SucceededEvaluation | FailedEvaluation;
+
+const evaluationTaxonomySchema = z.object({
+  id: z.string().min(1),
+  version: z.string().min(1),
+  digest: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+
+const evaluationElementSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  category_id: z.string().min(1).optional(),
+}).strict();
+
+const evaluationImplementationSchema = z.object({
+  type: z.enum(["prompt", "deterministic"]),
+  handler: z.string().min(1).optional(),
+  provider: z.object({
+    name: z.string().min(1),
+    version: z.string().min(1).optional(),
+    origin: z.enum(["builtin", "local", "package"]),
+    entry: z.string().min(1).optional(),
+    integrity: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  }).strict().optional(),
+  attempts: z.array(attemptProvenanceSchema).min(1).max(2),
+}).strict();
+
+const evaluationBaseSchema = z.object({
+  schema_version: z.literal(EVALUATION_SCHEMA_VERSION),
+  taxonomy: evaluationTaxonomySchema,
+  element: evaluationElementSchema,
+  implementation: evaluationImplementationSchema,
+  input: inputIdentitySchema,
+});
+
+/** Canonical persisted evaluation schema shared by resume and readout. */
+export const evaluationSchema: z.ZodType<Evaluation> =
+  z.discriminatedUnion("status", [
+    evaluationBaseSchema.extend({
+      status: z.literal("succeeded"),
+      result: assessmentSchema,
+    }).strict(),
+    evaluationBaseSchema.extend({
+      status: z.literal("failed"),
+      error: evaluationErrorSchema,
+    }).strict(),
+  ]);
+
+export type PromptExecutionResult =
+  | {
+    status: "succeeded";
+    candidate: unknown;
+    attempts: AttemptProvenance[];
+  }
+  | {
+    status: "failed";
+    attempts: AttemptProvenance[];
+    error: EvaluationError;
+  };
 
 /** Prompt executor receives the loaded production element definition. */
 export interface PromptExecutor {
-  /**
-   * @param element - Loaded prompt element containing authored instructions/schema.
-   * @param input - Frozen normalized ATIF plus taxonomy.
-   * @returns Untrusted model output validated by the engine.
-   */
-  evaluate(element: NormalizedElement, input: TaxonomyInput): Promise<unknown>;
-}
-
-/** Returns trusted task text from the Scope extension or recorded user turns. */
-function hasTaskEvidence(input: TaxonomyInput): boolean {
-  return Boolean(
-    input.atif.extra?.scope?.task ||
-    input.atif.steps.some(step => step.source === "user" && step.message.trim()),
-  );
-}
-
-/** Finds a globally normalized ATIF step by ID. */
-function findStep(input: TaxonomyInput, stepId: number) {
-  return input.atif.steps.find(step => step.step_id === stepId);
-}
-
-/** Validates dynamic source/turn/call grounding after authored schema validation. */
-function validateEvidenceGrounding(
-  element: NormalizedElement,
-  result: unknown,
-  input: TaxonomyInput,
-): string[] {
-  if (!result || typeof result !== "object" || Array.isArray(result)) return [];
-  const record = result as Record<string, unknown>;
-  if (record.state !== "completed" || record.observed !== true) return [];
-  if (!Array.isArray(record.occurrences)) return [];
-
-  const sources = new Map(
-    (input.atif.extra?.scope?.available_sources ?? []).map(source => [source.id, source]),
-  );
-  const errors: string[] = [];
-
-  record.occurrences.forEach((rawOccurrence, index) => {
-    if (!rawOccurrence || typeof rawOccurrence !== "object" || Array.isArray(rawOccurrence)) return;
-    const occurrence = rawOccurrence as Record<string, unknown>;
-    const source = occurrence.source && typeof occurrence.source === "object"
-      ? occurrence.source as Record<string, unknown>
-      : undefined;
-    if (source) {
-      const declared = typeof source.id === "string" ? sources.get(source.id) : undefined;
-      if (!declared || JSON.stringify(declared) !== JSON.stringify(source)) {
-        errors.push(`$.occurrences[${index}].source is not a supplied Scope source`);
-      }
-    }
-
-    if (element.evidence.requires_discovery_event) {
-      const discoveryTurn = occurrence.discovery_turn;
-      const extensionPoint = occurrence.extension_point;
-      if (
-        !source ||
-        typeof source.id !== "string" ||
-        typeof discoveryTurn !== "number" ||
-        typeof extensionPoint !== "string"
-      ) {
-        errors.push(`$.occurrences[${index}] must contain source, discovery_turn, and extension_point`);
-      } else {
-        const step = findStep(input, discoveryTurn);
-        const grounded = step?.extra?.scope?.discoveries?.some(discovery =>
-          discovery.source_id === source.id &&
-          discovery.extension_point === extensionPoint
-        );
-        if (!grounded) {
-          errors.push(`$.occurrences[${index}] is not grounded in a Scope discovery event`);
-        }
-      }
-    }
-
-    const relatedTurns = Array.isArray(occurrence.related_turns)
-      ? occurrence.related_turns.filter((value): value is number =>
-        typeof value === "number"
-      )
-      : [];
-    for (const turn of relatedTurns) {
-      if (!findStep(input, turn)) {
-        errors.push(`$.occurrences[${index}].related_turns contains unknown step ${turn}`);
-      }
-    }
-
-    if (typeof occurrence.tool_call_id === "string") {
-      const step = input.atif.steps.find(candidate =>
-        relatedTurns.includes(candidate.step_id) &&
-        candidate.tool_calls?.some(call => call.tool_call_id === occurrence.tool_call_id),
-      );
-      if (!step) {
-        errors.push(`$.occurrences[${index}].tool_call_id is not grounded in related_turns`);
-      } else if (
-        source?.id &&
-        step.tool_calls?.find(call => call.tool_call_id === occurrence.tool_call_id)
-          ?.extra?.scope?.source_id !== source.id
-      ) {
-        errors.push(`$.occurrences[${index}] call/source attribution does not match`);
-      }
-    }
-  });
-  return errors;
+  evaluate(
+    element: NormalizedElement,
+    input: TaxonomyInput,
+    signal?: AbortSignal,
+  ): Promise<PromptExecutionResult>;
 }
 
 /** Removes private mutable lookup maps before invoking third-party code. */
@@ -181,12 +169,26 @@ function deterministicHandlerInput(
   return freezeTaxonomyInput(handlerInput);
 }
 
-/** Builds one result envelope after schema and evidence validation. */
-function evaluationEnvelope(
+function implementation(
+  element: NormalizedElement,
+  attempts: AttemptProvenance[],
+): EvaluationImplementation {
+  return element.implementation.type === "prompt"
+    ? { type: "prompt", attempts }
+    : {
+      type: "deterministic",
+      handler: element.implementation.handler,
+      ...(element.handlerProvider ? { provider: element.handlerProvider } : {}),
+      attempts,
+    };
+}
+
+function evaluationBase(
   taxonomy: NormalizedTaxonomy,
   element: NormalizedElement,
-  result: unknown,
-): Evaluation {
+  input: InputIdentity,
+  attempts: AttemptProvenance[],
+): EvaluationBase {
   return {
     schema_version: EVALUATION_SCHEMA_VERSION,
     taxonomy: {
@@ -199,28 +201,112 @@ function evaluationEnvelope(
       label: element.label,
       ...(element.category_id ? { category_id: element.category_id } : {}),
     },
-    implementation: element.implementation.type === "prompt"
-      ? { type: "prompt" }
-      : {
-        type: "deterministic",
-        handler: element.implementation.handler,
-        ...(element.handlerProvider ? { provider: element.handlerProvider } : {}),
-      },
+    implementation: implementation(element, attempts),
+    input,
+  };
+}
+
+function succeeded(
+  taxonomy: NormalizedTaxonomy,
+  element: NormalizedElement,
+  input: InputIdentity,
+  attempts: AttemptProvenance[],
+  result: Assessment,
+): SucceededEvaluation {
+  return {
+    ...evaluationBase(taxonomy, element, input, attempts),
+    status: "succeeded",
     result,
   };
 }
 
-/**
- * Evaluates one loaded element against normalized evidence.
- *
- * Invalid input/taxonomy selection throws. Implementation/output failures
- * become authored-schema-compatible `state:error` results when that shape is
- * accepted, otherwise they throw rather than bypassing the YAML contract.
- */
+function failed(
+  taxonomy: NormalizedTaxonomy,
+  element: NormalizedElement,
+  input: InputIdentity,
+  attempts: AttemptProvenance[],
+  error: EvaluationError,
+): FailedEvaluation {
+  return {
+    ...evaluationBase(taxonomy, element, input, attempts),
+    status: "failed",
+    error,
+  };
+}
+
+function validateCandidate(
+  candidate: unknown,
+  element: NormalizedElement,
+  input: TaxonomyInput,
+) {
+  return validateAssessment(candidate, element.output, input.atif);
+}
+
+/** Maps normalized evidence diagnostics back to original input locations. */
+function sourceLocations(
+  input: TaxonomyInput,
+  diagnostics: readonly ValidationDiagnostic[],
+): EvaluationError["source_locations"] {
+  if (!input.atif_provenance) return undefined;
+  const locations = diagnostics.flatMap(diagnostic => {
+    if (!diagnostic.evidence_path) return [];
+    const original = originalAtifPath(
+      input.atif_provenance!,
+      diagnostic.evidence_path,
+    );
+    const source = original.source ?? input.atif_provenance!.source;
+    return [{
+      normalized_path: diagnostic.evidence_path,
+      original_path: original.path,
+      ...(source.file ? { file: source.file } : {}),
+      ...(source.archive_entry
+        ? { archive_entry: source.archive_entry }
+        : {}),
+      ...(source.jsonl_line
+        ? { jsonl_line: source.jsonl_line }
+        : {}),
+      ...(original.generated_by
+        ? { generated_by: original.generated_by }
+        : {}),
+    }];
+  });
+  return locations.length ? locations : undefined;
+}
+
+/** Returns one successful preflight or a validator failure envelope. */
+function preflightEvaluation(
+  input: TaxonomyInput,
+  element: NormalizedElement,
+  identity: InputIdentity,
+  result: Assessment,
+): Evaluation {
+  const validation = validateCandidate(result, element, input);
+  if (!validation.assessment) {
+    return failed(input.taxonomy, element, identity, [{
+      attempt: 1,
+      kind: "initial",
+      outcome: "invalid_output",
+    }], {
+      code: "invalid_output",
+      message: "The engine-generated preflight assessment failed validation.",
+      validation_errors: validation.diagnostics,
+      source_locations: sourceLocations(input, validation.diagnostics),
+    });
+  }
+  return succeeded(input.taxonomy, element, identity, [{
+    attempt: 1,
+    kind: "initial",
+    outcome: "succeeded",
+  }], validation.assessment);
+}
+
+/** Evaluates one loaded element against normalized evidence. */
 export async function evaluateElement(
   input: TaxonomyInput,
   elementId: string,
   executor?: PromptExecutor,
+  signal?: AbortSignal,
+  identityContext: InputIdentityContext = {},
 ): Promise<Evaluation> {
   const runtimeInput: TaxonomyInput = {
     atif: freezeTaxonomyInput(structuredClone(input.atif)),
@@ -228,64 +314,153 @@ export async function evaluateElement(
   };
   const element = input.taxonomy.elementById.get(elementId);
   if (!element) {
-    throw new Error(`Taxonomy '${input.taxonomy.id}' has no element '${elementId}'`);
+    throw new Error(
+      `Taxonomy '${input.taxonomy.id}' has no element '${elementId}'`,
+    );
+  }
+  const identity = createInputIdentity(input.atif, identityContext);
+  if (signal?.aborted) {
+    return failed(input.taxonomy, element, identity, [{
+      attempt: 1,
+      kind: "initial",
+      outcome: "cancelled",
+    }], {
+      code: "cancelled",
+      message: "Evaluation was cancelled before execution.",
+    });
+  }
+  const preconditionResult = evaluatePreconditions(input.atif, element);
+  if (preconditionResult) {
+    return preflightEvaluation(input, element, identity, preconditionResult);
   }
 
-  const trajectoryState = input.atif.extra?.scope?.trajectory_state ?? "complete";
-  if (element.evidence.complete_for_negative && trajectoryState !== "complete") {
-    const result = {
-      state: "indeterminate",
-      reason: `${element.label} requires complete trajectory evidence for absence conclusions.`,
-    };
-    const errors = element.validateOutput(result);
-    if (errors.length) throw new Error(errors.join("; "));
-    return evaluationEnvelope(input.taxonomy, element, result);
-  }
-  if (element.evidence.requires_task && !hasTaskEvidence(input)) {
-    const result = {
-      state: "indeterminate",
-      reason: `${element.label} requires task evidence to assess relevance.`,
-    };
-    const errors = element.validateOutput(result);
-    if (errors.length) throw new Error(errors.join("; "));
-    return evaluationEnvelope(input.taxonomy, element, result);
-  }
-
-  let result: unknown;
-  try {
-    if (element.implementation.type === "deterministic") {
+  if (element.implementation.type === "deterministic") {
+    const attempts: AttemptProvenance[] = [];
+    let candidate: unknown;
+    try {
       if (!element.resolvedHandler) {
-        throw new Error(`Element '${element.id}' has no resolved deterministic handler`);
+        throw new Error(
+          `Element '${element.id}' has no resolved deterministic handler`,
+        );
       }
-      result = await element.resolvedHandler.evaluate(
+      candidate = await element.resolvedHandler.evaluate(
         deterministicHandlerInput(runtimeInput),
-        freezeTaxonomyInput(structuredClone(element.implementation.config)),
+        freezeTaxonomyInput(
+          structuredClone(element.implementation.config),
+        ),
       );
-    } else {
-      if (!executor) {
-        throw new Error("Prompt execution requires an explicit prompt executor");
-      }
-      result = await executor.evaluate(element, runtimeInput);
+    } catch (error) {
+      attempts.push({
+        attempt: 1,
+        kind: "initial",
+        outcome: signal?.aborted ? "cancelled" : "execution_failed",
+      });
+      return failed(input.taxonomy, element, identity, attempts, {
+        code: signal?.aborted ? "cancelled" : "execution_failed",
+        message: boundedErrorMessage(error),
+      });
     }
-  } catch (error) {
-    result = {
-      state: "error",
-      error: error instanceof AggregateError
-        ? `${error.message}: ${error.errors.map(cause =>
-          cause instanceof Error ? cause.message : String(cause)
-        ).join("; ")}`
-        : error instanceof Error ? error.message : String(error),
-    };
+
+    const validation = validateCandidate(candidate, element, input);
+    if (!validation.assessment) {
+      attempts.push({
+        attempt: 1,
+        kind: "initial",
+        outcome: "invalid_output",
+      });
+      return failed(input.taxonomy, element, identity, attempts, {
+        code: "invalid_output",
+        message: "The deterministic assessment failed validation.",
+        validation_errors: validation.diagnostics,
+        source_locations: sourceLocations(input, validation.diagnostics),
+      });
+    }
+    attempts.push({
+      attempt: 1,
+      kind: "initial",
+      outcome: "succeeded",
+    });
+    return succeeded(
+      input.taxonomy,
+      element,
+      identity,
+      attempts,
+      validation.assessment,
+    );
   }
 
-  const errors = [
-    ...element.validateOutput(result),
-    ...validateEvidenceGrounding(element, result, input),
-  ];
-  if (errors.length) {
-    throw new Error(`Element '${element.id}' returned invalid output: ${errors.join("; ")}`);
+  if (!executor) {
+    return failed(input.taxonomy, element, identity, [{
+      attempt: 1,
+      kind: "initial",
+      outcome: "execution_failed",
+    }], {
+      code: "execution_failed",
+      message: "Prompt execution requires an explicit prompt executor.",
+    });
   }
-  return evaluationEnvelope(input.taxonomy, element, result);
+
+  let execution: PromptExecutionResult;
+  try {
+    execution = await executor.evaluate(element, runtimeInput, signal);
+  } catch (error) {
+    const attempts: AttemptProvenance[] = [{
+      attempt: 1,
+      kind: "initial",
+      outcome: signal?.aborted ? "cancelled" : "execution_failed",
+    }];
+    return failed(input.taxonomy, element, identity, attempts, {
+      code: signal?.aborted ? "cancelled" : "execution_failed",
+      message: boundedErrorMessage(error),
+    });
+  }
+  if (execution.status === "failed") {
+    const error = execution.error.validation_errors
+      ? {
+        ...execution.error,
+        source_locations: sourceLocations(
+          input,
+          execution.error.validation_errors,
+        ),
+      }
+      : execution.error;
+    return failed(
+      input.taxonomy,
+      element,
+      identity,
+      execution.attempts,
+      error,
+    );
+  }
+  const validation = validateParsedAssessment(
+    execution.candidate,
+    element.output,
+    input.atif,
+  );
+  if (!validation.assessment) {
+    const attempts = execution.attempts.map((attempt, index, all) =>
+      index === all.length - 1
+        ? { ...attempt, outcome: "invalid_output" as const }
+        : attempt
+    );
+    return failed(input.taxonomy, element, identity, attempts, {
+      code: "invalid_output",
+      message:
+        "The Ax-accepted assessment failed the engine's final validation.",
+      validation_errors: validation.diagnostics,
+      source_locations: sourceLocations(
+        input,
+        validation.diagnostics,
+      ),
+    });
+  }
+  return succeeded(
+    input.taxonomy,
+    element,
+    identity,
+    execution.attempts,
+    validation.assessment,
+  );
 }
 
 /** Evaluates unique element IDs in caller order without cross-element batching. */
@@ -293,6 +468,8 @@ export async function evaluate(
   input: TaxonomyInput,
   elementIds: readonly string[],
   executor?: PromptExecutor,
+  signal?: AbortSignal,
+  identityContext: InputIdentityContext = {},
 ): Promise<Evaluation[]> {
   if (!elementIds.length || new Set(elementIds).size !== elementIds.length) {
     throw new Error("Choose a nonempty, unique element selection");
@@ -300,7 +477,15 @@ export async function evaluate(
 
   const evaluations: Evaluation[] = [];
   for (const elementId of elementIds) {
-    evaluations.push(await evaluateElement(input, elementId, executor));
+    evaluations.push(
+      await evaluateElement(
+        input,
+        elementId,
+        executor,
+        signal,
+        identityContext,
+      ),
+    );
   }
   return evaluations;
 }

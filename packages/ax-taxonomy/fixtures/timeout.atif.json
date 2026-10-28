@@ -1,7 +1,7 @@
 {
   "schema_version": "ATIF-v1.7",
   "session_id": "timeout-example-v2",
-  "agent": { "name": "synthetic-example" },
+  "agent": { "name": "synthetic-example", "version": "1.0.0" },
   "steps": [
     { "step_id": 1, "source": "user", "message": "Query the service." },
     {

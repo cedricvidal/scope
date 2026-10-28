@@ -15,34 +15,66 @@ import {
 
 const productionTaxonomy = loadAgentBehaviorTaxonomy();
 
-/** JSONL target registry for standalone SDK-only families (not the Azure runner). */
-export const standaloneTargets = {
-  "taxonome-skipped-invocation/default": {
-    family: "taxonome-skipped-invocation",
+/** Creates one standalone family over an authored catalog prompt element. */
+function createStandaloneTarget(
+  family: string,
+  elementId: string,
+  inputs: string,
+  groundTruth: string,
+) {
+  return {
+    family,
     variant: "default",
     transport: "copilot-sdk",
-    cases: "packages/ax-taxonomy/fixtures/inputs.jsonl",
-    assertions: "packages/ax-taxonomy/fixtures/gold.json",
+    inputs,
+    groundTruth,
     /**
-     * Runs one case through the production Ax/SDK adapter and shared grounding validator.
+     * Runs one input through the production Ax/SDK adapter and shared grounding validator.
      *
-     * @param input - Untrusted case input.
+     * @param input - Untrusted evaluation input.
      * @param transport - Explicit Copilot SDK transport supplied by the standalone runner.
      * @param model - Exact model ID used by the adapter.
      */
     async run(input: unknown, transport: CopilotTransport, model: string) {
-      // This adapter loads the production YAML; it has no evaluation-only prompt copy.
       const taxonomy = await productionTaxonomy;
       const atif = parseScopeAtif(input);
       validateScopeAtif(atif, taxonomy);
       const [evaluation] = await evaluate(
         { atif, taxonomy },
-        ["beh-skipped-invocation"],
+        [elementId],
         taxonomyPromptExecutor(copilotAI(transport, model)),
       );
+      if (evaluation.status === "failed") {
+        throw new Error(
+          `${evaluation.error.code}: ${evaluation.error.message}; ` +
+          `${evaluation.error.validation_errors?.map(item => item.code).join(", ") ?? ""}`,
+        );
+      }
       return evaluation.result;
     },
-  },
+  } as const;
+}
+
+/** JSONL target registry for standalone SDK-only families (not the Azure runner). */
+export const standaloneTargets = {
+  "taxonome-skipped-invocation/default": createStandaloneTarget(
+    "taxonome-skipped-invocation",
+    "beh-skipped-invocation",
+    "packages/ax-taxonomy/fixtures/skipped-invocation-inputs.jsonl",
+    "packages/ax-taxonomy/fixtures/skipped-invocation-ground-truth.json",
+  ),
+  "taxonome-wrong-discovery/default": createStandaloneTarget(
+    "taxonome-wrong-discovery",
+    "beh-wrong-discovery",
+    "packages/ax-taxonomy/fixtures/wrong-discovery-inputs.jsonl",
+    "packages/ax-taxonomy/fixtures/wrong-discovery-ground-truth.json",
+  ),
+  "taxonome-content-misused/default": createStandaloneTarget(
+    "taxonome-content-misused",
+    "beh-content-misused",
+    "packages/ax-taxonomy/fixtures/content-misused-inputs.jsonl",
+    "packages/ax-taxonomy/fixtures/content-misused-ground-truth.json",
+  ),
 } as const;
 
 /**

@@ -61,7 +61,7 @@ if (isMain) {
   validateCoverage()
     .then(({ qualityTargets, standaloneTargets }) => {
       console.log(
-        `Validated ${qualityTargets} quality targets and ${standaloneTargets} standalone SDK target`,
+        `Validated ${qualityTargets} quality targets and ${standaloneTargets} standalone SDK targets`,
       );
     })
     .catch((error: unknown) => {

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,21 +13,54 @@ import type {
   AxChatResponse,
   AxSerializedOptimizedProgram,
 } from "@ax-llm/ax";
-import type { PromptExecutor } from "./engine.js";
-import { CallLedger } from "./ledger.js";
 import {
+  AxAssertionError,
+  AxGenerateError,
+} from "@ax-llm/ax";
+import type {
+  AttemptProvenance,
+  ValidationDiagnostic,
+} from "./assessment.js";
+import type {
+  PromptExecutionResult,
+  PromptExecutor,
+} from "./engine.js";
+import { validateParsedAssessment } from "./evidence.js";
+import { boundedErrorMessage } from "./errors.js";
+import {
+  ASSESSMENT_EXACT_KEYS,
   createTaxonomyPromptProgram,
   taxonomyPromptEvidence,
 } from "./prompt.js";
 import { executeSdkCall } from "./sdk-call.js";
 import type { TaxonomyInput as LoadedTaxonomyInput } from "./scope-atif.js";
 
-export { CallLedger } from "./ledger.js";
 export {
   createTaxonomyPromptProgram,
   taxonomyPromptEvidence,
 } from "./prompt.js";
 export const DEFAULT_MODEL = "gpt-5.6-sol-fast";
+
+/** Flattens only Ax text content parts; media and other rich parts stay rejected. */
+export function axTextMessageContent(
+  content: string | readonly unknown[] | undefined,
+): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) {
+    throw new Error("Only text messages are supported");
+  }
+  return content.map(part => {
+    if (
+      !part ||
+      typeof part !== "object" ||
+      part.type !== "text" ||
+      typeof part.text !== "string"
+    ) {
+      throw new Error("Only scalar text or text-only message arrays are supported");
+    }
+    return part.text;
+  }).join("");
+}
 
 /** Provider usage fields exposed by SDK assistant-usage events. */
 export interface CopilotUsage {
@@ -63,6 +97,8 @@ export interface CopilotTransport {
     user: string,
     signal?: AbortSignal,
   ): Promise<CopilotCompletion>;
+  /** Whether the transport can safely accept another completion. */
+  isHealthy?(): boolean;
   /** Stops the SDK process and removes its isolated temporary home. */
   close(): Promise<void>;
 }
@@ -88,35 +124,108 @@ export async function closeTransports(
   }
 }
 
+const SDK_AUTH_ENVIRONMENT_VARIABLES = [
+  "COPILOT_GITHUB_TOKEN",
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+] as const;
+
+/** Resolved in-memory credential and its non-secret source. */
+export interface CopilotCredential {
+  /** GitHub token passed directly to the SDK client. */
+  token: string;
+  /** Credential source without the secret value. */
+  source: "environment" | "gh-cli";
+}
+
+/** Injectable credential boundaries used by offline tests. */
+export interface CopilotCredentialOptions {
+  /** Host environment checked in SDK-supported priority order. */
+  environment?: NodeJS.ProcessEnv;
+  /** Active GitHub CLI account token lookup. */
+  readGhToken?: () => Promise<string | undefined>;
+}
+
+/** Reads the active GitHub CLI token without using a shell or exposing stderr. */
+async function readActiveGhToken(): Promise<string | undefined> {
+  return new Promise(resolve => {
+    try {
+      const child = execFile("gh", ["auth", "token"], {
+        encoding: "utf8",
+        env: process.env,
+        maxBuffer: 1024 * 1024,
+        timeout: 10_000,
+        windowsHide: true,
+      }, (error, stdout) => {
+        resolve(error ? undefined : String(stdout).trim() || undefined);
+      });
+      // Credential lookup is non-interactive and must never consume caller input.
+      child.stdin?.destroy();
+    } catch {
+      resolve(undefined);
+    }
+  });
+}
+
+/** Resolves a supported environment override or the active GitHub CLI account. */
+export async function resolveCopilotCredential(
+  options: CopilotCredentialOptions = {},
+): Promise<CopilotCredential> {
+  const environment = options.environment ?? process.env;
+  for (const name of SDK_AUTH_ENVIRONMENT_VARIABLES) {
+    const token = environment[name]?.trim();
+    if (token) return { token, source: "environment" };
+  }
+
+  let ghToken: string | undefined;
+  try {
+    ghToken = await (options.readGhToken ?? readActiveGhToken)();
+  } catch {
+    ghToken = undefined;
+  }
+  const token = ghToken?.trim();
+  if (token) return { token, source: "gh-cli" };
+
+  throw new Error(
+    "GitHub authentication is unavailable; run `gh auth login` or set " +
+    "COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN",
+  );
+}
+
+/** Builds the narrow environment for the isolated SDK process. */
+function copilotRuntimeEnvironment(sessionDirectory: string): Record<string, string> {
+  const environment: Record<string, string> = { HOME: sessionDirectory };
+  for (const name of ["PATH", "TMPDIR"]) {
+    const value = process.env[name];
+    if (value?.trim()) environment[name] = value;
+  }
+  return environment;
+}
+
 /**
- * Opens an isolated, tool-free SDK client using only the explicit environment token.
- * The caller owns close(); a failed submission blocks further calls until reconciliation.
+ * Opens an isolated, tool-free SDK client using the SDK's normal authentication resolution.
+ * The caller owns close(); a failed submission requires a fresh transport.
  *
- * @param ledger - Initialized shared ledger that gates every completion.
  * @param model - Exact model ID used for session creation and usage verification.
- * @param purpose - Stable ledger label attached to every completion.
+ * @param resolveCredential - Injectable credential resolution for offline tests.
  * @returns Text-only transport. Callers must invoke `close`.
  */
 export async function openCopilotTransport(
-  ledger: CallLedger,
   model: string,
-  purpose: string,
+  resolveCredential = resolveCopilotCredential,
 ): Promise<CopilotTransport> {
-  const token = process.env.COPILOT_GITHUB_TOKEN;
-  if (!token) {
-    throw new Error("COPILOT_GITHUB_TOKEN is required for prompt execution (no logged-in-user fallback)");
-  }
-
-  await ledger.events();
+  const credential = await resolveCredential();
   const sessionDirectory = await mkdtemp(join(tmpdir(), "taxonome-sdk-"));
   const client = new CopilotClient({
     mode: "empty",
-    gitHubToken: token,
+    gitHubToken: credential.token,
     useLoggedInUser: false,
     baseDirectory: sessionDirectory,
     workingDirectory: sessionDirectory,
     logLevel: "error",
-    env: { PATH: process.env.PATH, HOME: sessionDirectory, TMPDIR: process.env.TMPDIR },
+    // Credential resolution already ran host-side. The SDK child receives only
+    // a temporary home and process-launch essentials.
+    env: copilotRuntimeEnvironment(sessionDirectory),
   });
 
   /** Stops the runtime and removes its isolated home, reporting both failures if needed. */
@@ -142,7 +251,10 @@ export async function openCopilotTransport(
   try {
     await client.start();
     if (!(await client.getAuthStatus()).isAuthenticated) {
-      throw new Error("Copilot SDK token authentication failed");
+      throw new Error(
+        "Copilot SDK rejected the resolved GitHub credential; run `gh auth login` " +
+        "or set COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN",
+      );
     }
   } catch (error) {
     try {
@@ -156,7 +268,7 @@ export async function openCopilotTransport(
   let failed = false;
   return {
     /**
-     * Creates one isolated tool-free session and delegates guarded submission/accounting.
+     * Creates one isolated tool-free session and delegates guarded submission.
      *
      * @param system - Trusted system prompt installed with replace semantics.
      * @param user - Model-visible Ax text envelope.
@@ -164,7 +276,9 @@ export async function openCopilotTransport(
      */
     async complete(system, user, signal) {
       if (failed) {
-        throw new Error("Previous SDK call failed; reconcile the ledger before another live invocation");
+        throw new Error(
+          "Previous SDK call failed; start a new transport before another live invocation",
+        );
       }
 
       const session = await client.createSession({
@@ -195,12 +309,18 @@ export async function openCopilotTransport(
       });
 
       try {
-        return await executeSdkCall(session, ledger, model, purpose, user, () => client.deleteSession(session.sessionId), signal);
+        return await executeSdkCall(
+          session,
+          user,
+          () => client.deleteSession(session.sessionId),
+          signal,
+        );
       } catch (error) {
         failed = true;
         throw error;
       }
     },
+    isHealthy: () => !failed,
     close: cleanup,
   };
 }
@@ -240,7 +360,7 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
       },
     }),
     getMetrics: () => ({
-      // Ax expects service-level metrics; authoritative per-call usage remains in the durable SDK ledger.
+      // Ax expects service-level latency/error metrics; token usage stays on each completion.
       latency: {
         chat: {
           mean: latencySamples.length ? latencySamples.reduce((total, sample) => total + sample, 0) / latencySamples.length : 0,
@@ -286,7 +406,7 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
     async chat(request: Readonly<AxChatRequest>, callOptions?: Readonly<AxAIServiceOptions>): Promise<AxChatResponse> {
       // Reject unsupported features instead of silently degrading Ax's request.
       if (callOptions?.stream ?? options.stream) {
-        throw new Error("Streaming is not supported by the one-call SDK adapter");
+        throw new Error("Streaming is not supported by the text-only SDK adapter");
       }
       if (request.responseFormat) {
         throw new Error("Native structured output is not supported; use the Ax prompt/JSON parser and shared result validator");
@@ -310,16 +430,18 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
         if (message.role === "system") {
           system.push(message.content);
         } else {
-          if (message.role === "function" || typeof message.content !== "string") {
+          if (message.role === "function") {
             throw new Error("Only text messages are supported");
           }
-          messages.push(`<${message.role}>\n${message.content}\n</${message.role}>`);
+          const content = axTextMessageContent(message.content);
+          messages.push(`<${message.role}>\n${content}\n</${message.role}>`);
         }
       }
 
       const startedAt = Date.now();
       try {
-        // Each Ax chat maps to exactly one transport completion; Ax retries are disabled by the program.
+        // Each Ax chat maps to exactly one transport completion. Ax alone may
+        // request one additional chat for output validation correction.
         const result = await transport.complete(
           [systemPrefix, ...system].filter(Boolean).join("\n\n"),
           messages.join("\n\n"),
@@ -372,22 +494,161 @@ export function taxonomyPromptExecutor(
   ai: AxAIService,
   artifacts: ReadonlyMap<string, AxSerializedOptimizedProgram> = new Map(),
 ): PromptExecutor {
-  const programs = new Map<string, ReturnType<typeof createTaxonomyPromptProgram>>();
   return {
-    async evaluate(element, input: LoadedTaxonomyInput) {
-      let program = programs.get(element.id);
-      if (!program) {
-        program = createTaxonomyPromptProgram(element, artifacts.get(element.id));
-        programs.set(element.id, program);
-      }
-      const result = await program.forward(ai, {
-        evidence: taxonomyPromptEvidence(input),
-      }, {
-        maxRetries: 0,
-        maxSteps: 1,
-        stream: false,
+    async evaluate(
+      element,
+      input: LoadedTaxonomyInput,
+      signal?: AbortSignal,
+    ): Promise<PromptExecutionResult> {
+      let startedCompletions = 0;
+      let completedCompletions = 0;
+      let validatedCompletions = 0;
+      let lastDiagnostics: ValidationDiagnostic[] = [];
+      const observedChat: AxAIService["chat"] = async (
+        request,
+        options,
+      ) => {
+        startedCompletions++;
+        const response = await ai.chat(request, options);
+        completedCompletions++;
+        return response;
+      };
+      const observedAI = new Proxy(ai, {
+        get(target, property, receiver) {
+          if (property === "chat") return observedChat;
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function"
+            ? value.bind(target)
+            : value;
+        },
       });
-      return result.observation;
+      const program = createTaxonomyPromptProgram(
+        element,
+        artifacts.get(element.id),
+        {
+          correctionRetries: 1,
+          assertion: observation => {
+            validatedCompletions++;
+            const validation = validateParsedAssessment(
+              observation,
+              element.output,
+              input.atif,
+            );
+            lastDiagnostics = validation.diagnostics;
+            if (validation.assessment) return true;
+            return `The parsed assessment is invalid. JSON property-name casing is significant. Use the exact canonical keys where applicable: ${ASSESSMENT_EXACT_KEYS.join(", ")}. Return one complete replacement assessment. Taxonome validation diagnostics: ${
+              boundedErrorMessage(JSON.stringify(validation.diagnostics))
+            }`;
+          },
+        },
+      );
+      try {
+        const result = await program.forward(
+          observedAI,
+          { trajectory_context: taxonomyPromptEvidence(input) },
+          {
+            abortSignal: signal,
+            maxRetries: 1,
+            maxSteps: 1,
+            stream: false,
+          },
+        );
+        return {
+          status: "succeeded",
+          candidate: result.observation,
+          attempts: successfulPromptAttempts(completedCompletions),
+        };
+      } catch (error) {
+        const cancelled = Boolean(signal?.aborted);
+        if (completedCompletions < startedCompletions) {
+          return {
+            status: "failed",
+            attempts: interruptedPromptAttempts(
+              startedCompletions,
+              completedCompletions,
+              cancelled,
+            ),
+            error: {
+              code: cancelled ? "cancelled" : "execution_failed",
+              message: cancelled
+                ? "Prompt execution was cancelled."
+                : boundedErrorMessage(error),
+              ...(lastDiagnostics.length
+                ? { validation_errors: lastDiagnostics }
+                : {}),
+            },
+          };
+        }
+        if (
+          completedCompletions > 0 &&
+          (
+            lastDiagnostics.length ||
+            error instanceof AxGenerateError ||
+            error instanceof AxAssertionError
+          )
+        ) {
+          const diagnostics = validatedCompletions === completedCompletions &&
+              lastDiagnostics.length
+            ? lastDiagnostics
+            : [invalidJsonDiagnostic()];
+          return {
+            status: "failed",
+            attempts: invalidPromptAttempts(completedCompletions),
+            error: {
+              code: "invalid_output",
+              message:
+                "Ax output validation failed after the configured correction budget.",
+              validation_errors: diagnostics,
+            },
+          };
+        }
+        throw error;
+      }
     },
+  };
+}
+
+function successfulPromptAttempts(
+  completed: number,
+): AttemptProvenance[] {
+  return completed > 1
+    ? [
+      { attempt: 1, kind: "initial", outcome: "invalid_output" },
+      { attempt: 2, kind: "repair", outcome: "succeeded" },
+    ]
+    : [{ attempt: 1, kind: "initial", outcome: "succeeded" }];
+}
+
+function invalidPromptAttempts(
+  completed: number,
+): AttemptProvenance[] {
+  return completed > 1
+    ? [
+      { attempt: 1, kind: "initial", outcome: "invalid_output" },
+      { attempt: 2, kind: "repair", outcome: "invalid_output" },
+    ]
+    : [{ attempt: 1, kind: "initial", outcome: "invalid_output" }];
+}
+
+function interruptedPromptAttempts(
+  started: number,
+  completed: number,
+  cancelled: boolean,
+): AttemptProvenance[] {
+  const outcome = cancelled ? "cancelled" : "execution_failed";
+  if (started > 1 && completed > 0) {
+    return [
+      { attempt: 1, kind: "initial", outcome: "invalid_output" },
+      { attempt: 2, kind: "repair", outcome },
+    ];
+  }
+  return [{ attempt: 1, kind: "initial", outcome }];
+}
+
+function invalidJsonDiagnostic(): ValidationDiagnostic {
+  return {
+    code: "invalid_json",
+    output_path: "$.observation",
+    message: "Ax could not parse the observation field as one JSON value.",
   };
 }

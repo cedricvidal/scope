@@ -44,13 +44,17 @@ export interface TaxonomeStyle {
   label(text: string): string;
   /** Successful status text; callers still emit the word PASS. */
   pass(text: string): string;
+  /** Prompt-backed element type. */
+  prompt(text: string): string;
+  /** Code/deterministic element type. */
+  code(text: string): string;
   /** Failed status text; callers still emit the word FAIL. */
   fail(text: string): string;
   /** Warning text with an explicit textual warning message. */
   warning(text: string): string;
   /** Error text with an explicit textual error message. */
   error(text: string): string;
-  /** Secondary context such as case IDs and sample numbers. */
+  /** Secondary context such as input IDs and sample numbers. */
   dim(text: string): string;
 }
 
@@ -101,6 +105,8 @@ export function createTaxonomeStyle(
     description: text => apply("italic", text),
     label: text => apply("bold", text),
     pass: text => apply(["bold", "green"], text),
+    prompt: text => apply("magenta", text),
+    code: text => apply("blue", text),
     fail: text => apply(["bold", "red"], text),
     warning: text => apply("yellow", text),
     error: text => apply(["bold", "red"], text),

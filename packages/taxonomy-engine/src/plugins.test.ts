@@ -34,7 +34,7 @@ describe("explicit Taxonome plugins", () => {
     await mkdir(join(cwd, "dist"));
     await writeFile(
       join(cwd, "dist", "helper.mjs"),
-      'export const observed = {state:"completed",observed:true,occurrences:[{related_turns:[1],tool_call_id:"custom"}]};',
+      'export const observed = {state:"completed",observed:true,occurrences:[{evidence:[{role:"call",path:"$.steps[0].tool_calls[0]"}]}]};',
     );
     await writeFile(
       join(cwd, "dist", "handlers.mjs"),
