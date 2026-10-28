@@ -371,9 +371,6 @@ export function registerTaxonomyRoutes(ctx: RouteContext): void {
     { path: "/api/v1/taxonomies/:id", element: false },
     { path: "/api/v1/taxonomy-elements/:id", element: true },
   ] as const) {
-    const rootStore = operation.element
-      ? ctx.taxonomyElementStore
-      : ctx.taxonomyStore;
     const responseSchema = operation.element
       ? TaxonomyElementResponseSchema
       : TaxonomyResponseSchema;
@@ -387,6 +384,9 @@ export function registerTaxonomyRoutes(ctx: RouteContext): void {
       handler: async (req, res, next) => {
         try {
           if (!(await requireTaxonome(ctx, res))) return;
+          const rootStore = operation.element
+            ? ctx.taxonomyElementStore
+            : ctx.taxonomyStore;
           const root = await rootStore.get(req.params.id);
           if (!root) {
             res.status(404).json({ error: "Taxonomy root not found" });
@@ -409,6 +409,9 @@ export function registerTaxonomyRoutes(ctx: RouteContext): void {
       handler: async (req, res, next) => {
         try {
           if (!(await requireTaxonome(ctx, res))) return;
+          const rootStore = operation.element
+            ? ctx.taxonomyElementStore
+            : ctx.taxonomyStore;
           const root = await rootStore.get(req.params.id);
           if (!root) {
             res.status(404).json({ error: "Taxonomy root not found" });
@@ -433,6 +436,9 @@ export function registerTaxonomyRoutes(ctx: RouteContext): void {
       handler: async (req, res, next) => {
         try {
           if (!(await requireTaxonome(ctx, res))) return;
+          const rootStore = operation.element
+            ? ctx.taxonomyElementStore
+            : ctx.taxonomyStore;
           if (!(await rootStore.softDelete(req.params.id))) {
             res.status(404).json({ error: "User taxonomy root not found" });
             return;
@@ -453,6 +459,9 @@ export function registerTaxonomyRoutes(ctx: RouteContext): void {
       handler: async (req, res, next) => {
         try {
           if (!(await requireTaxonome(ctx, res))) return;
+          const rootStore = operation.element
+            ? ctx.taxonomyElementStore
+            : ctx.taxonomyStore;
           const restored = await rootStore.restore(req.params.id);
           if (!restored) {
             res.status(404).json({ error: "Deleted user taxonomy root not found" });
@@ -470,12 +479,6 @@ export function registerTaxonomyRoutes(ctx: RouteContext): void {
     { path: "/api/v1/taxonomies/:id/revisions", element: false },
     { path: "/api/v1/taxonomy-elements/:id/revisions", element: true },
   ] as const) {
-    const rootStore = operation.element
-      ? ctx.taxonomyElementStore
-      : ctx.taxonomyStore;
-    const revisionStore = operation.element
-      ? ctx.taxonomyElementRevisionStore
-      : ctx.taxonomyRevisionStore;
     const bodySchema = operation.element
       ? CreateTaxonomyElementRevisionInputSchema
       : CreateTaxonomyRevisionInputSchema;
@@ -492,6 +495,12 @@ export function registerTaxonomyRoutes(ctx: RouteContext): void {
       handler: async (req, res, next) => {
         try {
           if (!(await requireTaxonome(ctx, res))) return;
+          const rootStore = operation.element
+            ? ctx.taxonomyElementStore
+            : ctx.taxonomyStore;
+          const revisionStore = operation.element
+            ? ctx.taxonomyElementRevisionStore
+            : ctx.taxonomyRevisionStore;
           const root = await rootStore.get(req.params.id, true);
           if (!root) {
             res.status(404).json({ error: "Taxonomy root not found" });
@@ -515,6 +524,12 @@ export function registerTaxonomyRoutes(ctx: RouteContext): void {
       handler: async (req, res, next) => {
         try {
           if (!(await requireTaxonome(ctx, res))) return;
+          const rootStore = operation.element
+            ? ctx.taxonomyElementStore
+            : ctx.taxonomyStore;
+          const revisionStore = operation.element
+            ? ctx.taxonomyElementRevisionStore
+            : ctx.taxonomyRevisionStore;
           const root = await rootStore.get(req.params.id);
           if (!root) {
             res.status(404).json({ error: "Taxonomy root not found" });
