@@ -122,6 +122,17 @@ const ExperimentReportReferenceSchema = z.object({
   updatedAt: z.coerce.date(),
 });
 
+const ExperimentRequestSummarySchema = z.object({
+  requestId: z.string(),
+  runId: z.string(),
+  task: z.string().optional(),
+  status: z.string().optional(),
+  outcome: z.string().optional(),
+  workerType: z.string().optional(),
+  model: z.string().optional(),
+  profileId: z.string().optional(),
+});
+
 const ExperimentTemplateReportSummarySchema = z.object({
   templateId: z.string(),
   templateVersionId: z.string().optional(),
@@ -179,7 +190,10 @@ const ExperimentResponseSchema = z
     currentExecution: z.object({
       experimentExecutionId: z.string(),
       attemptNumber: z.number().int(),
+      version: z.number().int().optional(),
       readiness: ReadinessSchema,
+      requestCount: z.number().int().nonnegative(),
+      requests: z.array(ExperimentRequestSummarySchema),
       blockers: z.array(
         z.object({
           requestId: z.string().optional(),
@@ -271,7 +285,10 @@ const ExecutionResponseSchema = z
   .object({
     experimentExecutionId: z.string(),
     attemptNumber: z.number().int(),
+    version: z.number().int().optional(),
     readiness: ReadinessSchema,
+    requestCount: z.number().int().nonnegative(),
+    requests: z.array(ExperimentRequestSummarySchema),
     blockers: z.array(z.object({
       requestId: z.string().optional(),
       runId: z.string().optional(),
@@ -418,9 +435,12 @@ function sendLifecycleError(res: Response, error: unknown): boolean {
   return true;
 }
 
-function membershipResponse(result: ReplaceMembershipResult) {
+async function membershipResponse(
+  ctx: RouteContext,
+  result: ReplaceMembershipResult,
+) {
   return {
-    experiment: experimentResponse(result.experiment),
+    experiment: await resolvedExperimentResponse(ctx, result.experiment),
     attachedRequestIds: result.attachedRequestIds,
     detachedRequestIds: result.detachedRequestIds,
   };
@@ -498,7 +518,10 @@ function executionResponse(execution: ExperimentExecution) {
   return {
     experimentExecutionId: execution.experimentExecutionId,
     attemptNumber: execution.attemptNumber,
+    version: execution.version,
     readiness: readiness(execution),
+    requestCount: execution.requests.entryCount,
+    requests: [],
     blockers: execution.blocking,
     progress: Object.fromEntries(
       Object.entries(execution.handlerSummary).map(([handlerId, status]) => [
@@ -528,6 +551,109 @@ function executionResponse(execution: ExperimentExecution) {
       ? { supersededReason: execution.supersededReason }
       : {}),
     ...(execution.report ? { report: execution.report } : {}),
+  };
+}
+
+/**
+ * Resolves one immutable execution vector into ordered request/run summaries.
+ * The vector is read once, active request documents are fetched in one query,
+ * and any non-current exact runs are fetched from history in one query.
+ */
+async function resolvedExecutionResponse(
+  ctx: RouteContext,
+  input: {
+    projectId: string;
+    experimentId: string;
+    execution: ExperimentExecution;
+    includeDeleted?: boolean;
+  },
+) {
+  const states = await store(ctx).readExecutionRequests({
+    projectId: input.projectId,
+    experimentId: input.experimentId,
+    experimentExecutionId: input.execution.experimentExecutionId,
+    includeDeleted: input.includeDeleted,
+  });
+  if (!states) return executionResponse(input.execution);
+
+  const requestIds = states.map(({ requestId }) => requestId);
+  const requestDocuments = requestIds.length === 0
+    ? []
+    : await ctx.requestCollection
+        .find(
+          {
+            _id: { $in: requestIds },
+            projectId: input.projectId,
+          } as Document,
+          {
+            projection: {
+              _id: 1,
+              "scenario.task": 1,
+              workerType: 1,
+              model: 1,
+              profileId: 1,
+              deletedAt: 1,
+              run: 1,
+            },
+          },
+        )
+        .toArray();
+  const requestsById = new Map(
+    requestDocuments.map((request) => [request._id, request]),
+  );
+
+  // Exact historical executions may reference a run no longer embedded on its request.
+  const historicalRunIds = states
+    .filter(({ requestId, runId }) => {
+      const request = requestsById.get(requestId);
+      return request?.run?._id !== runId;
+    })
+    .map(({ runId }) => runId);
+  const historicalRuns = historicalRunIds.length === 0
+    ? []
+    : await ctx.runsCollection
+        .find(
+          {
+            _id: { $in: historicalRunIds },
+            projectId: input.projectId,
+          } as Document,
+          {
+            projection: {
+              _id: 1,
+              status: 1,
+              outcome: 1,
+            },
+          },
+        )
+        .toArray();
+  const historicalRunsById = new Map(
+    historicalRuns.map((run) => [run._id, run]),
+  );
+
+  const requests = states.map(({ requestId, runId }) => {
+    const request = requestsById.get(requestId);
+    const run = request?.run?._id === runId
+      ? request.run
+      : historicalRunsById.get(runId);
+    const status = request?.deletedAt
+      ? "deleted"
+      : (run?.status ?? "missing");
+    return {
+      requestId,
+      runId,
+      ...(request?.scenario.task ? { task: request.scenario.task } : {}),
+      status,
+      ...(run?.outcome ? { outcome: run.outcome } : {}),
+      ...(request?.workerType ? { workerType: request.workerType } : {}),
+      ...(request?.model ? { model: request.model } : {}),
+      ...(request?.profileId ? { profileId: request.profileId } : {}),
+    };
+  });
+
+  return {
+    ...executionResponse(input.execution),
+    requestCount: states.length,
+    requests,
   };
 }
 
@@ -722,6 +848,22 @@ function experimentResponse(experiment: ExperimentDocument) {
   };
 }
 
+/** Returns the detail representation with the exact current execution hydrated. */
+async function resolvedExperimentResponse(
+  ctx: RouteContext,
+  experiment: ExperimentDocument,
+) {
+  return {
+    ...experimentResponse(experiment),
+    currentExecution: await resolvedExecutionResponse(ctx, {
+      projectId: experiment.projectId,
+      experimentId: experiment.experimentId,
+      execution: experiment.execution,
+      includeDeleted: Boolean(experiment.deletedAt || experiment.lifecycle),
+    }),
+  };
+}
+
 interface ExecutionCursor {
   attemptNumber: number;
   experimentExecutionId: string;
@@ -900,7 +1042,10 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
             now,
           });
           res.status(201).json({
-            experiment: experimentResponse(result.experiment),
+            experiment: await resolvedExperimentResponse(
+              ctx,
+              result.experiment,
+            ),
             requestIds: result.attachedRequestIds,
           });
         } catch (error) {
@@ -995,7 +1140,7 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
         );
       }
       res.status(201).json({
-        experiment: experimentResponse(finalized),
+        experiment: await resolvedExperimentResponse(ctx, finalized),
         requestIds: requestDocs.map((doc) => doc._id),
       });
     },
@@ -1023,7 +1168,7 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
             req.body.expectedExperimentRevisionId,
           requestIds: req.body.requestIds,
         });
-        res.status(201).json(membershipResponse(result));
+        res.status(201).json(await membershipResponse(ctx, result));
       } catch (error) {
         if (!sendMembershipError(res, error)) throw error;
       }
@@ -1052,7 +1197,7 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
             req.body.expectedExperimentRevisionId,
           requestIds: req.body.requestIds,
         });
-        res.status(201).json(membershipResponse(result));
+        res.status(201).json(await membershipResponse(ctx, result));
       } catch (error) {
         if (!sendMembershipError(res, error)) throw error;
       }
@@ -1106,7 +1251,7 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
         res.status(404).json({ error: "Experiment not found" });
         return;
       }
-      res.json(experimentResponse(experiment));
+      res.json(await resolvedExperimentResponse(ctx, experiment));
     },
   });
 
@@ -1290,7 +1435,7 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
         });
         return;
       }
-      res.json(experimentResponse(updated));
+      res.json(await resolvedExperimentResponse(ctx, updated));
     },
   });
 
@@ -1408,7 +1553,12 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
         res.status(404).json({ error: "Experiment execution not found" });
         return;
       }
-      res.json(executionResponse(execution));
+      res.json(await resolvedExecutionResponse(ctx, {
+        projectId: experiment.projectId,
+        experimentId: req.params.id,
+        execution,
+        includeDeleted: req.query.includeDeleted === "true",
+      }));
     },
   });
 

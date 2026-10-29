@@ -153,6 +153,14 @@ mutable bounded state covered by the `FixedPayload` descriptor's
 missing positions, duplicates, count mismatches, identity mismatches, or
 fingerprint mismatches.
 
+Experiment detail responses resolve that exact vector into ordered run
+summaries. The API reads the vector once, fetches all request documents in one
+project-scoped query, and fetches any exact non-current run attempts from run
+history in one additional query. This preserves current and historical attempt
+identity without per-row lookups. A soft-deleted request remains visible with
+status `deleted`; a missing request or exact run remains visible with status
+`missing` so the immutable member vector is never silently shortened.
+
 ## FixedPayload storage
 
 `FixedPayload<T>` has two representations:
