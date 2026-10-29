@@ -159,16 +159,16 @@ taxonomy unchanged, which makes the comparison reviewable.
 
 ```bash
 taxonome optimize --taxonomy taxonomy.yaml \
-  --inputs "evaluation/*.jsonl" \
-  --ground-truth "evaluation/*-ground-truth.json" \
-  --element help-before-guessing --in-place
+  --from-candidate optimized/help-before-guessing.optimized.yaml \
+  --in-place
 git diff -- elements/help-before-guessing.yaml
 ```
 
 In-place publication requires a writable local `{ path }` reference and writes
-all selected elements transactionally. Normal `run` and `eval` then use the
-promoted YAML without `--element-override`. Review the focused diff and reject
-metadata-only, formatting-only, or unrelated changes.
+the exact selected candidate plus its matching provenance manifest
+transactionally. It does not rerun the model. Normal `run` and `eval` then use
+the promoted YAML without `--element-override`. Review the focused diff and
+reject metadata-only, formatting-only, or unrelated changes.
 
 Finish by generating a readout as described in [Using
 Taxonome](/guides/taxonome/#build-a-readout).

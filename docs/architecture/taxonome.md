@@ -354,6 +354,10 @@ complete standard Taxonome element YAML whose exact `id` replaces one authored
 taxonomy element before validation and digest calculation. Duplicate, unknown,
 or mismatched IDs fail before model initialization. The optional sibling
 optimization manifest is provenance only and is never required at runtime.
+`optimize --in-place --from-candidate <optimized.yaml>` publishes the exact
+selected YAML and matching provenance manifest without rerunning model
+selection. Candidate identity, taxonomy digest, contract hash, and semantic
+content hash must all match before the transactional write.
 
 ## Authored taxonomy contract
 

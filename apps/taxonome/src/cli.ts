@@ -141,6 +141,8 @@ interface OptimizeOptions extends ExecutionOptions {
   outputDir?: string;
   /** Atomically replace writable local referenced element YAML. */
   inPlace?: boolean;
+  /** Existing selected optimized YAML to publish exactly with --in-place. */
+  fromCandidate: string[];
   /** Ax metric-evaluation cap from 1 through 100; default 48. */
   maxMetricCalls: string;
 }
@@ -1698,6 +1700,12 @@ export function createCli(style: TaxonomeStyle = createTaxonomeStyle()): Command
       )
       .option("--output-dir <path>", "Write optimized YAML and manifests to a new candidate directory")
       .option("--in-place", "Atomically replace writable local referenced element YAML")
+      .addOption(
+        new Option(
+          "--from-candidate <path>",
+          "Publish an exact selected optimized YAML with --in-place (repeatable)",
+        ).argParser(collect).default([]),
+      )
       .option("--max-metric-calls <n>", "Maximum Ax metric calls for bounded search", "48")
       .requiredOption("--taxonomy <path>", "Taxonomy YAML manifest")
       .addOption(new Option("--plugin <specifier>", "Trusted compiled JS plugin path or installed package").argParser(collect).default([]))
@@ -1705,6 +1713,124 @@ export function createCli(style: TaxonomeStyle = createTaxonomeStyle()): Command
       .option("--json", "Emit complete machine-readable JSON");
   configureTaxonomeHelp(optimizeCommand, style);
   optimizeCommand.action(async (options: OptimizeOptions) => {
+    if (options.fromCandidate.length) {
+      if (!options.inPlace || options.outputDir) {
+        throw new Error(
+          "--from-candidate requires --in-place and cannot use --output-dir",
+        );
+      }
+      if (
+        options.inputs.length ||
+        options.groundTruth.length ||
+        options.element.length
+      ) {
+        throw new Error(
+          "--from-candidate derives elements from selected YAML; omit --inputs, --ground-truth, and --element",
+        );
+      }
+      const taxonomy = await loadExecutionTaxonomy({
+        ...options,
+        elementOverride: [],
+      });
+      const promoted = await loadExecutionTaxonomy({
+        ...options,
+        elementOverride: options.fromCandidate,
+      });
+      const overrides = await prepareElementOverrides(options.fromCandidate);
+      const {
+        optimizationManifestSchema,
+        promptContractHash,
+        semanticHash,
+      } = await import("taxonomy-engine/optimization-v2");
+      const results = [];
+      for (const [elementId, rawElement] of overrides.values) {
+        const source = taxonomy.elementById.get(elementId);
+        const candidate = promoted.elementById.get(elementId);
+        if (
+          !source ||
+          !candidate ||
+          source.implementation.type !== "prompt" ||
+          candidate.implementation.type !== "prompt"
+        ) {
+          throw new Error(
+            `--from-candidate requires an existing prompt element: ${elementId}`,
+          );
+        }
+        let candidatePath: string | undefined;
+        for (const path of options.fromCandidate) {
+          const value = parseYaml(await readFile(path, "utf8")) as unknown;
+          if (semanticHash(value) === overrides.hashes[elementId]) {
+            candidatePath = path;
+            break;
+          }
+        }
+        if (!candidatePath) {
+          throw new Error(`Cannot resolve candidate path for '${elementId}'`);
+        }
+        const manifestPath = join(
+          dirname(resolve(candidatePath)),
+          `${elementId}.optimization.manifest.json`,
+        );
+        const manifest = optimizationManifestSchema.parse(
+          JSON.parse(await readFile(manifestPath, "utf8")) as unknown,
+        );
+        if (
+          manifest.element_id !== elementId ||
+          manifest.taxonomy.id !== taxonomy.id ||
+          manifest.taxonomy.version !== taxonomy.version ||
+          manifest.taxonomy.digest !== taxonomy.digest ||
+          manifest.contract_hash !== promptContractHash(taxonomy, source) ||
+          manifest.optimized_element_sha256 !== semanticHash(rawElement)
+        ) {
+          throw new Error(
+            `Candidate provenance does not match '${elementId}' and the loaded taxonomy`,
+          );
+        }
+        results.push({
+          elementId,
+          element: {
+            implementation: { prompt: candidate.implementation.prompt },
+          },
+          manifest,
+        });
+      }
+      const paths = await writeInPlaceSet({
+        taxonomyPath: options.taxonomy,
+        results,
+      });
+      const output = {
+        taxonomy: {
+          id: taxonomy.id,
+          version: taxonomy.version,
+          digest: taxonomy.digest,
+        },
+        optimized: results.map(result => {
+          const path = paths.find(candidate =>
+            candidate.elementId === result.elementId
+          )!;
+          return {
+            element_id: result.elementId,
+            yaml: displayPath(path.yaml),
+            manifest: displayPath(path.manifest),
+            train_ids: result.manifest.train_ids,
+            validation_ids: result.manifest.validation_ids,
+            settings: result.manifest.settings,
+            metrics: result.manifest.metrics,
+          };
+        }),
+        skipped: [],
+      };
+      emitCommandOutput(
+        options.json,
+        output,
+        renderOptimizeHuman(output.optimized.map(result => ({
+          ...result,
+          yaml_path: result.yaml,
+          manifest_path: result.manifest,
+        }))),
+      );
+      return;
+    }
     if (Boolean(options.outputDir) === Boolean(options.inPlace)) {
       throw new Error("Choose exactly one of --output-dir or --in-place");
     }

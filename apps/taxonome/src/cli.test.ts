@@ -1647,11 +1647,33 @@ output:
     const optimizeHelp = await runCli(["optimize", "--help"]);
     expect(optimizeHelp.stderr).toContain("--output-dir <path>");
     expect(optimizeHelp.stderr).toContain("--in-place");
+    expect(optimizeHelp.stderr).toContain("--from-candidate <path>");
     expect(optimizeHelp.stderr).toContain(
       "--element <id>",
     );
     expect(optimizeHelp.stderr).not.toContain("--artifact");
     expect(optimizeHelp.stderr).not.toContain("--element-override");
+
+    await expect(runCli([
+      "optimize",
+      "--taxonomy", "packages/ax-taxonomy/taxonomy/taxonomy.yaml",
+      "--from-candidate", "candidate.yaml",
+    ])).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "--from-candidate requires --in-place",
+      ),
+    });
+    await expect(runCli([
+      "optimize",
+      "--taxonomy", "packages/ax-taxonomy/taxonomy/taxonomy.yaml",
+      "--from-candidate", "candidate.yaml",
+      "--in-place",
+      "--inputs", "inputs.jsonl",
+    ])).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "--from-candidate derives elements from selected YAML",
+      ),
+    });
 
     const evalHelp = await runCli(["eval", "--help"]);
     expect(evalHelp.stderr).toContain("--element-override <path>");
