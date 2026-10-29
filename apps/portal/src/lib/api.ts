@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTemplateVersion, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, TaxonomyDocument, TaxonomyRevisionDocument, TaxonomyElementDocument, TaxonomyElementRevisionDocument, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ResourceDocument, ResourceRevisionDocument, ResourceBindingSpec, CreateResourceBody, CreateResourceRevisionBody, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, RunFacetsResponse, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType, RunSortField, RunSortDir, CriterionKind, TaxonomyElementId, CriterionSubject } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTemplateVersion, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, TaxonomyDocument, TaxonomyListItem, TaxonomyDetailDocument, TaxonomyRevisionDocument, TaxonomyElementDocument, TaxonomyElementRevisionDocument, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ResourceDocument, ResourceRevisionDocument, ResourceBindingSpec, CreateResourceBody, CreateResourceRevisionBody, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, RunFacetsResponse, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType, RunSortField, RunSortDir, CriterionKind, TaxonomyElementId, CriterionSubject } from "@/types";
 
 import type { Project, CreateProjectRequest, UpdateProjectRequest } from "@/types";
 import { qs } from "./url";
@@ -1404,8 +1404,22 @@ export const api = {
 
   // ─── Taxonomies ────────────────────────────────────────────────────────────
 
-  listTaxonomies: (): Promise<TaxonomyDocument[]> => {
+  listTaxonomies: (): Promise<TaxonomyListItem[]> => {
     return request("/taxonomies", undefined, { scoped: true });
+  },
+
+  getTaxonomyDetail: (
+    id: string,
+    revisionId?: string,
+  ): Promise<TaxonomyDetailDocument> => {
+    const query = revisionId
+      ? `?revisionId=${encodeURIComponent(revisionId)}`
+      : "";
+    return request(
+      `/taxonomies/${encodeURIComponent(id)}/detail${query}`,
+      undefined,
+      { scoped: true },
+    );
   },
 
   getTaxonomy: (id: string): Promise<TaxonomyDocument> => {
@@ -1414,6 +1428,16 @@ export const api = {
 
   listTaxonomyRevisions: (id: string): Promise<TaxonomyRevisionDocument[]> => {
     return request(`/taxonomies/${encodeURIComponent(id)}/revisions`);
+  },
+
+  createTaxonomyRevision: (
+    id: string,
+    content: unknown,
+  ): Promise<TaxonomyRevisionDocument> => {
+    return request(`/taxonomies/${encodeURIComponent(id)}/revisions`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
   },
 
   createTaxonomy: (input: {

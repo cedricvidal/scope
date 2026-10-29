@@ -1231,7 +1231,14 @@ export interface TaxonomyDocument {
   latestRevisionId?: string;
   latestRevision?: number;
   createdAt: string;
+  updatedAt?: string;
   deletedAt?: string;
+}
+
+export interface TaxonomyListItem extends TaxonomyDocument {
+  ref: string;
+  version: string;
+  elementCount: number;
 }
 
 export interface TaxonomyRevisionDocument {
@@ -1256,9 +1263,11 @@ export interface TaxonomyElementRevisionDocument {
   _id: string;
   elementId: string;
   projectId: string;
+  schema_version?: "scope/taxonomy/v1";
   id: string;
   label: string;
   description?: string;
+  category_id?: string;
   sourceType: "builtin" | "user";
   revision: number;
   ref: string;
@@ -1269,6 +1278,31 @@ export interface TaxonomyElementRevisionDocument {
   preconditions: Record<string, boolean>;
   output: { evidence_roles: Record<string, unknown>; constraints?: unknown[] };
   createdAt: string;
+}
+
+export interface TaxonomyRevisionSummary {
+  _id: string;
+  revision: number;
+  ref: string;
+  version: string;
+  elementCount: number;
+  contentSha256: string;
+  creator?: string;
+  createdAt: string;
+  isLatest: boolean;
+}
+
+export interface ResolvedTaxonomyElement {
+  position: number;
+  root: TaxonomyElementDocument;
+  revision: TaxonomyElementRevisionDocument;
+}
+
+export interface TaxonomyDetailDocument {
+  taxonomy: TaxonomyDocument;
+  selectedRevision: TaxonomyRevisionDocument;
+  revisions: TaxonomyRevisionSummary[];
+  elements: ResolvedTaxonomyElement[];
 }
 
 // =============================================================================
