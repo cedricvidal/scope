@@ -152,6 +152,8 @@ export interface TaxonomyLoadLimits {
 export interface TaxonomyLoadOptions {
   /** Combined built-in/local/package registry. */
   handlers: HandlerRegistry;
+  /** Complete authored element replacements keyed by exact element ID. */
+  elementOverrides?: ReadonlyMap<string, unknown>;
   /** Optional safety-limit overrides used primarily by tests. */
   limits?: TaxonomyLoadLimits;
 }
@@ -511,6 +513,7 @@ export async function loadTaxonomy(
       if (loadedReferences.size >= limits.maxReferences) {
         throw new Error(`Taxonomy exceeds maximum reference count ${limits.maxReferences}`);
       }
+
       const elementPath = await resolveElementPath(root, reference.data.path);
       if (loadedReferences.has(elementPath)) {
         throw new Error(`Duplicate or cyclic taxonomy element reference '${reference.data.path}'`);
@@ -524,6 +527,32 @@ export async function loadTaxonomy(
       );
     } else {
       authoredElements.push(parseAuthoredElement(entry, "inline element"));
+    }
+  }
+
+  if (options.elementOverrides?.size) {
+    const matched = new Set<string>();
+    for (let index = 0; index < authoredElements.length; index++) {
+      const authored = authoredElements[index]!;
+      const override = options.elementOverrides.get(authored.id);
+      if (override === undefined) continue;
+      const parsed = parseAuthoredElement(
+        override,
+        `element override '${authored.id}'`,
+      );
+      if (parsed.id !== authored.id) {
+        throw new Error(
+          `Element override ID '${parsed.id}' does not match taxonomy element '${authored.id}'`,
+        );
+      }
+      authoredElements[index] = parsed;
+      matched.add(authored.id);
+    }
+    const unknown = [...options.elementOverrides.keys()].filter(
+      id => !matched.has(id),
+    );
+    if (unknown.length) {
+      throw new Error(`Unknown element override ID(s): ${unknown.join(", ")}`);
     }
   }
 

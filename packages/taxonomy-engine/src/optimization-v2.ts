@@ -1,13 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import {
-  axDeserializeOptimizedProgram,
-  axSerializeOptimizedProgram,
-  optimize,
-  type AxAIService,
-  type AxSerializedOptimizedProgram,
-} from "@ax-llm/ax";
+import { optimize, type AxAIService } from "@ax-llm/ax";
 import { z } from "zod";
 import {
   ASSESSMENT_JSON_SCHEMA,
@@ -41,24 +35,14 @@ import type {
   NormalizedTaxonomy,
 } from "./taxonomy.js";
 
-export const OPTIMIZATION_ARTIFACT_VERSION = "scope/taxonome-ax/v2";
+export const OPTIMIZATION_MANIFEST_VERSION =
+  "scope/taxonome-optimization-manifest/v1" as const;
 
-/** Hashes semantic JSON values used in artifact compatibility checks. */
+/** Hashes semantic JSON values used in provenance and compatibility checks. */
 export const semanticHash = canonicalJsonSha256;
 
-const serializedProgramSchema = z.custom<AxSerializedOptimizedProgram>(value =>
-  z.object({
-    bestScore: z.number(),
-    stats: z.object({}).passthrough(),
-    optimizerType: z.string(),
-    optimizationTime: z.number(),
-    totalRounds: z.number(),
-    converged: z.boolean(),
-  }).passthrough().safeParse(value).success
-);
-
-export const optimizationArtifactSchemaV2 = z.object({
-  format: z.literal(OPTIMIZATION_ARTIFACT_VERSION),
+export const optimizationManifestSchema = z.object({
+  schema_version: z.literal(OPTIMIZATION_MANIFEST_VERSION),
   taxonomy: z.object({
     schema_version: z.literal("scope/taxonomy/v1"),
     id: z.string(),
@@ -66,6 +50,8 @@ export const optimizationArtifactSchemaV2 = z.object({
     digest: z.string(),
   }).strict(),
   element_id: z.string(),
+  source_element_sha256: z.string(),
+  optimized_element_sha256: z.string(),
   contract_hash: z.string(),
   corpus_hash: z.string(),
   model: z.string(),
@@ -76,14 +62,20 @@ export const optimizationArtifactSchemaV2 = z.object({
   settings: z.object({
     maxMetricCalls: z.number().int().positive(),
     seed: z.number().int(),
-    bootstrap: z.literal(true),
+    bootstrap: z.literal(false),
   }).strict(),
   transport_settings: z.object({
     reasoning_effort: z.literal("low"),
     sampling: z.literal("sdk-managed"),
     ax_sampling_hints_applied: z.literal(false),
   }).strict(),
-  optimized: serializedProgramSchema,
+  metrics: z.object({
+    best_score: z.number(),
+    metric_calls: z.number().int().nonnegative(),
+    total_rounds: z.number().int().nonnegative(),
+    converged: z.boolean(),
+    optimization_time_ms: z.number().nonnegative(),
+  }).strict(),
   metric_trace: z.array(z.object({
     input_id: z.string(),
     score: z.number(),
@@ -100,7 +92,36 @@ export const optimizationArtifactSchemaV2 = z.object({
   }).strict()),
 }).strict();
 
-export type OptimizationArtifactV2 = z.infer<typeof optimizationArtifactSchemaV2>;
+export type OptimizationManifest = z.infer<typeof optimizationManifestSchema>;
+
+/** Complete standard Taxonome prompt element emitted by optimization. */
+export interface OptimizedPromptElement {
+  schema_version?: "scope/taxonomy/v1";
+  id: string;
+  label: string;
+  description?: string;
+  category_id?: string;
+  implementation: { type: "prompt"; prompt: string };
+  preconditions: NormalizedElement["preconditions"];
+  output: NormalizedElement["output"];
+}
+
+export interface OptimizationProgress {
+  phase:
+    | "preflight"
+    | "optimizing"
+    | "candidate"
+    | "complete";
+  elementId: string;
+  metricCalls: number;
+  bestScore?: number;
+  message: string;
+}
+
+export interface OptimizedElementResult {
+  element: OptimizedPromptElement;
+  manifest: OptimizationManifest;
+}
 
 /** Dimensioned raw-candidate fitness produced without repair or model calls. */
 export interface OptimizationCandidateScore {
@@ -171,6 +192,7 @@ export function promptContractHash(
     taxonomy_digest: taxonomy.digest,
     element: {
       id: element.id,
+      ...(element.description ? { description: element.description } : {}),
       implementation: element.implementation,
       preconditions: element.preconditions,
       output: element.output,
@@ -184,51 +206,22 @@ export function promptContractHash(
   });
 }
 
-/**
- * Restores a v2 artifact only for its exact taxonomy/element/model contract.
- * Historical `taxonome.ax.v1` artifacts fail clearly rather than being
- * silently reinterpreted under YAML semantics.
- */
-export function restoreOptimizationArtifactV2(
-  value: unknown,
-  taxonomy: NormalizedTaxonomy,
-  elementId: string,
-  model: string,
-): OptimizationArtifactV2 {
-  if (
-    value &&
-    typeof value === "object" &&
-    "format" in value &&
-    (value as { format?: unknown }).format === "taxonome.ax.v1"
-  ) {
-    throw new Error(
-      "Historical taxonome.ax.v1 artifacts are incompatible with scope/taxonomy/v1; rerun optimization explicitly.",
-    );
-  }
-  const parsed = optimizationArtifactSchemaV2.safeParse(value);
-  if (!parsed.success) {
-    throw new Error(
-      "Optimization artifact structure is incompatible with the current " +
-      "shared assessment/evidence contract; rerun optimization explicitly.",
-    );
-  }
-  const artifact = parsed.data;
-  const element = taxonomy.elementById.get(elementId);
-  if (!element || element.implementation.type !== "prompt") {
-    throw new Error(`Taxonomy prompt element '${elementId}' is required for artifact replay`);
-  }
-  if (
-    artifact.taxonomy.digest !== taxonomy.digest ||
-    artifact.element_id !== elementId ||
-    artifact.model !== model ||
-    artifact.contract_hash !== promptContractHash(taxonomy, element)
-  ) {
-    throw new Error("Optimization artifact taxonomy/element/model contract mismatch");
-  }
-  return artifact;
+function portablePromptElement(
+  element: NormalizedElement,
+  prompt: string,
+): OptimizedPromptElement {
+  return {
+    schema_version: "scope/taxonomy/v1",
+    id: element.id,
+    label: element.label,
+    ...(element.description ? { description: element.description } : {}),
+    ...(element.category_id ? { category_id: element.category_id } : {}),
+    implementation: { type: "prompt", prompt },
+    preconditions: structuredClone(element.preconditions),
+    output: structuredClone(element.output),
+  };
 }
 
-/** Converts fixed ground truth into one supervised training observation. */
 function trainingObservation(
   input: EvaluationInput,
   groundTruth: GroundTruth,
@@ -241,8 +234,8 @@ function trainingObservation(
   return expected;
 }
 
-/** Runs bounded bootstrap+GEPA for one loaded prompt element. */
-export async function optimizePromptElementV2(
+/** Optimizes one prompt instruction without embedding examples or ATIF in output. */
+export async function optimizePromptElement(
   taxonomy: NormalizedTaxonomy,
   elementId: string,
   inputs: readonly EvaluationInput[],
@@ -251,7 +244,8 @@ export async function optimizePromptElementV2(
   teacherAI: AxAIService,
   model: string,
   maxMetricCalls = 48,
-): Promise<OptimizationArtifactV2> {
+  onProgress?: (progress: OptimizationProgress) => void,
+): Promise<OptimizedElementResult> {
   const element = taxonomy.elementById.get(elementId);
   if (!element || element.implementation.type !== "prompt") {
     throw new Error(`Cannot optimize non-prompt element '${elementId}'`);
@@ -269,18 +263,31 @@ export async function optimizePromptElementV2(
   const validation = eligible.filter(row => row.split === "validation");
   if (!train.length || !validation.length) {
     throw new Error(
-      "Optimization requires eligible disjoint train and validation inputs",
+      `Element '${elementId}' requires eligible Train and Validation inputs`,
     );
+  }
+  for (const row of [...train, ...validation]) {
+    if (!groundTruth[row.id]?.[elementId]) {
+      throw new Error(`Missing ground truth for ${row.id}/${elementId}`);
+    }
   }
   for (const row of train) {
     if (validation.some(candidate =>
       candidate.family === row.family ||
       candidate.originating_run === row.originating_run
     )) {
-      throw new Error("Train/validation family or originating-run leakage");
+      throw new Error(
+        `Element '${elementId}' has Train/Validation family or originating-run leakage`,
+      );
     }
   }
 
+  onProgress?.({
+    phase: "preflight",
+    elementId,
+    metricCalls: 0,
+    message: `${train.length} Train; ${validation.length} Validation`,
+  });
   const inputFor = (input: EvaluationInput): TaxonomyInput => ({
     atif: input.atif,
     atif_provenance: input.atif_provenance,
@@ -292,15 +299,12 @@ export async function optimizePromptElementV2(
       input,
     ]),
   );
-  const trace: OptimizationArtifactV2["metric_trace"] = [];
-  const program = createTaxonomyPromptProgram(
-    element,
-    undefined,
-    {
-      correctionRetries: 0,
-      captureInvalidOutput: true,
-    },
-  );
+  const trace: OptimizationManifest["metric_trace"] = [];
+  const program = createTaxonomyPromptProgram(element, {
+    correctionRetries: 0,
+    captureInvalidOutput: true,
+  });
+  let bestScore: number | undefined;
   const optimized = await optimize(
     program,
     train.map(input => ({
@@ -315,17 +319,15 @@ export async function optimizePromptElementV2(
       if (!input) {
         throw new Error("Optimizer attempted to score an unregistered input");
       }
-      validateScopeAtif(
-        input.atif,
-        taxonomy,
-        input.atif_provenance,
-      );
-      const parsedPrediction = z.object({ observation: z.unknown() }).passthrough().parse(prediction);
+      validateScopeAtif(input.atif, taxonomy, input.atif_provenance);
+      const parsedPrediction = z.object({
+        observation: z.unknown(),
+      }).passthrough().parse(prediction);
       const scored = scoreOptimizationCandidate(
         parsedPrediction.observation,
         input,
         element,
-        groundTruth[input.id][elementId]!,
+        groundTruth[input.id]![elementId]!,
       );
       trace.push({
         input_id: input.id,
@@ -333,6 +335,14 @@ export async function optimizePromptElementV2(
         errors: scored.errors,
         diagnostics: scored.diagnostics,
         dimensions: scored.dimensions,
+      });
+      bestScore = Math.max(bestScore ?? scored.score, scored.score);
+      onProgress?.({
+        phase: "candidate",
+        elementId,
+        metricCalls: trace.length,
+        bestScore,
+        message: `scored ${input.id}`,
       });
       return scored.score;
     },
@@ -346,26 +356,42 @@ export async function optimizePromptElementV2(
       maxIterations: 2,
       earlyStoppingPatience: 2,
       skipPerfectScore: false,
-      bootstrap: {
-        maxRounds: 1,
-        maxExamples: train.length,
-        maxDemos: 2,
-        batchSize: 1,
-        dynamicTemperature: false,
-        adaptiveBatching: false,
-      },
+      bootstrap: false,
       seed: 42,
       verbose: false,
       logger: () => {},
-      optimizerLogger: () => {},
+      optimizerLogger: data => {
+        onProgress?.({
+          phase: "optimizing",
+          elementId,
+          metricCalls: trace.length,
+          bestScore,
+          message: typeof data === "string" ? data : "GEPA optimization",
+        });
+      },
     },
   );
   if (!optimized.optimizedProgram) {
-    throw new Error("Ax did not return a serializable optimized program");
+    throw new Error("Ax did not return an optimized program");
   }
-
-  return {
-    format: OPTIMIZATION_ARTIFACT_VERSION,
+  const serialized = optimized.optimizedProgram as unknown as {
+    demos?: unknown[];
+    examples?: unknown[];
+  };
+  if ((serialized.demos?.length ?? 0) > 0) {
+    throw new Error("Optimizer returned runtime demos while bootstrap is disabled");
+  }
+  optimized.optimizedProgram.applyTo(program);
+  const optimizedElement = portablePromptElement(
+    element,
+    program.optimizedInstruction(),
+  );
+  const sourceElement = portablePromptElement(
+    element,
+    element.implementation.prompt,
+  );
+  const manifest: OptimizationManifest = {
+    schema_version: OPTIMIZATION_MANIFEST_VERSION,
     taxonomy: {
       schema_version: taxonomy.schema_version,
       id: taxonomy.id,
@@ -373,6 +399,8 @@ export async function optimizePromptElementV2(
       digest: taxonomy.digest,
     },
     element_id: elementId,
+    source_element_sha256: semanticHash(sourceElement),
+    optimized_element_sha256: semanticHash(optimizedElement),
     contract_hash: promptContractHash(taxonomy, element),
     corpus_hash: semanticHash({
       train: train.map(row => row.id),
@@ -389,20 +417,27 @@ export async function optimizePromptElementV2(
     sdk_version: "1.0.1",
     train_ids: train.map(row => row.id),
     validation_ids: validation.map(row => row.id),
-    settings: { maxMetricCalls, seed: 42, bootstrap: true },
+    settings: { maxMetricCalls, seed: 42, bootstrap: false },
     transport_settings: {
       reasoning_effort: "low",
       sampling: "sdk-managed",
       ax_sampling_hints_applied: false,
     },
-    optimized: axSerializeOptimizedProgram(optimized.optimizedProgram),
+    metrics: {
+      best_score: optimized.optimizedProgram.bestScore,
+      metric_calls: trace.length,
+      total_rounds: optimized.optimizedProgram.totalRounds,
+      converged: optimized.optimizedProgram.converged,
+      optimization_time_ms: optimized.optimizedProgram.optimizationTime,
+    },
     metric_trace: trace,
   };
-}
-
-/** Converts the validated serialized program into Ax's runtime artifact object. */
-export function deserializeOptimizationProgram(
-  artifact: OptimizationArtifactV2,
-) {
-  return axDeserializeOptimizedProgram(artifact.optimized);
+  onProgress?.({
+    phase: "complete",
+    elementId,
+    metricCalls: trace.length,
+    bestScore: manifest.metrics.best_score,
+    message: "optimized YAML ready",
+  });
+  return { element: optimizedElement, manifest };
 }

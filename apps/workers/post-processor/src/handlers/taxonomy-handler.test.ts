@@ -93,7 +93,7 @@ function acceptanceContext(input: {
     : promptElement;
   const taxonomyContent = {
     schema_version: "scope/taxonomy/v1" as const,
-    id: input.sourceType === "builtin" ? "default" : "user-managed",
+    id: input.sourceType === "builtin" ? "ax-taxonomy" : "user-managed",
     version: "1.0.0",
     surfaces: [{ id: "surface-mcp", label: "MCP" }],
     elements: [{ ref: `${elementContent.id}@r1` }],

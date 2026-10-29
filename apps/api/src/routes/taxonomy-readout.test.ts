@@ -79,7 +79,7 @@ describe("buildTaxonomyReadout", () => {
         requests: pairs,
         taxonomy: {
           taxonomyRevisionId: "taxonomy-revision-1",
-          ref: "default@r1",
+          ref: "ax-taxonomy@r1",
           contentSha256: "a".repeat(64),
         },
       },

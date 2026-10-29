@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const forbidden = /\bcases?\b|\bgold\b|heldout|held-out|--cases|--gold|case_id/i;
 const forbiddenSplit = /"split"\s*:\s*"unit"|validation,\s*test,\s*unit/i;
+const forbiddenReplay = /\breplay(?:ed|ing|s)?\b/i;
 const extensions = new Set([".ts", ".mjs", ".json", ".jsonl", ".md", ".yaml"]);
 
 /** Recursively collects active text files while excluding generated/frozen areas. */
@@ -45,6 +46,7 @@ describe("active Taxonome evaluation terminology", () => {
       const content = await readFile(file, "utf8");
       expect(content, file).not.toMatch(forbidden);
       expect(content, file).not.toMatch(forbiddenSplit);
+      expect(content, file).not.toMatch(forbiddenReplay);
     }
 
     const architecture = await readFile(
@@ -54,5 +56,6 @@ describe("active Taxonome evaluation terminology", () => {
     const current = architecture.split("## Recorded spike findings")[0];
     expect(current).not.toMatch(forbidden);
     expect(current).not.toMatch(forbiddenSplit);
+    expect(current).not.toMatch(forbiddenReplay);
   });
 });

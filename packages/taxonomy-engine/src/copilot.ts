@@ -11,7 +11,6 @@ import type {
   AxAIServiceOptions,
   AxChatRequest,
   AxChatResponse,
-  AxSerializedOptimizedProgram,
 } from "@ax-llm/ax";
 import {
   AxAssertionError,
@@ -478,21 +477,12 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
 }
 
 /**
- * Restores optional learned components once and executes only the registered prompt element.
- *
- * @param ai - Ax service backed by the Copilot SDK transport.
- * @param artifact - Optional complete serialized optimized program.
- * @returns Prompt executor restricted to Skipped Invocation.
- */
-/**
  * Creates the production executor that builds programs from loaded YAML.
  *
  * @param ai - Ax service backed by the isolated Copilot SDK.
- * @param artifacts - Optional compatible artifact by element ID.
  */
 export function taxonomyPromptExecutor(
   ai: AxAIService,
-  artifacts: ReadonlyMap<string, AxSerializedOptimizedProgram> = new Map(),
 ): PromptExecutor {
   return {
     async evaluate(
@@ -524,7 +514,6 @@ export function taxonomyPromptExecutor(
       });
       const program = createTaxonomyPromptProgram(
         element,
-        artifacts.get(element.id),
         {
           correctionRetries: 1,
           assertion: observation => {

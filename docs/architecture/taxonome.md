@@ -33,7 +33,7 @@ The production catalog consists of exactly four project-scoped collections:
 are immutable, monotonically numbered, and addressed as `{id}@rN`.
 
 The canonical `packages/ax-taxonomy/taxonomy/taxonomy.yaml` and referenced
-element files seed a per-project **Default Taxonomy** as `sourceType: builtin`.
+element files seed a per-project **ax-taxonomy** root as `sourceType: builtin`.
 Built-ins are read-only. Copying an exact built-in revision creates a new user
 root at revision 1. User edits always append revisions.
 
@@ -348,11 +348,11 @@ not repeated after the dashboard. Non-TTY human output intentionally retains
 the detailed input/file summary; JSON fields and row ordering remain unchanged
 apart from the additive evaluation-level counts.
 
-`--artifact <path>` is repeatable. Each artifact's embedded `element_id`
-provides generic scoping; duplicate artifacts or artifacts for unselected or
-deterministic elements fail. Deterministic selections require no credentials;
-eligible prompt inputs still make fresh SDK calls and require separate
-live-call authorization.
+`--element-override <path>` is repeatable for `run` and `eval`. Each path is a
+complete standard Taxonome element YAML whose exact `id` replaces one authored
+taxonomy element before validation and digest calculation. Duplicate, unknown,
+or mismatched IDs fail before model initialization. The optional sibling
+optimization manifest is provenance only and is never required at runtime.
 
 ## Authored taxonomy contract
 
@@ -365,11 +365,11 @@ explicitly.
 
 ```yaml
 schema_version: scope/taxonomy/v1
-id: agent-behavior
-version: 2.0.0
-categories:
-  - id: behavior-category-invocation
-    label: Invocation behavior
+id: ax-taxonomy
+version: 1.0.0
+surfaces:
+  - id: surface-mcp
+    label: MCP
 elements:
   - path: elements/timeout.yaml
 ```
@@ -700,13 +700,16 @@ relevance and use. Deterministic handlers are never bypassed by this prompt-only
 preflight. Every preflight result is validated against the shared assessment,
 evidence-role, and constraint contract before it is returned.
 
-Optimization artifacts use `scope/taxonome-ax/v2` and bind the complete Ax
-serialization, including learned demos, to the exact taxonomy digest, element,
-model, prompt contract, and corpus. Historical `taxonome.ax.v1` artifacts fail
-clearly instead of being replayed under revised YAML semantics. The real Ax
-convenience optimizer remains bounded bootstrap plus GEPA. `maxMetricCalls`
-bounds optimizer scoring; it is not a cumulative SDK budget and does not apply
-to separate baseline or replay commands.
+Optimization emits `<element-id>.optimized.yaml`, a complete standard element
+whose only optimized runtime content is `implementation.prompt`, plus an
+optional `<element-id>.optimization.manifest.json` using
+`scope/taxonome-optimization-manifest/v1`. The manifest binds the taxonomy
+digest, element contract, Train and Validation IDs/hashes, model, settings, and
+aggregate metrics without storing complete ATIF, examples, demonstrations, or
+a serialized runtime program. Ax GEPA runs with `bootstrap: false`; Train
+inputs drive instruction proposals and Validation inputs drive scoring and
+selection. Final unseen Test evaluation is a separate `eval --split test`.
+`maxMetricCalls` is per element, not a cumulative SDK budget.
 
 Plain ATIF and a single archive root preserve the existing final human/JSON
 stdout contract while using the same run-centric stderr dashboard and
@@ -834,7 +837,7 @@ The current private package boundary is intentionally explicit:
   assertions, prompt/SDK plumbing, optimization/artifact compatibility,
   deterministic readout, archive conversion, strict versioned ATIF validators,
   adjacent upcasters/source maps, and generic neutral tests.
-- `ax-taxonomy` owns only the shipped `agent-behavior` YAML, catalog fixtures,
+- `ax-taxonomy` owns only the shipped `ax-taxonomy` YAML, catalog fixtures,
   the reviewed `scope/discovered-v1`, `scope/malformed-invocation-v1`, and
   `scope/timeout-v1` handlers, focused definition/handler tests, and minimal
   asset/handler registration exports.
@@ -858,7 +861,7 @@ cd packages/ax-taxonomy && pnpm test
 ```
 
 The engine command runs only generic neutral-fixture tests; the catalog command
-runs only focused agent-behavior definitions, deterministic handlers, prompt
+runs only focused Ax taxonomy definitions, deterministic handlers, prompt
 corpus contracts, and package-script tests. Neither command requires model
 credentials or scans the rest of the monorepo.
 

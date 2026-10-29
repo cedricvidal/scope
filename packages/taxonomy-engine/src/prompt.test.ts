@@ -45,6 +45,19 @@ describe("Taxonome Ax output contract", () => {
     expect(signature.description).toContain(
       "Assessment JSON property-name casing is significant.",
     );
+    expect(program.getOptimizableComponents()).toEqual([
+      expect.objectContaining({
+        key: "test-observation@prompt::instruction",
+        kind: "instruction",
+        current: taxonomy.elementById.get("test-observation")!.implementation
+          .type === "prompt"
+          ? taxonomy.elementById.get("test-observation")!.implementation.prompt
+          : "",
+      }),
+    ]);
+    expect(program.getOptimizableComponents()[0]?.current).not.toContain(
+      "Shared assessment schema",
+    );
     expect(YAML_OBSERVATION_CONTRACT).not.toContain("repair_context");
   });
 });

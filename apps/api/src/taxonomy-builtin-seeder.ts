@@ -15,12 +15,13 @@ const CATALOG_DIRECTORY = fileURLToPath(
   new URL("../../../packages/ax-taxonomy/taxonomy/", import.meta.url),
 );
 
-/** Idempotently seeds the canonical Default Taxonomy into one project. */
+/** Idempotently seeds the canonical built-in taxonomy into one project. */
 export async function ensureBuiltinTaxonomy(
   ctx: RouteContext,
   projectId: string,
+  catalogDirectory = CATALOG_DIRECTORY,
 ): Promise<void> {
-  const taxonomyPath = resolve(CATALOG_DIRECTORY, "taxonomy.yaml");
+  const taxonomyPath = resolve(catalogDirectory, "taxonomy.yaml");
   const taxonomy = PortableTaxonomySchema.parse(
     parseYaml(await readFile(taxonomyPath, "utf8")),
   );
@@ -67,8 +68,8 @@ export async function ensureBuiltinTaxonomy(
   const root = await ctx.taxonomyStore.create({
     projectId,
     id: taxonomy.id,
-    name: "Default Taxonomy",
-    description: "Canonical built-in Taxonome taxonomy",
+    name: taxonomy.id,
+    description: `${taxonomy.id} ${taxonomy.version}`,
     sourceType: "builtin",
     creator: "system",
   });

@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { createHandlerRegistry } from "./handlers.js";
 import {
-  OPTIMIZATION_ARTIFACT_VERSION,
+  OPTIMIZATION_MANIFEST_VERSION,
+  optimizationManifestSchema,
   promptContractHash,
-  restoreOptimizationArtifactV2,
   scoreOptimizationCandidate,
   semanticHash,
 } from "./optimization-v2.js";
@@ -28,22 +28,12 @@ async function neutralTaxonomy() {
   );
 }
 
-describe("generic v2 optimization compatibility", () => {
-  it("rejects historical artifacts instead of reinterpreting them", async () => {
-    const taxonomy = await neutralTaxonomy();
-    expect(() => restoreOptimizationArtifactV2(
-      { format: "taxonome.ax.v1" },
-      taxonomy,
-      "test-observation",
-      "gpt-4.1",
-    )).toThrow(/incompatible/);
-  });
-
-  it("requires the exact taxonomy, element, model, and prompt contract", async () => {
+describe("instruction-only optimization contract", () => {
+  it("publishes provenance without demos, examples, or trajectory bodies", async () => {
     const taxonomy = await neutralTaxonomy();
     const element = taxonomy.elementById.get("test-observation")!;
-    const artifact = {
-      format: OPTIMIZATION_ARTIFACT_VERSION,
+    const manifest = {
+      schema_version: OPTIMIZATION_MANIFEST_VERSION,
       taxonomy: {
         schema_version: taxonomy.schema_version,
         id: taxonomy.id,
@@ -58,58 +48,27 @@ describe("generic v2 optimization compatibility", () => {
       sdk_version: "1.0.1",
       train_ids: ["input-a"],
       validation_ids: ["input-b"],
-      settings: { maxMetricCalls: 4, seed: 42, bootstrap: true },
+      source_element_sha256: semanticHash(element),
+      optimized_element_sha256: semanticHash({ ...element, prompt: "better" }),
+      settings: { maxMetricCalls: 4, seed: 42, bootstrap: false },
       transport_settings: {
         reasoning_effort: "low",
         sampling: "sdk-managed",
         ax_sampling_hints_applied: false,
       },
-      optimized: {
-        bestScore: 1,
-        stats: {},
-        optimizerType: "GEPA",
-        optimizationTime: 1,
-        totalRounds: 1,
+      metrics: {
+        best_score: 1,
+        metric_calls: 2,
+        total_rounds: 1,
         converged: true,
-        demos: [{ evidence: "input-a" }],
+        optimization_time_ms: 10,
       },
       metric_trace: [],
     };
-
-    expect(restoreOptimizationArtifactV2(
-      artifact,
-      taxonomy,
-      element.id,
-      "gpt-4.1",
-    ).optimized).toMatchObject({
-      demos: [{ evidence: "input-a" }],
-    });
-    expect(() => restoreOptimizationArtifactV2(
-      artifact,
-      taxonomy,
-      element.id,
-      "gpt-4.1-mini",
-    )).toThrow(/mismatch/);
-    expect(() => restoreOptimizationArtifactV2(
-      { ...artifact, contract_hash: "tampered" },
-      taxonomy,
-      element.id,
-      "gpt-4.1",
-    )).toThrow(/mismatch/);
-    expect(() => restoreOptimizationArtifactV2(
-      {
-        ...artifact,
-        metric_trace: [{
-          input_id: "input-a",
-          score: 1,
-          errors: [],
-          prediction: {},
-        }],
-      },
-      taxonomy,
-      element.id,
-      "gpt-4.1",
-    )).toThrow(/rerun optimization explicitly/);
+    expect(optimizationManifestSchema.parse(manifest)).toEqual(manifest);
+    expect(JSON.stringify(manifest)).not.toContain("trajectory_context");
+    expect(JSON.stringify(manifest)).not.toContain('"demos"');
+    expect(JSON.stringify(manifest)).not.toContain('"examples"');
     expect(promptContractHash(
       taxonomy,
       {
@@ -124,7 +83,7 @@ describe("generic v2 optimization compatibility", () => {
           }],
         },
       },
-    )).not.toBe(artifact.contract_hash);
+    )).not.toBe(manifest.contract_hash);
     expect(promptContractHash(
       taxonomy,
       {
@@ -134,7 +93,7 @@ describe("generic v2 optimization compatibility", () => {
           requires_task: !element.preconditions.requires_task,
         },
       },
-    )).not.toBe(artifact.contract_hash);
+    )).not.toBe(manifest.contract_hash);
   });
 
   it("hard-scores wrong evidence references zero without repair or model calls", async () => {
@@ -225,7 +184,6 @@ describe("generic v2 optimization compatibility", () => {
     });
     const program = createTaxonomyPromptProgram(
       element,
-      undefined,
       {
         correctionRetries: 0,
         captureInvalidOutput: true,
