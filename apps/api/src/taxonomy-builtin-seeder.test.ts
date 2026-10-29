@@ -29,6 +29,7 @@ describe("ensureBuiltinTaxonomy", () => {
       }),
     };
     const taxonomyElementRevisionStore = {
+      getLatest: vi.fn(async () => null),
       create: vi.fn(async (_rootId: string, content: { id: string }) => ({
         revision: { ref: `${content.id}@r1` },
         deduplicated: false,

@@ -177,19 +177,6 @@ const ExperimentExecutionBaseSchema = z
               })
               .strict()
               .optional(),
-    taxonomyReadout: z
-              .object({
-                status: z.enum(["processing", "done", "failed"]),
-                claimToken: IdSchema.optional(),
-                experimentExecutionId: IdSchema,
-                taxonomyRevisionId: IdSchema,
-                jsonUrl: z.string().min(1).max(2_048).optional(),
-                markdownUrl: z.string().min(1).max(2_048).optional(),
-                updatedAt: z.coerce.date(),
-                error: ErrorSchema.optional(),
-              })
-              .strict()
-              .optional(),
             updatedAt: z.coerce.date(),
             error: ErrorSchema.optional(),
           })
@@ -205,6 +192,19 @@ const ExperimentExecutionBaseSchema = z
         reportId: IdSchema,
         url: z.string().min(1).max(2_048),
         updatedAt: z.coerce.date(),
+      })
+      .strict()
+      .optional(),
+    taxonomyReadout: z
+      .object({
+        status: z.enum(["processing", "done", "failed"]),
+        claimToken: IdSchema.optional(),
+        experimentExecutionId: IdSchema,
+        taxonomyRevisionId: IdSchema,
+        jsonUrl: z.string().min(1).max(2_048).optional(),
+        markdownUrl: z.string().min(1).max(2_048).optional(),
+        updatedAt: z.coerce.date(),
+        error: ErrorSchema.optional(),
       })
       .strict()
       .optional(),

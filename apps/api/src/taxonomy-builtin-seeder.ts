@@ -57,11 +57,19 @@ export async function ensureBuiltinTaxonomy(
         sourceType: "builtin",
         creator: "system",
       }));
-    const revision = await ctx.taxonomyElementRevisionStore.create(
-      root._id,
-      element,
-      "system",
-    );
+    const revision = existingElement
+      ? {
+          revision: await ctx.taxonomyElementRevisionStore.getLatest(root._id),
+          deduplicated: true,
+        }
+      : await ctx.taxonomyElementRevisionStore.create(
+          root._id,
+          element,
+          "system",
+        );
+    if (!revision.revision) {
+      throw new Error(`Built-in element '${element.id}' has no revision`);
+    }
     elementRefs.push({ ref: revision.revision.ref });
   }
 
