@@ -166,7 +166,7 @@ export class OptimizationDashboard {
     const lines = [
       this.style.title(header),
       this.style.label(
-        "STATUS     ELEMENT              TRN VAL TRIAL CAND CALL LAST BEST PAR DETAIL",
+        "STATUS     ELEMENT    TRN VAL TRIAL CAND CALL LAST BEST PAR DETAIL",
       ),
       ...this.rows.map(row => {
         const paddedStatus = row.status.padEnd(10);
@@ -180,7 +180,7 @@ export class OptimizationDashboard {
         const detail = row.stopReason
           ? `stop=${row.stopReason}`
           : row.detail;
-        return `${status} ${clip(row.id, 20).padEnd(20)} ` +
+        return `${status} ${clip(row.id, 10).padEnd(10)} ` +
           `${String(row.train).padStart(3)} ${String(row.validation).padStart(3)} ` +
           `${displayTrial(row.trial, row.totalTrials).padStart(5)} ` +
           `${displayNumber(row.candidateCount).padStart(4)} ` +
@@ -188,7 +188,7 @@ export class OptimizationDashboard {
           `${displayNumber(row.latestScore).padStart(4)} ` +
           `${displayNumber(row.bestScore).padStart(4)} ` +
           `${displayNumber(row.paretoFrontSize).padStart(3)} ` +
-          this.style.dim(clip(detail, 18));
+          this.style.dim(clip(detail, 14));
       }),
     ];
     for (const line of lines) {

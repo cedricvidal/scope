@@ -54,7 +54,7 @@ describe("OptimizationDashboard", () => {
 
     expect(text).toContain("\u001b[?25l");
     expect(text).toContain("\u001b[?25h");
-    expect(text).toContain("deterministic ele…");
+    expect(text).toContain("deterministic…");
     expect(text).toContain("stop=converged");
     expect(text).toContain("RUN 0  DONE 1  WAIT 0  FAIL 1  SKIP 1");
     expect(text).toContain("1/2");
@@ -63,7 +63,7 @@ describe("OptimizationDashboard", () => {
       line.includes("prompt-a") || line.includes("prompt-b")
     );
     expect(renderedRows.every(line =>
-      line.replaceAll(/\u001b\[[0-9;]*m/g, "").length <= 100
+      line.replaceAll(/\u001b\[[0-9;]*m/g, "").length <= 79
     )).toBe(true);
     expect(text.indexOf("prompt-a")).toBeLessThan(text.indexOf("prompt-b"));
     expect(text.match(/\u001b\[2K/g)?.length).toBeGreaterThan(3);
