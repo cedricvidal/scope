@@ -12,6 +12,7 @@ import { execSync } from 'node:child_process';
 import remarkGfm from 'remark-gfm';
 import remarkBasePath from './src/plugins/remark-base-path.mjs';
 import remarkHttpSnippets from './src/plugins/remark-http-snippets.mjs';
+import { taxonomeGuideNavigation } from './src/lib/taxonome-guide-navigation.mjs';
 
 // https://astro.build/config
 // `site` and `base` are driven by the GitHub Pages deployment URL in CI
@@ -128,11 +129,10 @@ export default defineConfig({
 								{ label: 'Submit through the API', slug: 'guides/submitting-requests-api' },
 								{ label: 'Create Experiments', slug: 'guides/creating-experiments' },
 								{ label: 'Migrate to Experiments', slug: 'guides/migrating-to-experiments' },
-								{ label: 'Using Taxonome', slug: 'guides/taxonome' },
-								{ label: 'Create your own taxonomy', slug: 'guides/create-taxonomy' },
 								{ label: 'Prioritize & pause', slug: 'guides/prioritizing-requests' },
 							],
 						},
+						taxonomeGuideNavigation,
 						{
 							label: 'Design your benchmark',
 							collapsed: true,

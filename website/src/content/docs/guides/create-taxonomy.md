@@ -1,6 +1,6 @@
 ---
 title: Create your own taxonomy
-description: Author prompt and deterministic elements, evaluate them, and optimize prompt instructions.
+description: Create a taxonomy with prompt and deterministic elements, reviewed evaluation data, and optimized prompt instructions.
 ---
 
 This workflow keeps the taxonomy manifest, element definitions, evaluation
@@ -97,6 +97,9 @@ ID. It is not a dataset split.
 - **Test** inputs are disjoint final unseen evaluation inputs.
 
 Avoid family and originating-run leakage between Train and Validation.
+Freeze the taxonomy, data, ground truth, optimizer settings, and seed before
+the final Test comparison. Rehearse with separate development-only inputs; do
+not tune instructions or labels from held-out Test outcomes.
 
 ## 5. Establish the baseline
 
@@ -124,6 +127,11 @@ taxonome optimize --taxonomy taxonomy.yaml \
 Repeat `--element` for several prompt elements. Omit it to optimize every
 prompt-backed element; deterministic elements are reported as skipped.
 Optimization consumes Train and Validation only and uses `bootstrap: false`.
+The interactive dashboard reports only Ax/GEPA signals that exist: active
+phase, trial and candidate counts, consumed metric calls, latest and best
+scores, Pareto frontier size, and the convergence or stop reason. There are no
+synthetic completion percentages. Multi-element runs also keep stable rows for
+running, completed, waiting, failed, and skipped elements.
 It writes:
 
 - `optimized/help-before-guessing.optimized.yaml`;
@@ -143,7 +151,9 @@ taxonome eval --taxonomy taxonomy.yaml \
 ```
 
 Compare baseline and optimized-element evaluation on the same final Test
-inputs. Do not infer improvement unless the measured results show it.
+inputs only after candidate selection is frozen. Do not infer improvement
+unless the measured results show it. `--element-override` leaves the authored
+taxonomy unchanged, which makes the comparison reviewable.
 
 ## 8. Promote in place
 
@@ -157,7 +167,8 @@ git diff -- elements/help-before-guessing.yaml
 
 In-place publication requires a writable local `{ path }` reference and writes
 all selected elements transactionally. Normal `run` and `eval` then use the
-promoted YAML without `--element-override`.
+promoted YAML without `--element-override`. Review the focused diff and reject
+metadata-only, formatting-only, or unrelated changes.
 
 Finish by generating a readout as described in [Using
 Taxonome](/guides/taxonome/#build-a-readout).
