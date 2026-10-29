@@ -105,13 +105,13 @@ call counter.
 Use deterministic elements to process a multi-run export without credentials:
 
 ```bash
-pnpm --silent taxonome run submission.tar.gz \
+taxonome run submission.tar.gz \
   --taxonomy packages/ax-taxonomy/taxonomy/taxonomy.yaml \
   --elements beh-discovered,beh-malformed-invocation,beh-timeout \
   --output-dir ./taxonome-results \
   --concurrency 4
 
-pnpm --silent taxonome readout "./taxonome-results/*.json" \
+taxonome readout "./taxonome-results/*.json" \
   --taxonomy packages/ax-taxonomy/taxonomy/taxonomy.yaml \
   --inputs submission.tar.gz \
   --markdown ./taxonome-results/readout.md

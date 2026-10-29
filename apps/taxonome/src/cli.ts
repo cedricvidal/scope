@@ -1840,9 +1840,27 @@ export function createCli(style: TaxonomeStyle = createTaxonomeStyle()): Command
                 elementId: element.id,
                 status: progress.phase === "complete" ? "DONE" : "OPTIMIZING",
                 metricCalls: progress.metricCalls,
+                ...(progress.trial === undefined
+                  ? {}
+                  : { trial: progress.trial }),
+                ...(progress.totalTrials === undefined
+                  ? {}
+                  : { totalTrials: progress.totalTrials }),
+                ...(progress.candidateCount === undefined
+                  ? {}
+                  : { candidateCount: progress.candidateCount }),
+                ...(progress.latestScore === undefined
+                  ? {}
+                  : { latestScore: progress.latestScore }),
                 ...(progress.bestScore === undefined
                   ? {}
                   : { bestScore: progress.bestScore }),
+                ...(progress.paretoFrontSize === undefined
+                  ? {}
+                  : { paretoFrontSize: progress.paretoFrontSize }),
+                ...(progress.stopReason === undefined
+                  ? {}
+                  : { stopReason: progress.stopReason }),
                 detail: progress.message,
               });
             },

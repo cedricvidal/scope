@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { optimize, type AxAIService } from "@ax-llm/ax";
+import {
+  optimize,
+  type AxAIService,
+} from "@ax-llm/ax";
 import { z } from "zod";
 import {
   ASSESSMENT_JSON_SCHEMA,
@@ -12,6 +15,7 @@ import {
 } from "./assessment.js";
 import { ATIF_INGESTION_POLICY_HASH } from "./atif/index.js";
 import { canonicalJsonSha256 } from "./canonical-json.js";
+import { redactErrorText } from "./errors.js";
 import { validateParsedAssessment } from "./evidence.js";
 import {
   assertObservation,
@@ -74,10 +78,13 @@ export const optimizationManifestSchema = z.object({
     metric_calls: z.number().int().nonnegative(),
     total_rounds: z.number().int().nonnegative(),
     converged: z.boolean(),
+    stop_reason: z.string().optional(),
+    pareto_front_size: z.number().int().nonnegative().optional(),
     optimization_time_ms: z.number().nonnegative(),
   }).strict(),
   metric_trace: z.array(z.object({
     input_id: z.string(),
+    split: z.enum(["train", "validation", "test"]).optional(),
     score: z.number(),
     errors: z.array(z.string()),
     diagnostics: z.array(validationDiagnosticSchema),
@@ -114,7 +121,14 @@ export interface OptimizationProgress {
     | "complete";
   elementId: string;
   metricCalls: number;
+  trial?: number;
+  totalTrials?: number;
+  candidateCount?: number;
+  candidateChanged?: boolean;
+  latestScore?: number;
   bestScore?: number;
+  paretoFrontSize?: number;
+  stopReason?: string;
   message: string;
 }
 
@@ -136,6 +150,249 @@ export interface OptimizationCandidateScore {
     constraints_valid: boolean;
     semantic_match: boolean;
   };
+}
+
+type JsonRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): JsonRecord | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as JsonRecord
+    : undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function nonnegativeInteger(value: unknown): number | undefined {
+  const parsed = finiteNumber(value);
+  return parsed !== undefined && Number.isInteger(parsed) && parsed >= 0
+    ? parsed
+    : undefined;
+}
+
+function optionalParetoFrontSize(value: JsonRecord): number | undefined {
+  return nonnegativeInteger(
+    value.paretoFrontSize ?? value.pareto_front_size,
+  );
+}
+
+/**
+ * Converts structured Ax optimizer logger events into bounded public progress.
+ * Signals absent from the Ax event are omitted instead of inferred.
+ */
+export class AxOptimizationProgressReporter {
+  private candidateCount: number | undefined;
+  private stopReason: string | undefined;
+
+  constructor(
+    private readonly elementId: string,
+    private readonly metricCalls: () => number,
+    private readonly emit: (progress: OptimizationProgress) => void,
+    private readonly componentKey?: string,
+    private readonly sourceInstruction?: string,
+  ) {}
+
+  handle(data: unknown): void {
+    const event = asRecord(data);
+    const name = typeof event?.name === "string" ? event.name : undefined;
+    const value = asRecord(event?.value);
+    if (!name || !value) return;
+
+    const common = {
+      elementId: this.elementId,
+      metricCalls: this.metricCalls(),
+    };
+    const paretoFrontSize = optionalParetoFrontSize(value);
+
+    switch (name) {
+      case "OptimizationStart": {
+        const optimizerType = typeof value.optimizerType === "string"
+          ? value.optimizerType
+          : "Ax";
+        this.emit({
+          phase: "optimizing",
+          ...common,
+          ...(paretoFrontSize === undefined ? {} : { paretoFrontSize }),
+          message: `${optimizerType} started`,
+        });
+        return;
+      }
+      case "ConfigurationProposal": {
+        const count = nonnegativeInteger(value.count);
+        if (count !== undefined) this.candidateCount = count;
+        const type = typeof value.type === "string" ? value.type : "candidate";
+        this.emit({
+          phase: "optimizing",
+          ...common,
+          ...(this.candidateCount === undefined
+            ? {}
+            : { candidateCount: this.candidateCount }),
+          ...(paretoFrontSize === undefined ? {} : { paretoFrontSize }),
+          message: `${type} proposal`,
+        });
+        return;
+      }
+      case "RoundProgress": {
+        const trial = nonnegativeInteger(value.round);
+        const totalTrials = nonnegativeInteger(value.totalRounds);
+        const latestScore = finiteNumber(value.currentScore);
+        const bestScore = finiteNumber(value.bestScore);
+        this.emit({
+          phase: "candidate",
+          ...common,
+          ...(trial === undefined ? {} : { trial }),
+          ...(totalTrials === undefined ? {} : { totalTrials }),
+          ...(this.candidateCount === undefined
+            ? {}
+            : { candidateCount: this.candidateCount }),
+          ...(latestScore === undefined ? {} : { latestScore }),
+          ...(bestScore === undefined ? {} : { bestScore }),
+          ...(paretoFrontSize === undefined ? {} : { paretoFrontSize }),
+          message: trial === undefined || totalTrials === undefined
+            ? "trial scored"
+            : `trial ${trial}/${totalTrials}`,
+        });
+        return;
+      }
+      case "BestConfigFound": {
+        const score = finiteNumber(value.score);
+        this.emit({
+          phase: "candidate",
+          ...common,
+          ...(this.candidateCount === undefined
+            ? {}
+            : { candidateCount: this.candidateCount }),
+          ...(score === undefined ? {} : {
+            latestScore: score,
+            bestScore: score,
+          }),
+          ...(paretoFrontSize === undefined ? {} : { paretoFrontSize }),
+          message: "best candidate updated",
+        });
+        return;
+      }
+      case "EarlyStopping": {
+        const reason = typeof value.reason === "string"
+          ? value.reason
+          : "early stop";
+        this.stopReason = reason;
+        const trial = nonnegativeInteger(value.round);
+        const latestScore = finiteNumber(value.finalScore);
+        this.emit({
+          phase: "optimizing",
+          ...common,
+          ...(trial === undefined ? {} : { trial }),
+          ...(latestScore === undefined ? {} : { latestScore }),
+          ...(paretoFrontSize === undefined ? {} : { paretoFrontSize }),
+          stopReason: reason,
+          message: reason,
+        });
+        return;
+      }
+      case "OptimizationComplete": {
+        const bestScore = finiteNumber(value.bestScore);
+        const stats = asRecord(value.stats);
+        const earlyStopping = asRecord(stats?.earlyStopping);
+        const stopReason = this.stopReason ??
+          (typeof earlyStopping?.reason === "string"
+            ? earlyStopping.reason
+            : undefined);
+        this.emit({
+          phase: "optimizing",
+          ...common,
+          ...(this.candidateCount === undefined
+            ? {}
+            : { candidateCount: this.candidateCount }),
+          ...(bestScore === undefined ? {} : { bestScore }),
+          ...(paretoFrontSize === undefined ? {} : { paretoFrontSize }),
+          ...(stopReason === undefined ? {} : { stopReason }),
+          message: "optimizer complete",
+        });
+      }
+    }
+  }
+
+  /** Surfaces bounded Ax optimizer notifications such as teacher-call failures. */
+  handleLogger(data: unknown): void {
+    const event = asRecord(data);
+    if (
+      event?.name !== "Notification" ||
+      typeof event.value !== "string"
+    ) {
+      return;
+    }
+    this.emit({
+      phase: "optimizing",
+      elementId: this.elementId,
+      metricCalls: this.metricCalls(),
+      message: redactErrorText(event.value),
+    });
+  }
+
+  /** Maps Ax's typed round callback into one public progress snapshot. */
+  handleRoundProgress(data: unknown): void {
+    const progress = asRecord(data);
+    if (!progress) return;
+    const trial = nonnegativeInteger(progress.round);
+    const totalTrials = nonnegativeInteger(progress.totalRounds);
+    const latestScore = finiteNumber(progress.currentScore);
+    const bestScore = finiteNumber(progress.bestScore);
+    const configuration = asRecord(progress.currentConfiguration);
+    const candidate = this.componentKey && configuration
+      ? configuration[this.componentKey]
+      : undefined;
+    const candidateChanged = typeof candidate === "string" &&
+      this.sourceInstruction !== undefined
+      ? candidate.trim() !== this.sourceInstruction.trim()
+      : undefined;
+    if (trial !== undefined) {
+      this.candidateCount = Math.max(this.candidateCount ?? 0, trial);
+    }
+    this.emit({
+      phase: "candidate",
+      elementId: this.elementId,
+      metricCalls: this.metricCalls(),
+      ...(trial === undefined ? {} : { trial }),
+      ...(totalTrials === undefined ? {} : { totalTrials }),
+      ...(latestScore === undefined ? {} : { latestScore }),
+      ...(bestScore === undefined ? {} : { bestScore }),
+      ...(this.candidateCount === undefined
+        ? {}
+        : { candidateCount: this.candidateCount }),
+      ...(candidateChanged === undefined ? {} : { candidateChanged }),
+      message: trial === undefined || totalTrials === undefined
+        ? "trial evaluated"
+        : `trial ${trial}/${totalTrials}` +
+          `${candidateChanged === undefined
+            ? ""
+            : candidateChanged ? "; candidate changed" : "; candidate unchanged"}`,
+    });
+  }
+
+  /** Records one real Ax proposal attempt without exposing instruction text. */
+  handleProposal(changed: boolean): void {
+    this.candidateCount = (this.candidateCount ?? 0) + 1;
+    this.emit({
+      phase: "optimizing",
+      elementId: this.elementId,
+      metricCalls: this.metricCalls(),
+      candidateCount: this.candidateCount,
+      candidateChanged: changed,
+      message: changed ? "candidate changed" : "candidate unchanged",
+    });
+  }
+}
+
+/** Converts measured candidate failures into bounded GEPA evaluator feedback. */
+export function optimizationFeedbackForCandidate(
+  scored: OptimizationCandidateScore,
+): string[] | undefined {
+  return scored.score === 1
+    ? undefined
+    : scored.errors.map(error => `Assessment mismatch: ${error}`);
 }
 
 /** Scores one raw Ax candidate with the same pure production validator. */
@@ -300,11 +557,69 @@ export async function optimizePromptElement(
     ]),
   );
   const trace: OptimizationManifest["metric_trace"] = [];
+  let optimizerProgress: AxOptimizationProgressReporter | undefined;
   const program = createTaxonomyPromptProgram(element, {
     correctionRetries: 0,
     captureInvalidOutput: true,
+    onOptimizationCandidate: candidate =>
+      optimizerProgress?.handleProposal(candidate.changed),
   });
-  let bestScore: number | undefined;
+  const scorePrediction = (
+    prediction: unknown,
+    example: unknown,
+  ): {
+    input: EvaluationInput;
+    scored: OptimizationCandidateScore;
+  } => {
+    const parsedExample = z.object({
+      trajectory_context: z.string(),
+    }).passthrough().parse(example);
+    const input = inputsByContext.get(parsedExample.trajectory_context);
+    if (!input) {
+      throw new Error("Optimizer attempted to score an unregistered input");
+    }
+    validateScopeAtif(input.atif, taxonomy, input.atif_provenance);
+    const parsedPrediction = z.object({
+      observation: z.unknown(),
+    }).passthrough().parse(prediction);
+    return {
+      input,
+      scored: scoreOptimizationCandidate(
+        parsedPrediction.observation,
+        input,
+        element,
+        groundTruth[input.id]![elementId]!,
+      ),
+    };
+  };
+  const recordScore = (
+    input: EvaluationInput,
+    scored: OptimizationCandidateScore,
+  ): number => {
+    trace.push({
+      input_id: input.id,
+      split: input.split,
+      score: scored.score,
+      errors: scored.errors,
+      diagnostics: scored.diagnostics,
+      dimensions: scored.dimensions,
+    });
+    onProgress?.({
+      phase: "candidate",
+      elementId,
+      metricCalls: trace.length,
+      latestScore: scored.score,
+      message: `scored ${input.id}`,
+    });
+    return scored.score;
+  };
+  optimizerProgress = new AxOptimizationProgressReporter(
+    elementId,
+    () => trace.length,
+    progress => onProgress?.(progress),
+    program.getOptimizableComponents()[0]?.key,
+    element.implementation.prompt,
+  );
   const optimized = await optimize(
     program,
     train.map(input => ({
@@ -312,39 +627,8 @@ export async function optimizePromptElement(
       observation: trainingObservation(input, groundTruth, elementId),
     })),
     ({ prediction, example }) => {
-      const parsedExample = z.object({
-        trajectory_context: z.string(),
-      }).passthrough().parse(example);
-      const input = inputsByContext.get(parsedExample.trajectory_context);
-      if (!input) {
-        throw new Error("Optimizer attempted to score an unregistered input");
-      }
-      validateScopeAtif(input.atif, taxonomy, input.atif_provenance);
-      const parsedPrediction = z.object({
-        observation: z.unknown(),
-      }).passthrough().parse(prediction);
-      const scored = scoreOptimizationCandidate(
-        parsedPrediction.observation,
-        input,
-        element,
-        groundTruth[input.id]![elementId]!,
-      );
-      trace.push({
-        input_id: input.id,
-        score: scored.score,
-        errors: scored.errors,
-        diagnostics: scored.diagnostics,
-        dimensions: scored.dimensions,
-      });
-      bestScore = Math.max(bestScore ?? scored.score, scored.score);
-      onProgress?.({
-        phase: "candidate",
-        elementId,
-        metricCalls: trace.length,
-        bestScore,
-        message: `scored ${input.id}`,
-      });
-      return scored.score;
+      const { input, scored } = scorePrediction(prediction, example);
+      return recordScore(input, scored);
     },
     {
       studentAI,
@@ -352,23 +636,28 @@ export async function optimizePromptElement(
       validationExamples: validation.map(input => ({
         trajectory_context: taxonomyPromptEvidence(inputFor(input)),
       })),
+      feedbackFn: ({
+        prediction,
+        example,
+      }: {
+        prediction: unknown;
+        example: unknown;
+      }) => {
+        const { scored } = scorePrediction(prediction, example);
+        return optimizationFeedbackForCandidate(scored);
+      },
       maxMetricCalls,
       maxIterations: 2,
       earlyStoppingPatience: 2,
+      minibatchSize: train.length,
       skipPerfectScore: false,
       bootstrap: false,
       seed: 42,
       verbose: false,
-      logger: () => {},
-      optimizerLogger: data => {
-        onProgress?.({
-          phase: "optimizing",
-          elementId,
-          metricCalls: trace.length,
-          bestScore,
-          message: typeof data === "string" ? data : "GEPA optimization",
-        });
-      },
+      logger: data => optimizerProgress.handleLogger(data),
+      optimizerLogger: data => optimizerProgress.handle(data),
+      onProgress: progress =>
+        optimizerProgress.handleRoundProgress(progress),
     },
   );
   if (!optimized.optimizedProgram) {
@@ -390,6 +679,12 @@ export async function optimizePromptElement(
     element,
     element.implementation.prompt,
   );
+  const optimizedRecord = asRecord(optimized);
+  const paretoFrontSize = optimizedRecord
+    ? optionalParetoFrontSize(optimizedRecord)
+    : undefined;
+  const stopReason = optimized.optimizedProgram.stats.earlyStopping?.reason ??
+    (optimized.optimizedProgram.converged ? "converged" : "completed");
   const manifest: OptimizationManifest = {
     schema_version: OPTIMIZATION_MANIFEST_VERSION,
     taxonomy: {
@@ -428,6 +723,10 @@ export async function optimizePromptElement(
       metric_calls: trace.length,
       total_rounds: optimized.optimizedProgram.totalRounds,
       converged: optimized.optimizedProgram.converged,
+      stop_reason: stopReason,
+      ...(paretoFrontSize === undefined ? {} : {
+        pareto_front_size: paretoFrontSize,
+      }),
       optimization_time_ms: optimized.optimizedProgram.optimizationTime,
     },
     metric_trace: trace,
@@ -436,7 +735,15 @@ export async function optimizePromptElement(
     phase: "complete",
     elementId,
     metricCalls: trace.length,
+    trial: manifest.metrics.total_rounds,
+    totalTrials: manifest.metrics.total_rounds,
     bestScore: manifest.metrics.best_score,
+    ...(manifest.metrics.pareto_front_size === undefined ? {} : {
+      paretoFrontSize: manifest.metrics.pareto_front_size,
+    }),
+    ...(manifest.metrics.stop_reason === undefined ? {} : {
+      stopReason: manifest.metrics.stop_reason,
+    }),
     message: "optimized YAML ready",
   });
   return { element: optimizedElement, manifest };

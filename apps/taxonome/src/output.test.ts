@@ -152,6 +152,7 @@ describe("Taxonome human output", () => {
         metric_calls: 3,
         total_rounds: 2,
         converged: true,
+        stop_reason: "converged",
       },
       yaml_path: "optimized/beh-skipped-invocation.optimized.yaml",
       manifest_path:
@@ -159,6 +160,7 @@ describe("Taxonome human output", () => {
     }]);
 
     expect(output).toContain("metric calls: 3/12");
+    expect(output).toContain("Stop: converged");
     expect(output).toContain("Bootstrap: disabled");
     expect(output).toContain("beh-skipped-invocation.optimized.yaml");
     expect(output).toContain("No before/after accuracy gain is inferred");

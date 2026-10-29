@@ -48,6 +48,10 @@ export interface TaxonomyPromptProgramOptions {
   assertion?: (observation: unknown) => boolean | string | undefined;
   /** Return an invalid parsed candidate for optimizer scoring, not runtime. */
   captureInvalidOutput?: boolean;
+  /** Observes actual GEPA instruction proposals without exposing their text. */
+  onOptimizationCandidate?: (candidate: {
+    changed: boolean;
+  }) => void;
 }
 
 function assessmentPropertyNames(): string[] {
@@ -142,6 +146,9 @@ class TaxonomyPromptProgram
     private readonly fixedDescription: string,
     private readonly outputContract: unknown,
     private readonly preconditions: unknown,
+    private readonly onOptimizationCandidate?: (candidate: {
+      changed: boolean;
+    }) => void,
   ) {
     super(signature, options);
   }
@@ -152,10 +159,17 @@ class TaxonomyPromptProgram
       key: `${this.getId()}::instruction`,
       kind: "instruction",
       current: this.instruction,
-      description: "Taxonome element instruction text",
+      description: this.fixedDescription,
       constraints:
         "Preserve the detector purpose. Do not add schemas, examples, demonstrations, or trusted-wrapper instructions.",
       traceId: this.getId(),
+      validate: candidate => {
+        const changed = candidate.trim() !== this.instruction.trim();
+        this.onOptimizationCandidate?.({ changed });
+        return changed
+          ? true
+          : "Propose a materially different instruction for evaluation.";
+      },
     }];
   }
 
@@ -273,6 +287,7 @@ export function createTaxonomyPromptProgram(
     fixedDescription,
     element.output,
     element.preconditions,
+    options.onOptimizationCandidate,
   );
   if (options.assertion) {
     program.addAssert(

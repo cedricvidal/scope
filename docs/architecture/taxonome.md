@@ -210,7 +210,7 @@ pnpm install --frozen-lockfile
 pnpm --filter taxonomy-engine build
 pnpm --filter ax-taxonomy build
 pnpm --filter taxonome build
-pnpm --silent taxonome run \
+taxonome run \
   packages/ax-taxonomy/fixtures/timeout.atif.json \
   --taxonomy packages/ax-taxonomy/taxonomy/taxonomy.yaml \
   --elements beh-timeout
@@ -222,7 +222,8 @@ taxonomy discovery. The exact authored schema identifier is
 archive content by gzip bytes, not filename. An archive can contain one run
 root or an ordered collection of run roots.
 
-Use `pnpm --silent taxonome ...` for repository development and demos.
+Use direct `taxonome ...` commands for repository development and demos after
+placing the built binary or wrapper on `PATH`.
 `run`, `eval`, and `optimize` write concise human-readable stdout by default,
 including when redirected. Pass `--json` for their complete machine-readable
 JSON shapes; this output is never styled. `readout` retains its existing JSON
@@ -492,8 +493,9 @@ the TypeScript handler directly and makes no SDK calls.
 The same example also contains a custom prompt element and a small disjoint
 train/validation/test packet. From the example directory, a real
 `taxonome` executable can run the prompt, evaluate fixed test ground truth,
-perform one bounded Ax optimization, save the complete v2 artifact, and
-re-evaluate through normal artifact restore. The current neutral-control inputs
+perform one bounded Ax optimization, write complete optimized element YAML plus
+a provenance-only manifest, and re-evaluate with `--element-override`. The
+current neutral-control inputs
 use opaque model-visible session/run/scenario/profile identities, distinct
 families and originating runs, separate ground truth, and no element ID or
 label in trajectory text. A regression serializes each input with the
@@ -504,10 +506,9 @@ Current user-facing paths name the subject and role explicitly:
 `datasets/repeated-request/trajectory-inputs.jsonl`,
 `datasets/repeated-request/ground-truth.json`,
 `inputs/repeated-request/example-run.atif.json`,
-`results/repeated-request/test/original-prompt-results.json`,
-`artifacts/repeated-request/optimized-prompt.ax.json`, and
-`results/repeated-request/test/optimized-prompt-results.json`. Historical
-evidence files retain their original names and hashes.
+`optimized/acme-repeated-request.optimized.yaml`, and
+`optimized/acme-repeated-request.optimization.manifest.json`. Historical
+evidence/result files retain their original names and hashes.
 
 The first 11-call YAML prompt demo under `evidence/yaml-prompt-demo/` is retained
 as historical execution evidence but is **ID-confounded**: its model-visible
@@ -710,6 +711,16 @@ a serialized runtime program. Ax GEPA runs with `bootstrap: false`; Train
 inputs drive instruction proposals and Validation inputs drive scoring and
 selection. Final unseen Test evaluation is a separate `eval --split test`.
 `maxMetricCalls` is per element, not a cumulative SDK budget.
+GEPA minibatches are capped to the eligible Train row count so small corpora do
+not spend the entire bounded metric budget by padding a parent minibatch before
+the first proposal can be evaluated.
+Interactive optimization progress maps structured Ax events and measured
+candidate evaluations into stable per-element rows. It reports aggregate
+running/completed/waiting/failed/skipped counts and, only when Ax exposes them,
+trial/candidate numbers, consumed metric calls, latest/best scores, Pareto
+frontier size, and convergence or stop reason. It never fabricates percentages
+or infers missing optimizer state. Non-TTY progress is append-only and
+ANSI-free; `NO_COLOR` disables styling and `--json` suppresses the dashboard.
 
 Plain ATIF and a single archive root preserve the existing final human/JSON
 stdout contract while using the same run-centric stderr dashboard and
@@ -731,7 +742,7 @@ Taxonome deliberately does not discover files. Standard tools select literal
 local paths, then `run --files-from` executes them through one global batch:
 
 ```bash
-pnpm --silent taxonome run --files-from trajectories.txt \
+taxonome run --files-from trajectories.txt \
   --taxonomy packages/ax-taxonomy/taxonomy/taxonomy.yaml \
   --output-dir ./taxonome-results \
   --elements beh-discovered,beh-malformed-invocation,beh-timeout
@@ -741,7 +752,7 @@ pnpm --silent taxonome run --files-from trajectories.txt \
 profile='VSCode_with_GitHub_Copilot_Chat_Claude_Sonnet_46_anti-hallucination_skill_context7_MCP_no_extra_instructions'
 find docs/ax-playbook/assets -type f \
   -path "*/$profile/*/trajectory.json" -print0 |
-  pnpm --silent taxonome run --files-from - --null \
+  taxonome run --files-from - --null \
     --taxonomy packages/ax-taxonomy/taxonomy/taxonomy.yaml \
     --output-dir ./taxonome-results \
     --concurrency 4 \

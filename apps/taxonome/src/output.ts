@@ -51,6 +51,8 @@ export interface OptimizationHumanResult {
     metric_calls: number;
     total_rounds: number;
     converged: boolean;
+    stop_reason?: string;
+    pareto_front_size?: number;
   };
   yaml_path: string;
   manifest_path: string;
@@ -266,6 +268,10 @@ export function renderOptimizeHuman(
       `  Train: ${result.train_ids.length}; Validation: ${result.validation_ids.length}`,
       `  Best score: ${result.metrics.best_score}; metric calls: ${result.metrics.metric_calls}/${result.settings.maxMetricCalls}`,
       `  Rounds: ${result.metrics.total_rounds}; converged: ${result.metrics.converged}`,
+      `  Stop: ${result.metrics.stop_reason ?? "not reported"}` +
+        `${result.metrics.pareto_front_size === undefined
+          ? ""
+          : `; Pareto frontier: ${result.metrics.pareto_front_size}`}`,
       `  YAML: ${result.yaml_path}`,
       `  Manifest: ${result.manifest_path}`,
     ]),

@@ -9,9 +9,28 @@ type ElementState = {
   train: number;
   validation: number;
   metricCalls: number;
+  trial?: number;
+  totalTrials?: number;
+  candidateCount?: number;
+  latestScore?: number;
   bestScore?: number;
+  paretoFrontSize?: number;
+  stopReason?: string;
   detail: string;
 };
+
+function displayNumber(value: number | undefined): string {
+  if (value === undefined) return "-";
+  return Number.isInteger(value) ? String(value) : value.toFixed(3);
+}
+
+function displayTrial(
+  trial: number | undefined,
+  totalTrials: number | undefined,
+): string {
+  if (trial === undefined) return "-";
+  return totalTrials === undefined ? String(trial) : `${trial}/${totalTrials}`;
+}
 
 /** Truthful stable-row progress for multi-element optimization. */
 export class OptimizationDashboard {
@@ -64,7 +83,13 @@ export class OptimizationDashboard {
     train?: number;
     validation?: number;
     metricCalls?: number;
+    trial?: number;
+    totalTrials?: number;
+    candidateCount?: number;
+    latestScore?: number;
     bestScore?: number;
+    paretoFrontSize?: number;
+    stopReason?: string;
     detail: string;
   }): void {
     const row = this.rows.find(candidate => candidate.id === input.elementId);
@@ -74,7 +99,23 @@ export class OptimizationDashboard {
       ...(input.train !== undefined ? { train: input.train } : {}),
       ...(input.validation !== undefined ? { validation: input.validation } : {}),
       ...(input.metricCalls !== undefined ? { metricCalls: input.metricCalls } : {}),
+      ...(input.trial !== undefined ? { trial: input.trial } : {}),
+      ...(input.totalTrials !== undefined
+        ? { totalTrials: input.totalTrials }
+        : {}),
+      ...(input.candidateCount !== undefined
+        ? { candidateCount: input.candidateCount }
+        : {}),
+      ...(input.latestScore !== undefined
+        ? { latestScore: input.latestScore }
+        : {}),
       ...(input.bestScore !== undefined ? { bestScore: input.bestScore } : {}),
+      ...(input.paretoFrontSize !== undefined
+        ? { paretoFrontSize: input.paretoFrontSize }
+        : {}),
+      ...(input.stopReason !== undefined
+        ? { stopReason: input.stopReason }
+        : {}),
       detail: input.detail,
     });
     if (this.silent) return;
@@ -82,7 +123,12 @@ export class OptimizationDashboard {
     else {
       this.stream.write(
         `${input.status} ${input.elementId} train=${row.train} validation=${row.validation} calls=${row.metricCalls}` +
-        `${row.bestScore === undefined ? "" : ` best=${row.bestScore}`} ${input.detail}\n`,
+        `${row.trial === undefined ? "" : ` trial=${displayTrial(row.trial, row.totalTrials)}`}` +
+        `${row.candidateCount === undefined ? "" : ` candidates=${row.candidateCount}`}` +
+        `${row.latestScore === undefined ? "" : ` latest=${displayNumber(row.latestScore)}`}` +
+        `${row.bestScore === undefined ? "" : ` best=${displayNumber(row.bestScore)}`}` +
+        `${row.paretoFrontSize === undefined ? "" : ` pareto=${row.paretoFrontSize}`}` +
+        `${row.stopReason === undefined ? "" : ` stop=${row.stopReason}`} ${input.detail}\n`,
       );
     }
   }
@@ -104,10 +150,18 @@ export class OptimizationDashboard {
     const complete = this.rows.filter(row => row.status === "DONE").length;
     const failed = this.rows.filter(row => row.status === "FAILED").length;
     const skipped = this.rows.filter(row => row.status === "SKIPPED").length;
-    const header = `Taxonome optimize  DONE ${complete}  FAIL ${failed}  SKIP ${skipped}`;
+    const waiting = this.rows.filter(row => row.status === "WAIT").length;
+    const running = this.rows.filter(row =>
+      row.status === "PREFLIGHT" || row.status === "OPTIMIZING"
+    ).length;
+    const header =
+      `Taxonome optimize  RUN ${running}  DONE ${complete}  WAIT ${waiting}` +
+      `  FAIL ${failed}  SKIP ${skipped}`;
     const lines = [
       this.style.title(header),
-      this.style.label("STATUS      ELEMENT                         TRAIN VALID CALLS BEST DETAIL"),
+      this.style.label(
+        "STATUS      ELEMENT                   TRAIN VALID TRIAL CAND CALLS LATEST BEST PARETO DETAIL",
+      ),
       ...this.rows.map(row => {
         const status = row.status === "DONE"
           ? this.style.pass(row.status)
@@ -116,7 +170,18 @@ export class OptimizationDashboard {
             : row.status === "SKIPPED"
               ? this.style.warning(row.status)
               : this.style.prompt(row.status);
-        return `${status.padEnd(19)} ${row.id.padEnd(31)} ${String(row.train).padStart(5)} ${String(row.validation).padStart(5)} ${String(row.metricCalls).padStart(5)} ${(row.bestScore ?? "-").toString().padStart(4)} ${this.style.dim(row.detail)}`;
+        const detail = row.stopReason
+          ? `${row.detail}; stop=${row.stopReason}`
+          : row.detail;
+        return `${status.padEnd(19)} ${row.id.padEnd(25)} ` +
+          `${String(row.train).padStart(5)} ${String(row.validation).padStart(5)} ` +
+          `${displayTrial(row.trial, row.totalTrials).padStart(5)} ` +
+          `${displayNumber(row.candidateCount).padStart(4)} ` +
+          `${String(row.metricCalls).padStart(5)} ` +
+          `${displayNumber(row.latestScore).padStart(6)} ` +
+          `${displayNumber(row.bestScore).padStart(4)} ` +
+          `${displayNumber(row.paretoFrontSize).padStart(6)} ` +
+          this.style.dim(detail);
       }),
     ];
     for (const line of lines) {
