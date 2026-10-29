@@ -35,6 +35,10 @@ import {
   ExperimentLifecycleCoordinator,
   ExperimentLifecycleError,
 } from "../experiment-lifecycle.js";
+import {
+  requestedAgentCapabilities,
+  validateAgentTarget,
+} from "../utils/agent-helpers.js";
 
 const CursorSchema = z.string().min(1).optional();
 const PageQuerySchema = ProjectIdQuerySchema.extend({
@@ -52,6 +56,7 @@ const ExperimentRequestInputSchema = CreateRequestInputSchema.omit({
   profileVariations: true,
 }).extend({
   workerType: z.string().trim().min(1),
+  agentVersion: z.string().trim().min(1).optional(),
 });
 
 const CreateExperimentInputSchema = z
@@ -937,6 +942,7 @@ function createRequestDocument(input: {
       ? { codebaseRevisionId: body.codebaseRevisionId }
       : {}),
     ...(body.extensions ? { extensions: body.extensions } : {}),
+    ...(body.agentVersion ? { agentVersion: body.agentVersion } : {}),
     ...(body.profileId ? { profileId: body.profileId } : {}),
     ...(body.gates ? { gates: body.gates } : {}),
     ...(body.observations ? { observations: body.observations } : {}),
@@ -1024,6 +1030,51 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
         });
         return;
       }
+      const targetCache = new Map<
+        string,
+        ReturnType<typeof validateAgentTarget>
+      >();
+      const resolvedRequests: Array<
+        z.infer<typeof ExperimentRequestInputSchema>
+      > = [];
+      for (const body of req.body.requests) {
+        const capabilities = requestedAgentCapabilities({
+          reasoningEffort: body.reasoningEffort,
+          mcpServers: body.mcpServers,
+          skillRevisions: body.skillRevisions,
+          extensions: body.extensions,
+          resources: body.resources,
+        });
+        const targetKey = JSON.stringify({
+          workerType: body.workerType,
+          agentVersion: body.agentVersion,
+          model: body.model,
+          capabilities,
+        });
+        let targetPromise = targetCache.get(targetKey);
+        if (!targetPromise) {
+          targetPromise = validateAgentTarget(ctx.agentCollection, {
+            workerType: body.workerType,
+            requestedVersion: body.agentVersion,
+            model: body.model,
+            requirements: capabilities,
+            strictCapabilities: ctx.strictAgentCapabilities,
+            subjectPlural: "Experiment requests",
+          });
+          targetCache.set(targetKey, targetPromise);
+        }
+        const target = await targetPromise;
+        if (!target.ok) {
+          const { ok: _ok, status, ...payload } = target;
+          res.status(status).json(payload);
+          return;
+        }
+        resolvedRequests.push({
+          ...body,
+          agentVersion: target.agentVersion,
+          ...(target.model ? { model: target.model } : {}),
+        });
+      }
       const experimentId = uuidv4();
       const experimentExecutionId = uuidv4();
       const experimentRevisionId = uuidv4();
@@ -1053,12 +1104,12 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
         }
         return;
       }
-      const identities = req.body.requests.map(() => ({
+      const identities = resolvedRequests.map(() => ({
         requestId: uuidv4(),
         runId: uuidv4(),
       }));
       const requestDocs = await Promise.all(
-        req.body.requests.map(async (body, index) => {
+        resolvedRequests.map(async (body, index) => {
           const identity = identities[index]!;
           const taskPrompt = await ctx.taskPromptStore.findOrCreate(
             projectId,
@@ -1067,7 +1118,7 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
           return createRequestDocument({
             ...identity,
             experimentId,
-            expectedCount: req.body.requests.length,
+            expectedCount: resolvedRequests.length,
             index,
             projectId,
             body,
@@ -1104,7 +1155,7 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
           reportTemplateIds,
           definitionFingerprint: fingerprintExperimentPayload({
             metadata,
-            requests: req.body.requests,
+            requests: resolvedRequests,
             reportTemplateIds,
             taxonomy,
           }),

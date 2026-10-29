@@ -51,6 +51,7 @@ export class RequestScheduler {
   private readonly invalidTargetReportIntervalMs: number;
   private queuedCountsByTarget = new Map<string, number>();
   private lastQueueReconciliationAt: number | undefined;
+  private lastMissingVersionReconciliationAt: number | undefined;
   private invalidTargetSignature = "";
   private lastInvalidTargetReportAt = 0;
   private conflictingTargetKeys = new Set<string>();
@@ -96,6 +97,7 @@ export class RequestScheduler {
     try {
       const agents = await this.agentCollection.find({}).toArray();
       const queueTargets = this.buildQueueTargets(agents);
+      await this.reconcileMissingPendingVersions(queueTargets);
       const queuedCountsByTarget =
         await this.maybeReconcileQueuedTargets(queueTargets);
 
@@ -373,6 +375,91 @@ export class RequestScheduler {
     this.queuedCountsByTarget = counts;
     this.lastQueueReconciliationAt = now;
     return counts;
+  }
+
+  /**
+   * Repairs legacy pending requests that omitted an agent version only when
+   * the worker has one unambiguous active target. The compare-and-set filter
+   * preserves exact run identity and makes every scheduler cycle idempotent.
+   */
+  private async reconcileMissingPendingVersions(
+    queueTargets: QueueTarget[],
+  ): Promise<number> {
+    const nowMs = Date.now();
+    if (
+      this.lastMissingVersionReconciliationAt !== undefined &&
+      nowMs - this.lastMissingVersionReconciliationAt <
+        this.queueReconciliationIntervalMs
+    ) {
+      return 0;
+    }
+    this.lastMissingVersionReconciliationAt = nowMs;
+
+    const targetsByWorker = new Map<string, RegistryTarget[]>();
+    for (const target of queueTargets.flatMap(({ targets }) => targets)) {
+      const current = targetsByWorker.get(target.workerType) ?? [];
+      current.push(target);
+      targetsByWorker.set(target.workerType, current);
+    }
+
+    const missingGroups = await this.requestCollection
+      .aggregate<{ _id: { workerType?: string }; count: number }>([
+        {
+          $match: {
+            "run.status": "pending",
+            agentVersion: { $exists: false },
+            deletedAt: { $exists: false },
+          },
+        },
+        {
+          $group: {
+            _id: { workerType: "$workerType" },
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray();
+
+    let repaired = 0;
+    for (const group of missingGroups) {
+      const workerType = group._id.workerType;
+      if (!workerType) continue;
+      const targets = targetsByWorker.get(workerType) ?? [];
+      if (targets.length !== 1) continue;
+      const target = targets[0]!;
+      const now = new Date();
+      const result = await this.requestCollection.updateMany(
+        {
+          workerType,
+          agentVersion: { $exists: false },
+          "run.status": "pending",
+          deletedAt: { $exists: false },
+        } as never,
+        {
+          $set: {
+            agentVersion: target.agentVersion,
+            updatedAt: now,
+            "run.updatedAt": now,
+          },
+        } as never,
+      );
+      if (result.modifiedCount === 0) continue;
+      repaired += result.modifiedCount;
+      console.warn(
+        `[Scheduler] Repaired ${result.modifiedCount} pending request(s) with ` +
+          `the sole active version worker=${workerType}, ` +
+          `version=${target.agentVersion}`,
+      );
+      trackEvent({
+        name: "scheduler.missing_agent_version_reconciled",
+        properties: {
+          workerType,
+          agentVersion: target.agentVersion,
+          requestCount: String(result.modifiedCount),
+        },
+      });
+    }
+    return repaired;
   }
 
   private async dispatchForQueue(

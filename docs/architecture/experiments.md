@@ -331,6 +331,15 @@ through shared `ExperimentStore` compare-and-swap primitives. Storage layout,
 routing, fingerprinting, and state transitions remain reusable typed modules
 under `packages/shared/src/experiments`; they do not own workflow policy.
 
+Composed Experiment creation resolves every request against the live agent
+registry before publication and persists the exact active `agentVersion`.
+Repeated count/profile targets share validation work but retain distinct
+request and run IDs. As a recovery boundary for legacy interrupted writes, the
+scheduler may fill a missing version only when that worker has exactly one
+unambiguous active queue target. The compare-and-set repair leaves the run
+`pending`; normal queue claiming then dispatches it exactly as any other
+request. Ambiguous or unavailable targets remain pending with diagnostics.
+
 ## Public API
 
 All routes require `?projectId=`:

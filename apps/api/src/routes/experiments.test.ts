@@ -334,6 +334,26 @@ describe("Experiment API contract", () => {
       experimentChunksCollection: {},
       requestCollection: { insertMany, updateMany, find },
       runsCollection: { find: vi.fn() },
+      agentCollection: {
+        findOne: vi.fn().mockResolvedValue({
+          _id: "coder",
+          name: "Coder",
+          available: true,
+          supportedModels: [],
+          versions: [{
+            agentVersion: "coder-v1",
+            workerVersion: "coder-v1-build",
+            components: {},
+            gitCommit: "abcdef0",
+            buildTime: "20261029T000000Z",
+            imageTag: "coder-v1-build",
+            queueName: "queue-coder",
+            status: "active",
+            createdAt: new Date(),
+          }],
+          createdAt: new Date(),
+        }),
+      },
       taskPromptStore: {
         findOrCreate: vi.fn().mockResolvedValue({ _id: "prompt-1" }),
       },
@@ -366,6 +386,7 @@ describe("Experiment API contract", () => {
       experimentExpectedRequestCount: 1,
       experimentRequestIndex: 0,
       experimentInitialRunId: expect.any(String),
+      agentVersion: "coder-v1",
       run: {
         _id: expect.any(String),
         status: "pending",
@@ -378,6 +399,102 @@ describe("Experiment API contract", () => {
       }),
       { $set: { experimentFinalizedAt: expect.any(Date) } },
     );
+  });
+
+  it("resolves and persists every mixed-model profile target before publication", async () => {
+    const experimentCollection = emptyExperimentCollection();
+    let insertedDocuments: RequestDocument[] = [];
+    const insertMany = vi.fn(async (documents: RequestDocument[]) => {
+      insertedDocuments = structuredClone(documents);
+      return {
+        acknowledged: true,
+        insertedCount: documents.length,
+      };
+    });
+    const find = vi.fn(() => ({
+      toArray: vi.fn(async () => structuredClone(insertedDocuments)),
+    }));
+    const findAgent = vi.fn().mockResolvedValue({
+      _id: "coder-acp-copilot",
+      name: "GitHub Copilot CLI",
+      available: true,
+      supportedModels: ["claude-haiku-4.5", "gpt-5.6-sol-fast"],
+      versions: [{
+        agentVersion: "copilot-dev",
+        workerVersion: "copilot-dev-build",
+        components: {},
+        gitCommit: "abcdef0",
+        buildTime: "20261029T000000Z",
+        imageTag: "copilot-dev-build",
+        queueName: "queue-coder-acp-copilot",
+        status: "active",
+        createdAt: new Date(),
+      }],
+      createdAt: new Date(),
+    });
+    const requests = Array.from({ length: 6 }, (_, index) => ({
+      scenario: { task: "Build it", criteria: ["works"] },
+      workerType: "coder-acp-copilot",
+      model:
+        index < 3 ? "claude-haiku-4.5" : "gpt-5.6-sol-fast",
+      profileId: index < 3 ? "profile-a@1" : "profile-b@2",
+    }));
+    const { app } = harness({
+      experimentCollection,
+      experimentExecutionsCollection: {},
+      experimentChunksCollection: {},
+      requestCollection: {
+        insertMany,
+        updateMany: vi.fn().mockResolvedValue({
+          acknowledged: true,
+          matchedCount: requests.length,
+          modifiedCount: requests.length,
+        }),
+        find,
+      },
+      runsCollection: { find: vi.fn() },
+      agentCollection: { findOne: findAgent },
+      taskPromptStore: {
+        findOrCreate: vi.fn().mockResolvedValue({ _id: "prompt-1" }),
+      },
+      blobStorage: {
+        getLogsBlobUrl: vi.fn(
+          (path: string) => `https://storage.invalid/${path}`,
+        ),
+      },
+    } as unknown as Partial<RouteContext>);
+
+    const response = await request(app)
+      .post("/api/v1/experiments?projectId=project-1")
+      .send({
+        mode: "compose",
+        metadata: { name: "Mixed targets" },
+        requests,
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.requestIds).toHaveLength(6);
+    expect(insertedDocuments).toHaveLength(6);
+    expect(insertedDocuments.map((document) => document.agentVersion)).toEqual(
+      Array(6).fill("copilot-dev"),
+    );
+    expect(insertedDocuments.map((document) => document.model)).toEqual([
+      "claude-haiku-4.5",
+      "claude-haiku-4.5",
+      "claude-haiku-4.5",
+      "gpt-5.6-sol-fast",
+      "gpt-5.6-sol-fast",
+      "gpt-5.6-sol-fast",
+    ]);
+    expect(insertedDocuments.map((document) => document.profileId)).toEqual([
+      "profile-a@1",
+      "profile-a@1",
+      "profile-a@1",
+      "profile-b@2",
+      "profile-b@2",
+      "profile-b@2",
+    ]);
+    expect(findAgent).toHaveBeenCalledTimes(2);
   });
 
   it("publishes only the canonical routes and public execution fields", () => {
