@@ -89,6 +89,23 @@ The API is the source of truth for taxonomy roots, revisions, copy, YAML
 import/export, elements, exact-run artifacts, and typed readouts. Portal and
 CLI clients use those routes and add no client-only capabilities.
 
+`GET /api/v1/taxonomies?projectId=...` returns scan-ready rows enriched from
+the latest revision in one bulk read: exact ref, portable semantic version,
+element count, source/read-only state, and root metadata. The project-scoped
+`GET /api/v1/taxonomies/:taxonomyId/detail?projectId=...&revisionId=...`
+returns the root, selected exact taxonomy revision, bounded revision summaries,
+and the selected revision's element refs resolved in authored order to exact
+element root/revision pairs. Resolution uses bulk `$in` reads and never expands
+the unrelated project element catalog.
+
+The Portal uses the shared list/table primitives for taxonomy discovery and a
+dedicated detail route for history and exact ordered elements. Prompt editing
+is available only for user-owned prompt elements on the latest active taxonomy
+revision; one edit appends an element revision and then a taxonomy revision
+that pins the new exact element ref. Built-in, deterministic, deleted, and
+historical rows remain read-only. `scope taxonomy show` consumes the same detail
+projection, including optional historical revision selection.
+
 ### Standalone foundation extraction
 
 The foundation carries the complete Taxonome-owned feature delta from

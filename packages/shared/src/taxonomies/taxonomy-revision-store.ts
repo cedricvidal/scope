@@ -60,6 +60,26 @@ export class TaxonomyRevisionStore<
     return this.collection.findOne({ projectId, ref } as never) as Promise<TRevision | null>;
   }
 
+  async getMany(ids: readonly string[]): Promise<TRevision[]> {
+    if (ids.length === 0) return [];
+    return this.collection
+      .find({ _id: { $in: [...new Set(ids)] } } as never)
+      .toArray() as Promise<TRevision[]>;
+  }
+
+  async getByRefs(
+    projectId: string,
+    refs: readonly string[],
+  ): Promise<TRevision[]> {
+    if (refs.length === 0) return [];
+    return this.collection
+      .find({
+        projectId,
+        ref: { $in: [...new Set(refs)] },
+      } as never)
+      .toArray() as Promise<TRevision[]>;
+  }
+
   async getLatest(rootId: string): Promise<TRevision | null> {
     return this.collection
       .find({ [this.rootKey]: rootId } as never)

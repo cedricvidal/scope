@@ -99,3 +99,34 @@ export interface TaxonomyElementRevisionDocument
   creator?: string;
   createdAt: Date;
 }
+
+export interface TaxonomyListItem extends TaxonomyDocument {
+  ref: string;
+  version: string;
+  elementCount: number;
+}
+
+export interface TaxonomyRevisionSummary {
+  _id: string;
+  revision: number;
+  ref: string;
+  version: string;
+  elementCount: number;
+  contentSha256: string;
+  creator?: string;
+  createdAt: Date;
+  isLatest: boolean;
+}
+
+export interface ResolvedTaxonomyElement {
+  position: number;
+  root: TaxonomyElementDocument;
+  revision: TaxonomyElementRevisionDocument;
+}
+
+export interface TaxonomyDetail {
+  taxonomy: TaxonomyDocument;
+  selectedRevision: TaxonomyRevisionDocument;
+  revisions: TaxonomyRevisionSummary[];
+  elements: ResolvedTaxonomyElement[];
+}

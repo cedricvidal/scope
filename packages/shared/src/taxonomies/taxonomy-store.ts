@@ -41,6 +41,16 @@ export class TaxonomyRootStore<T extends RootDocument> {
       .toArray() as Promise<T[]>;
   }
 
+  async getMany(ids: readonly string[], includeDeleted = false): Promise<T[]> {
+    if (ids.length === 0) return [];
+    return this.collection
+      .find({
+        _id: { $in: [...new Set(ids)] },
+        ...(includeDeleted ? {} : { deletedAt: { $exists: false } }),
+      } as never)
+      .toArray() as Promise<T[]>;
+  }
+
   async getByBusinessId(
     projectId: string,
     id: string,

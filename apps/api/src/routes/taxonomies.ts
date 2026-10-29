@@ -13,12 +13,16 @@ import {
   PortableTaxonomySchema,
   TaxonomyElementResponseSchema,
   TaxonomyElementRevisionResponseSchema,
+  TaxonomyDetailResponseSchema,
+  TaxonomyListItemResponseSchema,
   TaxonomyResponseSchema,
   TaxonomyRevisionResponseSchema,
   UpdateTaxonomyMetadataInputSchema,
   type PortableTaxonomyDocument,
   type TaxonomyDocument,
   type TaxonomyElementDocument,
+  type TaxonomyDetail,
+  type TaxonomyListItem,
 } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { RouteContext } from "../route-context.js";
@@ -38,6 +42,18 @@ const ImportTaxonomyYamlInputSchema = z
   })
   .strict()
   .openapi("ImportTaxonomyYamlInput");
+
+const TaxonomyDetailQuerySchema = ProjectIdQuerySchema.extend({
+  revisionId: z.string().optional(),
+}).openapi("TaxonomyDetailQuery");
+
+export type TaxonomyRouteStores = Pick<
+  RouteContext,
+  | "taxonomyStore"
+  | "taxonomyRevisionStore"
+  | "taxonomyElementStore"
+  | "taxonomyElementRevisionStore"
+>;
 
 /** Taxonome entry points are hidden unless the operator explicitly enables them. */
 async function requireTaxonome(ctx: RouteContext, response: {
@@ -101,6 +117,113 @@ async function validateResolvedTaxonomyElements(
     elementIds.add(revision.id);
   }
   return undefined;
+}
+
+/** Builds list rows with one bulk latest-revision read, avoiding per-row lookups. */
+export async function listTaxonomyRows(
+  ctx: TaxonomyRouteStores,
+  projectId: string,
+): Promise<TaxonomyListItem[]> {
+  const roots = await ctx.taxonomyStore.list(projectId);
+  const revisions = await ctx.taxonomyRevisionStore.getMany(
+    roots.flatMap(root => root.latestRevisionId ? [root.latestRevisionId] : []),
+  );
+  const revisionsById = new Map(revisions.map(revision => [
+    revision._id,
+    revision,
+  ]));
+  return roots.map(root => {
+    const revision = root.latestRevisionId
+      ? revisionsById.get(root.latestRevisionId)
+      : undefined;
+    if (!revision) {
+      throw new Error(`Taxonomy root '${root._id}' has no latest revision`);
+    }
+    return {
+      ...root,
+      ref: revision.ref,
+      version: revision.version,
+      elementCount: revision.elements.length,
+    };
+  });
+}
+
+/**
+ * Resolves one taxonomy revision and its exact ordered element revision vector
+ * using bulk reads scoped to the taxonomy's project.
+ */
+export async function resolveTaxonomyDetail(
+  ctx: TaxonomyRouteStores,
+  projectId: string,
+  taxonomyId: string,
+  revisionId?: string,
+): Promise<TaxonomyDetail | null> {
+  const taxonomy = await ctx.taxonomyStore.get(taxonomyId, true);
+  if (!taxonomy || taxonomy.projectId !== projectId) return null;
+
+  const revisions = await ctx.taxonomyRevisionStore.list(taxonomy._id);
+  const selectedRevision = revisionId
+    ? revisions.find(revision =>
+        revision._id === revisionId ||
+        revision.ref === revisionId ||
+        String(revision.revision) === revisionId
+      )
+    : revisions.find(revision =>
+        revision._id === taxonomy.latestRevisionId
+      ) ?? revisions[0];
+  if (!selectedRevision) return null;
+
+  const refs = selectedRevision.elements.map(reference => {
+    if (!("ref" in reference)) {
+      throw new Error(
+        `Stored taxonomy revision '${selectedRevision.ref}' contains unresolved element paths`,
+      );
+    }
+    return reference.ref;
+  });
+  const elementRevisions = await ctx.taxonomyElementRevisionStore.getByRefs(
+    projectId,
+    refs,
+  );
+  const revisionsByRef = new Map(elementRevisions.map(revision => [
+    revision.ref,
+    revision,
+  ]));
+  const elementRoots = await ctx.taxonomyElementStore.getMany(
+    elementRevisions.map(revision => revision.elementId),
+    true,
+  );
+  const rootsById = new Map(elementRoots.map(root => [root._id, root]));
+  const elements = refs.map((ref, position) => {
+    const revision = revisionsByRef.get(ref);
+    if (!revision) {
+      throw new Error(
+        `Element revision '${ref}' referenced by '${selectedRevision.ref}' was not found`,
+      );
+    }
+    const root = rootsById.get(revision.elementId);
+    if (!root || root.projectId !== projectId) {
+      throw new Error(`Element root for '${ref}' was not found in this project`);
+    }
+    return { position, root, revision };
+  });
+
+  return {
+    taxonomy,
+    selectedRevision,
+    revisions: revisions.map(revision => ({
+      _id: revision._id,
+      revision: revision.revision,
+      ref: revision.ref,
+      version: revision.version,
+      elementCount: revision.elements.length,
+      contentSha256: revision.contentSha256,
+      ...(revision.creator ? { creator: revision.creator } : {}),
+      createdAt: revision.createdAt,
+      isLatest: revision._id === taxonomy.latestRevisionId,
+    })),
+    elements,
+  };
 }
 
 /** Registers the complete project-scoped taxonomy and element product API. */
@@ -175,14 +298,39 @@ export function registerTaxonomyRoutes(ctx: RouteContext): void {
     tags: ["Taxonomies"],
     summary: "List project taxonomies",
     query: ProjectIdQuerySchema,
-    response: z.array(TaxonomyResponseSchema),
+    response: z.array(TaxonomyListItemResponseSchema),
     handler: async (req, res, next) => {
       try {
         if (!(await requireTaxonome(ctx, res))) return;
         await ensureBuiltinTaxonomy(ctx, getQueryProjectId(req));
-        res.json(
-          await ctx.taxonomyStore.list(getQueryProjectId(req)),
+        res.json(await listTaxonomyRows(ctx, getQueryProjectId(req)));
+      } catch (error) {
+        next(error);
+      }
+    },
+  });
+
+  apiRoute(ctx.app, ctx.registry, {
+    method: "get",
+    path: "/api/v1/taxonomies/:id/detail",
+    tags: ["Taxonomies"],
+    summary: "Get taxonomy detail with exact ordered element revisions",
+    query: TaxonomyDetailQuerySchema,
+    response: TaxonomyDetailResponseSchema,
+    handler: async (req, res, next) => {
+      try {
+        if (!(await requireTaxonome(ctx, res))) return;
+        const detail = await resolveTaxonomyDetail(
+          ctx,
+          getQueryProjectId(req),
+          req.params.id,
+          req.query.revisionId,
         );
+        if (!detail) {
+          res.status(404).json({ error: "Taxonomy or revision not found" });
+          return;
+        }
+        res.json(detail);
       } catch (error) {
         next(error);
       }

@@ -82,14 +82,24 @@ export function registerTaxonomyCommands(program: Command): void {
     }
   });
 
-  taxonomy
-    .command("show")
-    .description("Get a taxonomy root by database ID")
-    .argument("<id>", "Taxonomy root database ID")
-    .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-    .action(async (id, options) => {
+  withProjectOption(
+    taxonomy
+      .command("show")
+      .description("Show taxonomy detail with exact ordered element revisions")
+      .argument("<id>", "Taxonomy root database ID")
+      .option("--revision <id>", "Exact taxonomy revision ID, ref, or number")
+      .option("-u, --url <url>", "API base URL", getDefaultApiUrl()),
+  ).action(async (id, options) => {
       try {
-        print(await request(options.url, `/taxonomies/${encodeURIComponent(id)}`));
+        const detailPath = options.revision
+          ? `/taxonomies/${encodeURIComponent(id)}/detail?revisionId=${encodeURIComponent(options.revision)}`
+          : `/taxonomies/${encodeURIComponent(id)}/detail`;
+        print(
+          await request(
+            options.url,
+            projectPath(detailPath, requireProjectId(options.project)),
+          ),
+        );
       } catch (error) {
         console.error(errorText("Error:"), error instanceof Error ? error.message : error);
         process.exitCode = 1;

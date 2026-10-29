@@ -185,3 +185,43 @@ export const TaxonomyElementRevisionResponseSchema =
     creator: z.string().optional(),
     createdAt: z.coerce.date(),
   }).openapi("TaxonomyElementRevisionResponse");
+
+export const TaxonomyListItemResponseSchema = TaxonomyResponseSchema.extend({
+  ref: TaxonomyRevisionRefSchema,
+  version: z.string(),
+  elementCount: z.number().int().nonnegative(),
+}).openapi("TaxonomyListItemResponse");
+
+export const TaxonomyRevisionSummaryResponseSchema = z
+  .object({
+    _id: z.string(),
+    revision: z.number().int().positive(),
+    ref: TaxonomyRevisionRefSchema,
+    version: z.string(),
+    elementCount: z.number().int().nonnegative(),
+    contentSha256: z.string().length(64),
+    creator: z.string().optional(),
+    createdAt: z.coerce.date(),
+    isLatest: z.boolean(),
+  })
+  .strict()
+  .openapi("TaxonomyRevisionSummaryResponse");
+
+export const ResolvedTaxonomyElementResponseSchema = z
+  .object({
+    position: z.number().int().nonnegative(),
+    root: TaxonomyElementResponseSchema,
+    revision: TaxonomyElementRevisionResponseSchema,
+  })
+  .strict()
+  .openapi("ResolvedTaxonomyElementResponse");
+
+export const TaxonomyDetailResponseSchema = z
+  .object({
+    taxonomy: TaxonomyResponseSchema,
+    selectedRevision: TaxonomyRevisionResponseSchema,
+    revisions: z.array(TaxonomyRevisionSummaryResponseSchema),
+    elements: z.array(ResolvedTaxonomyElementResponseSchema),
+  })
+  .strict()
+  .openapi("TaxonomyDetailResponse");
