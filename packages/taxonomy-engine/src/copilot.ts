@@ -416,7 +416,7 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
 
       if (request.modelConfig && Object.keys(request.modelConfig).length && !warnedAboutSampling) {
         warnedAboutSampling = true;
-        process.stderr.write("taxonome: SDK-managed sampling; Ax temperature/token-limit hints cannot be applied by this SDK. Actual settings remain fixed low reasoning; see artifact transport settings.\n");
+        process.stderr.write("taxonome: SDK-managed sampling; Ax temperature/token-limit hints cannot be applied by this SDK. Actual settings remain fixed low reasoning; see optimization manifest transport settings.\n");
       }
       if (request.functions?.length || request.chatPrompt.some(message => message.role === "function" || (message.role === "assistant" && message.functionCalls?.length))) {
         throw new Error("Taxonome's SDK provider does not allow tools");
