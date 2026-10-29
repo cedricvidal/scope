@@ -32,6 +32,12 @@ function displayTrial(
   return totalTrials === undefined ? String(trial) : `${trial}/${totalTrials}`;
 }
 
+function clip(value: string, width: number): string {
+  return value.length <= width
+    ? value
+    : `${value.slice(0, Math.max(0, width - 1))}…`;
+}
+
 /** Truthful stable-row progress for multi-element optimization. */
 export class OptimizationDashboard {
   private readonly interactive: boolean;
@@ -160,28 +166,29 @@ export class OptimizationDashboard {
     const lines = [
       this.style.title(header),
       this.style.label(
-        "STATUS      ELEMENT                   TRAIN VALID TRIAL CAND CALLS LATEST BEST PARETO DETAIL",
+        "STATUS     ELEMENT              TRN VAL TRIAL CAND CALL LAST BEST PAR DETAIL",
       ),
       ...this.rows.map(row => {
+        const paddedStatus = row.status.padEnd(10);
         const status = row.status === "DONE"
-          ? this.style.pass(row.status)
+          ? this.style.pass(paddedStatus)
           : row.status === "FAILED"
-            ? this.style.fail(row.status)
+            ? this.style.fail(paddedStatus)
             : row.status === "SKIPPED"
-              ? this.style.warning(row.status)
-              : this.style.prompt(row.status);
+              ? this.style.warning(paddedStatus)
+              : this.style.prompt(paddedStatus);
         const detail = row.stopReason
-          ? `${row.detail}; stop=${row.stopReason}`
+          ? `stop=${row.stopReason}`
           : row.detail;
-        return `${status.padEnd(19)} ${row.id.padEnd(25)} ` +
-          `${String(row.train).padStart(5)} ${String(row.validation).padStart(5)} ` +
+        return `${status} ${clip(row.id, 20).padEnd(20)} ` +
+          `${String(row.train).padStart(3)} ${String(row.validation).padStart(3)} ` +
           `${displayTrial(row.trial, row.totalTrials).padStart(5)} ` +
           `${displayNumber(row.candidateCount).padStart(4)} ` +
-          `${String(row.metricCalls).padStart(5)} ` +
-          `${displayNumber(row.latestScore).padStart(6)} ` +
+          `${String(row.metricCalls).padStart(4)} ` +
+          `${displayNumber(row.latestScore).padStart(4)} ` +
           `${displayNumber(row.bestScore).padStart(4)} ` +
-          `${displayNumber(row.paretoFrontSize).padStart(6)} ` +
-          this.style.dim(detail);
+          `${displayNumber(row.paretoFrontSize).padStart(3)} ` +
+          this.style.dim(clip(detail, 18));
       }),
     ];
     for (const line of lines) {
