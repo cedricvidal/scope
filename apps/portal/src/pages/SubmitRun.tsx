@@ -747,6 +747,43 @@ export function SubmitRun({
     const baseProfileSpec = selectedProfileId
       ? (selectedProfileVersion ? `${selectedProfileId}@${selectedProfileVersion}` : selectedProfileId)
       : null;
+    const experimentProfileTargets = mode === "experiment" && inVariationMode
+      ? [
+          ...(selectedBaseProfileVersion
+            ? [{
+                profileId: baseProfileSpec ?? selectedProfileId!,
+                worker: selectedBaseProfileVersion.workerType,
+                model: selectedBaseProfileVersion.model,
+                ...(selectedBaseProfileVersion.reasoningEffort
+                  ? { reasoningEffort: selectedBaseProfileVersion.reasoningEffort }
+                  : {}),
+                ...(selectedBaseProfileVersion.agentVersion
+                  ? { agentVersion: selectedBaseProfileVersion.agentVersion }
+                  : {}),
+              }]
+            : []),
+          ...normalizedVariationDrafts.flatMap((draft) => {
+            const profile = profileList.find(candidate => candidate._id === draft.profileId);
+            const version = variationProfileVersions[draft.profileId]
+              ?.find(candidate => candidate.version === draft.profileVersion)
+              ?? profile?.version;
+            if (!version) return [];
+            return [{
+              profileId: draft.profileVersion
+                ? `${draft.profileId}@${draft.profileVersion}`
+                : draft.profileId,
+              worker: version.workerType,
+              model: version.model,
+              ...(version.reasoningEffort
+                ? { reasoningEffort: version.reasoningEffort }
+                : {}),
+              ...(version.agentVersion
+                ? { agentVersion: version.agentVersion }
+                : {}),
+            }];
+          }),
+        ]
+      : undefined;
 
     const request: RunCreateInput = {
       scenario: { task: task.trim(), criteria: pickedCriteria },
@@ -769,6 +806,9 @@ export function SubmitRun({
         ? {
             ...(baseProfileSpec ? { profileId: baseProfileSpec } : {}),
             profileVariations,
+            ...(experimentProfileTargets
+              ? { experimentProfileTargets }
+              : {}),
           }
         : {
             ...(baseProfileSpec ? { profileId: baseProfileSpec } : {}),

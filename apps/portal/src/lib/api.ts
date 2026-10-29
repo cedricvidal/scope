@@ -202,6 +202,61 @@ export interface RunCreateInput {
   codebase?: string;
   codebaseRevisionId?: string;
   priority?: number;
+  /** Portal-only canonical Experiment expansion targets; never sent directly. */
+  experimentProfileTargets?: Array<{
+    profileId?: string;
+    worker: string;
+    model?: string;
+    reasoningEffort?: string;
+    agentVersion?: string;
+  }>;
+}
+
+/** Expands legacy run composition fields into canonical Experiment requests. */
+export function canonicalExperimentRequests(
+  input: RunCreateInput,
+): Array<Record<string, unknown>> {
+  const {
+    worker,
+    model,
+    reasoningEffort,
+    agentVersion,
+    profileId,
+    profileVariations = [],
+    count = 1,
+    experimentProfileTargets,
+    ...shared
+  } = input;
+  const fallbackProfiles = profileVariations.length > 0
+    ? [profileId, ...profileVariations].filter(
+        (value): value is string => Boolean(value),
+      )
+    : [profileId];
+  const targets = experimentProfileTargets?.length
+    ? experimentProfileTargets
+    : fallbackProfiles.map(targetProfileId => ({
+        ...(targetProfileId ? { profileId: targetProfileId } : {}),
+        worker: worker ?? "",
+        ...(model ? { model } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(agentVersion ? { agentVersion } : {}),
+      }));
+
+  return targets.flatMap(target => {
+    if (!target.worker.trim()) {
+      throw new Error("Experiment request requires a worker");
+    }
+    return Array.from({ length: count }, () => ({
+      ...shared,
+      workerType: target.worker,
+      ...(target.model ? { model: target.model } : {}),
+      ...(target.reasoningEffort
+        ? { reasoningEffort: target.reasoningEffort }
+        : {}),
+      ...(target.agentVersion ? { agentVersion: target.agentVersion } : {}),
+      ...(target.profileId ? { profileId: target.profileId } : {}),
+    }));
+  });
 }
 
 export const api = {
@@ -283,21 +338,16 @@ export const api = {
     ),
   ): Promise<ExperimentView> => {
     const composedRequest = "request" in body ? body.request : undefined;
-    const worker = composedRequest?.worker;
-    const requestBody = composedRequest
-      ? { ...composedRequest, worker: undefined }
-      : undefined;
-    const path = worker
-      ? `/experiments?worker=${encodeURIComponent(worker)}`
-      : "/experiments";
     const value = await request<unknown>(
-      path,
+      "/experiments",
       {
         method: "POST",
         body: JSON.stringify({
           mode: "empty" in body ? "empty" : "compose",
           metadata: body.metadata,
-          requests: requestBody ? [requestBody] : [],
+          requests: composedRequest
+            ? canonicalExperimentRequests(composedRequest)
+            : [],
           reportTemplateIds: body.reportTemplateIds ?? [],
           ...(body.taxonomyRevisionId
             ? { taxonomyRevisionId: body.taxonomyRevisionId }
