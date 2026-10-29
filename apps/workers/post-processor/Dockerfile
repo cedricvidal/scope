@@ -1,5 +1,7 @@
 FROM node:22.22.0-slim AS builder
 
+# The bundled Copilot CLI trusts the OS CA store for token validation.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
 ENV npm_config_registry=${NPM_CONFIG_REGISTRY} \
     COREPACK_NPM_REGISTRY=${NPM_CONFIG_REGISTRY}
@@ -53,6 +55,7 @@ CMD ["/app/scripts/dev-entrypoint.sh"]
 # --- Production stage ---
 FROM node:22.22.0-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
 ENV npm_config_registry=${NPM_CONFIG_REGISTRY} \
     COREPACK_NPM_REGISTRY=${NPM_CONFIG_REGISTRY}
