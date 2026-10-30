@@ -25,6 +25,10 @@ import {
   type ExperimentRevisionIdentityView,
   type ExperimentView,
 } from "./experiments";
+import {
+  parseTaxonomyRunResult,
+  type TaxonomyRunResult,
+} from "./taxonomy-result";
 
 const BASE = "/api/v1";
 
@@ -1556,6 +1560,16 @@ export const api = {
     return request(`/experiments/${encodeURIComponent(experimentId)}/taxonomy-readout/retry`, {
       method: "POST",
     }, { scoped: true });
+  },
+
+  getTaxonomyEvaluationJson: async (
+    requestId: string,
+    runId: string,
+  ): Promise<TaxonomyRunResult> => {
+    const value = await request<unknown>(
+      `/requests/${encodeURIComponent(requestId)}/runs/${encodeURIComponent(runId)}/taxonomy-evaluation/json`,
+    );
+    return parseTaxonomyRunResult(value);
   },
 
   // ─── Skills ───────────────────────────────────────────────────────────────

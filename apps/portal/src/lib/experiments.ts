@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import type { TaxonomyHandlerSummary } from "@/types";
+
 export const LEGACY_REQUEST_COMPOSITION_DEPRECATION =
   "legacy-request-composition" as const;
 
@@ -67,6 +69,7 @@ export interface ExperimentRequestSummaryView {
   worker?: { instanceId: string; podName?: string };
   lastHeartbeatAt?: string;
   startedAt?: string;
+  taxonomyHandler?: TaxonomyHandlerSummary;
 }
 
 export interface ExperimentExecutionView {
@@ -297,6 +300,34 @@ function parseRequestSummary(value: unknown): ExperimentRequestSummaryView {
           podName: optionalString(value, "podName"),
         };
       })();
+  const taxonomyHandlerValue = item.taxonomyHandler;
+  const taxonomyHandler = taxonomyHandlerValue === undefined
+    ? undefined
+    : ((): TaxonomyHandlerSummary => {
+        const value = record(
+          taxonomyHandlerValue,
+          "experiment request taxonomy handler",
+        );
+        const status = requiredString(
+          value,
+          "status",
+          "experiment request taxonomy handler",
+        );
+        if (
+          status !== "queued" &&
+          status !== "processing" &&
+          status !== "done" &&
+          status !== "failed"
+        ) {
+          throw new Error("Invalid experiment request taxonomy handler status");
+        }
+        return {
+          status,
+          updatedAt: optionalString(value, "updatedAt"),
+          error: optionalString(value, "error"),
+          resultAvailable: value.resultAvailable === true,
+        };
+      })();
   const strings = (key: string): string[] | undefined => {
     const candidate = item[key];
     if (candidate === undefined) return undefined;
@@ -329,6 +360,7 @@ function parseRequestSummary(value: unknown): ExperimentRequestSummaryView {
     worker,
     lastHeartbeatAt: optionalString(item, "lastHeartbeatAt"),
     startedAt: optionalString(item, "startedAt"),
+    taxonomyHandler,
   };
 }
 

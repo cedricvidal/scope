@@ -619,6 +619,20 @@ describe("Experiment API contract", () => {
           worker: { instanceId: "worker-1", podName: "pod-1" },
           lastHeartbeatAt: now,
           startedAt: now,
+          handlerStatus: {
+            "pp-taxonomy": {
+              status: "done",
+              version: "1",
+              updatedAt: now,
+              claimToken: "claim-1",
+            },
+          },
+          taxonomyEvaluation: {
+            url: "https://storage.example/result.json.gz",
+            schemaVersion: "2",
+            contentSha256: "a".repeat(64),
+            sizeBytes: 123,
+          },
         },
       },
       {
@@ -671,6 +685,11 @@ describe("Experiment API contract", () => {
           priority: 5,
           attemptNumber: 1,
           worker: { instanceId: "worker-1", podName: "pod-1" },
+          taxonomyHandler: {
+            status: "done",
+            updatedAt: now.toISOString(),
+            resultAvailable: true,
+          },
         },
         {
           requestId: "request-deleted",

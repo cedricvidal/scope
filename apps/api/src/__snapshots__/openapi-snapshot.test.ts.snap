@@ -2033,6 +2033,38 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                 "taskPromptId": {
                   "type": "string",
                 },
+                "taxonomyHandler": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                    },
+                    "resultAvailable": {
+                      "type": "boolean",
+                    },
+                    "status": {
+                      "enum": [
+                        "queued",
+                        "processing",
+                        "done",
+                        "failed",
+                      ],
+                      "type": "string",
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null",
+                      ],
+                    },
+                  },
+                  "required": [
+                    "status",
+                    "resultAvailable",
+                  ],
+                  "type": "object",
+                },
                 "worker": {
                   "properties": {
                     "instanceId": {
@@ -2667,6 +2699,38 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     },
                     "taskPromptId": {
                       "type": "string",
+                    },
+                    "taxonomyHandler": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                        },
+                        "resultAvailable": {
+                          "type": "boolean",
+                        },
+                        "status": {
+                          "enum": [
+                            "queued",
+                            "processing",
+                            "done",
+                            "failed",
+                          ],
+                          "type": "string",
+                        },
+                        "updatedAt": {
+                          "format": "date-time",
+                          "type": [
+                            "string",
+                            "null",
+                          ],
+                        },
+                      },
+                      "required": [
+                        "status",
+                        "resultAvailable",
+                      ],
+                      "type": "object",
                     },
                     "worker": {
                       "properties": {
@@ -4867,6 +4931,38 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "taskPromptId": {
             "type": "string",
           },
+          "taxonomyHandler": {
+            "additionalProperties": false,
+            "properties": {
+              "error": {
+                "type": "string",
+              },
+              "resultAvailable": {
+                "type": "boolean",
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "processing",
+                  "done",
+                  "failed",
+                ],
+                "type": "string",
+              },
+              "updatedAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+            },
+            "required": [
+              "status",
+              "resultAvailable",
+            ],
+            "type": "object",
+          },
           "updatedAt": {
             "format": "date-time",
             "type": [
@@ -6359,6 +6455,748 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "contentSha256",
           "createdAt",
           "isLatest",
+        ],
+        "type": "object",
+      },
+      "TaxonomyRunResultResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "metadata": {},
+          "results": {
+            "items": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "element": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "category_id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "label": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                      ],
+                      "type": "object",
+                    },
+                    "implementation": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "attempts": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "attempt": {
+                                "anyOf": [
+                                  {
+                                    "enum": [
+                                      1,
+                                    ],
+                                    "type": "number",
+                                  },
+                                  {
+                                    "enum": [
+                                      2,
+                                    ],
+                                    "type": "number",
+                                  },
+                                ],
+                              },
+                              "kind": {
+                                "enum": [
+                                  "initial",
+                                  "repair",
+                                ],
+                                "type": "string",
+                              },
+                              "outcome": {
+                                "enum": [
+                                  "succeeded",
+                                  "invalid_output",
+                                  "execution_failed",
+                                  "cancelled",
+                                ],
+                                "type": "string",
+                              },
+                            },
+                            "required": [
+                              "attempt",
+                              "kind",
+                              "outcome",
+                            ],
+                            "type": "object",
+                          },
+                          "maxItems": 2,
+                          "minItems": 1,
+                          "type": "array",
+                        },
+                        "handler": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "provider": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "entry": {
+                              "minLength": 1,
+                              "type": "string",
+                            },
+                            "integrity": {
+                              "pattern": "^[a-f0-9]{64}$",
+                              "type": "string",
+                            },
+                            "name": {
+                              "minLength": 1,
+                              "type": "string",
+                            },
+                            "origin": {
+                              "enum": [
+                                "builtin",
+                                "local",
+                                "package",
+                              ],
+                              "type": "string",
+                            },
+                            "version": {
+                              "minLength": 1,
+                              "type": "string",
+                            },
+                          },
+                          "required": [
+                            "name",
+                            "origin",
+                          ],
+                          "type": "object",
+                        },
+                        "type": {
+                          "enum": [
+                            "prompt",
+                            "deterministic",
+                          ],
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "type",
+                        "attempts",
+                      ],
+                      "type": "object",
+                    },
+                    "input": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "archive_root": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "normalization": {
+                          "enum": [
+                            "scope/taxonome-normalized-atif/v1",
+                          ],
+                          "type": "string",
+                        },
+                        "request_id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "run_id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "session_id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "sha256": {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string",
+                        },
+                        "trajectory_id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "normalization",
+                        "sha256",
+                      ],
+                      "type": "object",
+                    },
+                    "result": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "observed": {
+                              "enum": [
+                                true,
+                              ],
+                              "type": "boolean",
+                            },
+                            "occurrences": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "evidence": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "path": {
+                                          "minLength": 1,
+                                          "type": "string",
+                                        },
+                                        "role": {
+                                          "minLength": 1,
+                                          "type": "string",
+                                        },
+                                      },
+                                      "required": [
+                                        "role",
+                                        "path",
+                                      ],
+                                      "type": "object",
+                                    },
+                                    "maxItems": 100,
+                                    "minItems": 1,
+                                    "type": "array",
+                                  },
+                                },
+                                "required": [
+                                  "evidence",
+                                ],
+                                "type": "object",
+                              },
+                              "maxItems": 100,
+                              "minItems": 1,
+                              "type": "array",
+                            },
+                            "state": {
+                              "enum": [
+                                "completed",
+                              ],
+                              "type": "string",
+                            },
+                          },
+                          "required": [
+                            "state",
+                            "observed",
+                            "occurrences",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "observed": {
+                              "enum": [
+                                false,
+                              ],
+                              "type": "boolean",
+                            },
+                            "state": {
+                              "enum": [
+                                "completed",
+                              ],
+                              "type": "string",
+                            },
+                          },
+                          "required": [
+                            "state",
+                            "observed",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "reason": {
+                              "maxLength": 2000,
+                              "minLength": 1,
+                              "type": "string",
+                            },
+                            "state": {
+                              "enum": [
+                                "indeterminate",
+                                "inapplicable",
+                              ],
+                              "type": "string",
+                            },
+                          },
+                          "required": [
+                            "state",
+                            "reason",
+                          ],
+                          "type": "object",
+                        },
+                      ],
+                    },
+                    "schema_version": {
+                      "enum": [
+                        "scope/taxonomy-evaluation/v1",
+                      ],
+                      "type": "string",
+                    },
+                    "status": {
+                      "enum": [
+                        "succeeded",
+                      ],
+                      "type": "string",
+                    },
+                    "taxonomy": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string",
+                        },
+                        "id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "version": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "id",
+                        "version",
+                        "digest",
+                      ],
+                      "type": "object",
+                    },
+                  },
+                  "required": [
+                    "schema_version",
+                    "taxonomy",
+                    "element",
+                    "implementation",
+                    "input",
+                    "status",
+                    "result",
+                  ],
+                  "type": "object",
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "element": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "category_id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "label": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                      ],
+                      "type": "object",
+                    },
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "execution_failed",
+                            "cancelled",
+                            "invalid_output",
+                            "invalid_input_binding",
+                          ],
+                          "type": "string",
+                        },
+                        "message": {
+                          "maxLength": 2000,
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "source_locations": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "archive_entry": {
+                                "type": "string",
+                              },
+                              "file": {
+                                "type": "string",
+                              },
+                              "generated_by": {
+                                "type": "string",
+                              },
+                              "jsonl_line": {
+                                "exclusiveMinimum": 0,
+                                "type": "integer",
+                              },
+                              "normalized_path": {
+                                "minLength": 1,
+                                "type": "string",
+                              },
+                              "original_path": {
+                                "minLength": 1,
+                                "type": "string",
+                              },
+                            },
+                            "required": [
+                              "normalized_path",
+                              "original_path",
+                            ],
+                            "type": "object",
+                          },
+                          "maxItems": 100,
+                          "type": "array",
+                        },
+                        "validation_errors": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "actual_type": {
+                                "enum": [
+                                  "atif.step",
+                                  "atif.tool_call",
+                                  "atif.observation",
+                                  "atif.observation_result",
+                                  "atif.content_part",
+                                  "atif.image_source",
+                                  "atif.audio_source",
+                                  "scope.discovery",
+                                  "scope.input_validation_issue",
+                                ],
+                                "type": "string",
+                              },
+                              "code": {
+                                "enum": [
+                                  "invalid_json",
+                                  "schema_mismatch",
+                                  "unknown_role",
+                                  "role_cardinality",
+                                  "duplicate_reference",
+                                  "invalid_jsonpath",
+                                  "unresolved_reference",
+                                  "reference_type_mismatch",
+                                  "reference_constraint_mismatch",
+                                ],
+                                "type": "string",
+                              },
+                              "evidence_path": {
+                                "minLength": 1,
+                                "type": "string",
+                              },
+                              "expected_type": {
+                                "enum": [
+                                  "atif.step",
+                                  "atif.tool_call",
+                                  "atif.observation",
+                                  "atif.observation_result",
+                                  "atif.content_part",
+                                  "atif.image_source",
+                                  "atif.audio_source",
+                                  "scope.discovery",
+                                  "scope.input_validation_issue",
+                                ],
+                                "type": "string",
+                              },
+                              "message": {
+                                "maxLength": 1000,
+                                "minLength": 1,
+                                "type": "string",
+                              },
+                              "output_path": {
+                                "minLength": 1,
+                                "type": "string",
+                              },
+                              "role": {
+                                "minLength": 1,
+                                "type": "string",
+                              },
+                            },
+                            "required": [
+                              "code",
+                              "output_path",
+                            ],
+                            "type": "object",
+                          },
+                          "maxItems": 100,
+                          "type": "array",
+                        },
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                      ],
+                      "type": "object",
+                    },
+                    "implementation": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "attempts": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "attempt": {
+                                "anyOf": [
+                                  {
+                                    "enum": [
+                                      1,
+                                    ],
+                                    "type": "number",
+                                  },
+                                  {
+                                    "enum": [
+                                      2,
+                                    ],
+                                    "type": "number",
+                                  },
+                                ],
+                              },
+                              "kind": {
+                                "enum": [
+                                  "initial",
+                                  "repair",
+                                ],
+                                "type": "string",
+                              },
+                              "outcome": {
+                                "enum": [
+                                  "succeeded",
+                                  "invalid_output",
+                                  "execution_failed",
+                                  "cancelled",
+                                ],
+                                "type": "string",
+                              },
+                            },
+                            "required": [
+                              "attempt",
+                              "kind",
+                              "outcome",
+                            ],
+                            "type": "object",
+                          },
+                          "maxItems": 2,
+                          "minItems": 1,
+                          "type": "array",
+                        },
+                        "handler": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "provider": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "entry": {
+                              "minLength": 1,
+                              "type": "string",
+                            },
+                            "integrity": {
+                              "pattern": "^[a-f0-9]{64}$",
+                              "type": "string",
+                            },
+                            "name": {
+                              "minLength": 1,
+                              "type": "string",
+                            },
+                            "origin": {
+                              "enum": [
+                                "builtin",
+                                "local",
+                                "package",
+                              ],
+                              "type": "string",
+                            },
+                            "version": {
+                              "minLength": 1,
+                              "type": "string",
+                            },
+                          },
+                          "required": [
+                            "name",
+                            "origin",
+                          ],
+                          "type": "object",
+                        },
+                        "type": {
+                          "enum": [
+                            "prompt",
+                            "deterministic",
+                          ],
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "type",
+                        "attempts",
+                      ],
+                      "type": "object",
+                    },
+                    "input": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "archive_root": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "normalization": {
+                          "enum": [
+                            "scope/taxonome-normalized-atif/v1",
+                          ],
+                          "type": "string",
+                        },
+                        "request_id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "run_id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "session_id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "sha256": {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string",
+                        },
+                        "trajectory_id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "normalization",
+                        "sha256",
+                      ],
+                      "type": "object",
+                    },
+                    "schema_version": {
+                      "enum": [
+                        "scope/taxonomy-evaluation/v1",
+                      ],
+                      "type": "string",
+                    },
+                    "status": {
+                      "enum": [
+                        "failed",
+                      ],
+                      "type": "string",
+                    },
+                    "taxonomy": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string",
+                        },
+                        "id": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "version": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "id",
+                        "version",
+                        "digest",
+                      ],
+                      "type": "object",
+                    },
+                  },
+                  "required": [
+                    "schema_version",
+                    "taxonomy",
+                    "element",
+                    "implementation",
+                    "input",
+                    "status",
+                    "error",
+                  ],
+                  "type": "object",
+                },
+              ],
+            },
+            "type": "array",
+          },
+          "run": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "profile": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "label": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "id",
+                  "label",
+                ],
+                "type": "object",
+              },
+              "scenario": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "label": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "task": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "id",
+                  "label",
+                ],
+                "type": "object",
+              },
+            },
+            "required": [
+              "id",
+              "scenario",
+              "profile",
+            ],
+            "type": "object",
+          },
+        },
+        "required": [
+          "run",
+          "results",
         ],
         "type": "object",
       },
@@ -14465,6 +15303,26 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Download the exact-run compressed Taxonome result",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/taxonomy-evaluation/json": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyRunResultResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Get the validated exact-run Taxonome result JSON",
         "tags": [
           "Requests",
         ],

@@ -97,6 +97,20 @@ const currentRequests = Array.from({ length: 11 }, (_, index) => ({
   profileId: "profile-1",
   priority: 5,
   attemptNumber: 1,
+  taxonomyHandler:
+    index === 0
+      ? { status: "done" as const, resultAvailable: true }
+      : index === 1
+        ? { status: "processing" as const, resultAvailable: false }
+        : index === 2
+          ? { status: "queued" as const, resultAvailable: false }
+          : index === 3
+            ? {
+                status: "failed" as const,
+                resultAvailable: false,
+                error: "Taxonome execution failed",
+              }
+            : undefined,
 }));
 
 const currentExecution: ExperimentExecutionView = {
@@ -400,6 +414,8 @@ describe("ExperimentDetail", { timeout: 10_000 }, () => {
     expect(screen.getAllByText("Queued").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Deleted").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Missing").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Completed").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Processing").length).toBeGreaterThan(0);
     expect(screen.queryAllByText("Historical task")).toHaveLength(0);
     expect(screen.getByText("1–10 of 11 runs")).toBeTruthy();
     const embeddedTable = document.querySelector(

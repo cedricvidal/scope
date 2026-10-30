@@ -55,6 +55,7 @@ import {
   RunSkillsCell,
   RunStatusCell,
   RunTaskCell,
+  RunTaxonomyCell,
   RunVersionCell,
   RunWorkerCell,
   RunsTable,
@@ -94,6 +95,7 @@ const RUN_COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "requestId", label: "ID", required: true },
   { id: "status", label: "Status" },
   { id: "outcome", label: "Outcome" },
+  { id: "taxonomy", label: "Taxonomy" },
   { id: "task", label: "Task" },
   { id: "criteria", label: "Criteria" },
   { id: "worker", label: "Worker" },
@@ -163,6 +165,8 @@ function requestSortValue(
       return request.status ?? "";
     case "outcome":
       return request.outcome ?? "";
+    case "taxonomy":
+      return request.taxonomyHandler?.status ?? "";
     case "worker":
       return request.workerType ?? "";
     case "model":
@@ -252,6 +256,7 @@ function experimentRunTableItem(
       worker: request.worker,
       lastHeartbeatAt: request.lastHeartbeatAt,
       startedAt: request.startedAt,
+      taxonomyHandler: request.taxonomyHandler,
     };
 }
 
@@ -863,6 +868,13 @@ export function ExperimentDetail() {
         width: "110px",
         hidden: columnVisibility.isHidden("outcome"),
         cell: (request) => <RunOutcomeCell item={item(request)} />,
+      },
+      {
+        id: "taxonomy",
+        header: "Taxonomy",
+        width: "150px",
+        hidden: columnVisibility.isHidden("taxonomy"),
+        cell: (request) => <RunTaxonomyCell item={item(request)} />,
       },
       {
         id: "task",

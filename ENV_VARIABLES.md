@@ -25,6 +25,14 @@ does not resolve credentials or initialize a Copilot SDK transport for
 deterministic-only taxonomies. Prompt execution uses the taxonomy engine's
 isolated, tool-free Copilot transport and normal credential resolution.
 
+### TAXONOMY_RESULT_MAX_BYTES
+**Default:** `10485760` (10 MiB)
+**Type:** positive integer bytes
+
+Maximum uncompressed Taxonome result size returned by the API's validated
+exact-run JSON view. The API rejects a larger persisted reference before
+downloading the blob and also enforces the limit while decompressing it.
+
 ## Docker Development
 
 ### API_DEBUG_PORT

@@ -5,6 +5,18 @@
 
 export type RunStatus = "pending" | "queued" | "processing" | "paused" | "done";
 export type RunOutcome = "succeeded" | "failed" | "finished";
+export type TaxonomyStatusValue =
+  | "queued"
+  | "processing"
+  | "done"
+  | "failed";
+
+export interface TaxonomyHandlerSummary {
+  status: TaxonomyStatusValue;
+  updatedAt?: string;
+  error?: string;
+  resultAvailable: boolean;
+}
 
 export interface TokenUsage {
   promptTokens: number;
@@ -231,6 +243,7 @@ export interface Run {
   gates?: GateConfig[];
   observations?: string[];
   gateSummaries?: GateRunSummary[];
+  taxonomyHandler?: TaxonomyHandlerSummary;
 }
 
 export interface CursorPaginatedResponse<T> {

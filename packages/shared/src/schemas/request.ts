@@ -204,6 +204,12 @@ export const RequestResponseSchema = z
     experimentFinalizedAt: z.coerce.date().optional(),
     experimentMembershipOperationId: z.string().optional(),
     experimentMembershipRevisionId: z.string().optional(),
+    taxonomyHandler: z.object({
+      status: z.enum(["queued", "processing", "done", "failed"]),
+      updatedAt: z.coerce.date().optional(),
+      error: z.string().optional(),
+      resultAvailable: z.boolean(),
+    }).strict().optional(),
     priority: z.number().int().default(0),
     gates: z.array(GateConfigSchema).optional(),
     observations: z.array(z.string()).optional(),

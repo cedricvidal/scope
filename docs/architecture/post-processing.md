@@ -129,6 +129,32 @@ DB-backed `taxonome` flag. Internal handlers and schedulers deliberately do not
 read the flag; turning it off hides new user entry points without interrupting
 accepted work.
 
+Run list responses and exact Experiment execution members include only a
+bounded `taxonomyHandler` summary derived from the persisted
+`run.handlerStatus["pp-taxonomy"]` entry and whether the exact run has a
+`taxonomyEvaluation` reference. List pages never read or probe result blobs.
+The Portal renders these states as:
+
+- no handler entry: unavailable;
+- `queued`: queued;
+- `processing`: processing;
+- `failed`: failed, with the persisted error available in the tooltip;
+- `done` with a result reference: completed;
+- `done` without a result reference: result unavailable.
+
+Run Detail loads the typed result only when its Taxonomy tab is active and the
+exact run has a result reference. The JSON view route,
+`GET /api/v1/requests/:id/runs/:runId/taxonomy-evaluation/json`, enforces the
+feature flag and exact request/run ownership, rejects results above
+`TAXONOMY_RESULT_MAX_BYTES`, decompresses the gzip artifact with the same bound,
+verifies the uncompressed size and SHA-256, parses JSON, and validates the full
+Taxonome result schema before returning it. The existing compressed download
+route remains the source for downloading the immutable artifact.
+
+Phase 1 intentionally exposes persisted coarse state only. Element totals,
+per-element progress, inferred dependency-blocked states, and SDK progress
+hooks are deferred.
+
 ## Handler registration
 
 Handlers implement:

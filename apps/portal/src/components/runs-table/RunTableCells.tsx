@@ -9,6 +9,7 @@ import { AgentBadge } from "@/components/AgentBadge";
 import { ShortId } from "@/components/ShortId";
 import { StatusBadge, OutcomeBadge, type StatusBadgeStatus } from "@/components/StatusBadge";
 import { TaskPromptBadge } from "@/components/TaskPromptBadge";
+import { TaxonomyStatus } from "@/components/TaxonomyStatus";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -22,7 +23,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatId, truncate } from "@/lib/utils";
-import type { OsInfo, Run, RunOutcome, RunState } from "@/types";
+import type {
+  OsInfo,
+  Run,
+  RunOutcome,
+  RunState,
+  TaxonomyHandlerSummary,
+} from "@/types";
 
 export interface RunTableItem {
   requestId: string;
@@ -47,6 +54,7 @@ export interface RunTableItem {
   worker?: RunState["worker"];
   lastHeartbeatAt?: RunState["lastHeartbeatAt"];
   startedAt?: RunState["startedAt"];
+  taxonomyHandler?: TaxonomyHandlerSummary;
 }
 
 export function runTableItemFromRun(run: Run): RunTableItem {
@@ -73,6 +81,7 @@ export function runTableItemFromRun(run: Run): RunTableItem {
     worker: run.run?.worker,
     lastHeartbeatAt: run.run?.lastHeartbeatAt,
     startedAt: run.run?.startedAt,
+    taxonomyHandler: run.taxonomyHandler,
   };
 }
 
@@ -391,6 +400,10 @@ export function RunStatusCell({ item }: { item: RunTableItem }) {
 
 export function RunOutcomeCell({ item }: { item: RunTableItem }) {
   return item.outcome ? <OutcomeBadge outcome={item.outcome} /> : <EmptyRunCell />;
+}
+
+export function RunTaxonomyCell({ item }: { item: RunTableItem }) {
+  return <TaxonomyStatus summary={item.taxonomyHandler} />;
 }
 
 export function RunAttemptCell({ item }: { item: RunTableItem }) {

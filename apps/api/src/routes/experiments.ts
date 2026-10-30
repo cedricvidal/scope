@@ -17,6 +17,7 @@ import {
   type ExperimentExecutionHistoryDocument,
   type ExperimentMetadata,
   type ExperimentRequestState,
+  taxonomyHandlerSummary,
 } from "shared";
 import type { RequestDocument, RouteContext } from "../route-context.js";
 import { apiRoute } from "../openapi/api-route.js";
@@ -156,6 +157,12 @@ const ExperimentRequestSummarySchema = z.object({
   }).optional(),
   lastHeartbeatAt: z.coerce.date().optional(),
   startedAt: z.coerce.date().optional(),
+  taxonomyHandler: z.object({
+    status: z.enum(["queued", "processing", "done", "failed"]),
+    updatedAt: z.coerce.date().optional(),
+    error: z.string().optional(),
+    resultAvailable: z.boolean(),
+  }).strict().optional(),
 });
 
 const ExperimentTemplateReportSummarySchema = z.object({
@@ -708,6 +715,9 @@ async function resolvedExecutionResponse(
         ? { lastHeartbeatAt: run.lastHeartbeatAt }
         : {}),
       ...(run?.startedAt ? { startedAt: run.startedAt } : {}),
+      ...(taxonomyHandlerSummary(run)
+        ? { taxonomyHandler: taxonomyHandlerSummary(run) }
+        : {}),
     };
   });
 

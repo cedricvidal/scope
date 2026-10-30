@@ -38,6 +38,7 @@ import {
   RunSkillsCell,
   RunStatusCell,
   RunTaskCell,
+  RunTaxonomyCell,
   RunVersionCell,
   RunWorkerCell,
   runTableItemFromRun,
@@ -257,6 +258,7 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   // growth-ecosystems/scope-project#127).
   { id: "status", label: "Status" },
   { id: "outcome", label: "Outcome" },
+  { id: "taxonomy", label: "Taxonomy" },
   { id: "experiment", label: "Experiment" },
   { id: "task", label: "Task" },
   { id: "criteria", label: "Criteria" },
@@ -1486,6 +1488,13 @@ export function RunsList() {
       width: "120px",
       hidden: columnVisibility.isHidden("outcome"),
       cell: (r) => <RunOutcomeCell item={runTableItemFromRun(r)} />,
+    },
+    {
+      id: "taxonomy",
+      header: "Taxonomy",
+      width: "150px",
+      hidden: columnVisibility.isHidden("taxonomy"),
+      cell: (r) => <RunTaxonomyCell item={runTableItemFromRun(r)} />,
     },
     {
       id: "report",
