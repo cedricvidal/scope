@@ -79,6 +79,12 @@ The worker uses `taxonomy-engine` directly:
 - deterministic-only taxonomies do not initialize a model client;
 - prompt execution is injected, with production lazily creating an isolated
   Copilot transport and tests supplying a fake executor;
+- `TAXONOME_MODEL` independently selects the prompt-evaluation model and
+  defaults to provider-resolved `auto`; coding-run model and reasoning effort
+  are never forwarded;
+- explicit Taxonome model IDs are validated against the SDK model catalog
+  before session creation, while reasoning effort is omitted for provider/model
+  compatibility;
 - no Taxonome CLI process is started and no CLI output is parsed.
 
 ### Artifact publication

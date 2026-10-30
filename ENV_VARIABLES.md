@@ -17,13 +17,18 @@ derives a localhost URL from `SCOPE_API_PORT` or uses `SCOPE_DEFAULT_API_URL`.
 ## Taxonome post-processing
 
 ### TAXONOME_MODEL
-**Default:** `claude-haiku-4.5`
+**Default:** `auto`
 **Type:** model identifier
 
 Model used by the post-processor's lazy Taxonome prompt executor. The worker
 does not resolve credentials or initialize a Copilot SDK transport for
 deterministic-only taxonomies. Prompt execution uses the taxonomy engine's
-isolated, tool-free Copilot transport and normal credential resolution.
+isolated, tool-free Copilot transport and normal credential resolution. This
+setting is independent from the coding run's model and reasoning effort.
+`auto` delegates model choice to the provider. Explicit model IDs are checked
+against `CopilotClient.listModels()` before session creation and fail clearly
+when unavailable. The post-processor deliberately omits reasoning effort so a
+model that does not support configurable effort remains valid.
 
 ### TAXONOMY_RESULT_MAX_BYTES
 **Default:** `10485760` (10 MiB)

@@ -6,6 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CopilotClient } from "@github/copilot-sdk";
+import type { ModelInfo } from "@github/copilot-sdk";
 import type {
   AxAIService,
   AxAIServiceOptions,
@@ -145,6 +146,28 @@ export interface CopilotCredentialOptions {
   readGhToken?: () => Promise<string | undefined>;
 }
 
+/** Session-level transport settings that callers may deliberately override. */
+export interface OpenCopilotTransportOptions {
+  /**
+   * Reasoning effort for standalone Taxonome callers. Pass `false` to let the
+   * provider choose and avoid sending an unsupported effort.
+   */
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | false;
+}
+
+/** Rejects an explicit unavailable model while preserving provider `auto`. */
+export function validateConfiguredModel(
+  model: string,
+  availableModels: readonly ModelInfo[],
+): void {
+  if (model === "auto") return;
+  if (availableModels.some((candidate) => candidate.id === model)) return;
+
+  throw new Error(
+    `Configured Taxonome model '${model}' is not available from the Copilot SDK`,
+  );
+}
+
 /** Reads the active GitHub CLI token without using a shell or exposing stderr. */
 async function readActiveGhToken(): Promise<string | undefined> {
   return new Promise(resolve => {
@@ -207,11 +230,13 @@ function copilotRuntimeEnvironment(sessionDirectory: string): Record<string, str
  *
  * @param model - Exact model ID used for session creation and usage verification.
  * @param resolveCredential - Injectable credential resolution for offline tests.
+ * @param options - Session settings; standalone callers retain low effort by default.
  * @returns Text-only transport. Callers must invoke `close`.
  */
 export async function openCopilotTransport(
   model: string,
   resolveCredential = resolveCopilotCredential,
+  options: OpenCopilotTransportOptions = {},
 ): Promise<CopilotTransport> {
   const credential = await resolveCredential();
   const sessionDirectory = await mkdtemp(join(tmpdir(), "taxonome-sdk-"));
@@ -255,6 +280,7 @@ export async function openCopilotTransport(
         "or set COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN",
       );
     }
+    validateConfiguredModel(model, await client.listModels());
   } catch (error) {
     try {
       await cleanup();
@@ -280,10 +306,16 @@ export async function openCopilotTransport(
         );
       }
 
+      const configuredReasoningEffort =
+        options.reasoningEffort === undefined
+          ? "low"
+          : options.reasoningEffort;
       const session = await client.createSession({
         // Empty mode plus explicit denials prevents ambient tools, instructions, skills, and storage.
         model,
-        reasoningEffort: "low",
+        ...(configuredReasoningEffort === false
+          ? {}
+          : { reasoningEffort: configuredReasoningEffort }),
         availableTools: [],
         tools: [],
         mcpServers: {},
@@ -446,7 +478,11 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
           messages.join("\n\n"),
           callOptions?.abortSignal ?? options.abortSignal,
         );
-        if (typeof result.usage?.model === "string" && result.usage.model !== model) {
+        if (
+          model !== "auto" &&
+          typeof result.usage?.model === "string" &&
+          result.usage.model !== model
+        ) {
           throw new Error("SDK usage reports an unexpected model; no silent model substitution is allowed");
         }
 

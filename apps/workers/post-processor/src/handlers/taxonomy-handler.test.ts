@@ -2,7 +2,10 @@
 // Licensed under the MIT License.
 
 import { describe, expect, it, vi } from "vitest";
-import { TaxonomyHandler } from "./taxonomy-handler.js";
+import {
+  createPromptExecutorFactory,
+  TaxonomyHandler,
+} from "./taxonomy-handler.js";
 import type { PromptExecutor } from "taxonomy-engine";
 import { taxonomyContentSha256 } from "shared";
 
@@ -139,6 +142,8 @@ function acceptanceContext(input: {
       projectId: "project-1",
       experimentId: "experiment-1",
       scenario: { task: "Implement merge sort." },
+      model: "claude-haiku-4.5",
+      reasoningEffort: "xhigh",
       run: {
         _id: "run-1",
         attemptNumber: 1,
@@ -166,6 +171,62 @@ function acceptanceContext(input: {
 }
 
 describe("TaxonomyHandler", () => {
+  it("uses only the dedicated Taxonome model and omits reasoning effort", async () => {
+    const close = vi.fn(async () => undefined);
+    const openTransport = vi.fn(async () => ({
+      complete: vi.fn(),
+      close,
+    }));
+    const factory = createPromptExecutorFactory({
+      environment: {
+        TAXONOME_MODEL: "taxonome-model",
+        MODEL: "coding-model",
+        REASONING_EFFORT: "xhigh",
+      },
+      openTransport,
+    });
+
+    const lease = await factory(true);
+    expect(openTransport).toHaveBeenCalledWith(
+      "taxonome-model",
+      { reasoningEffort: false },
+    );
+    expect(lease.executor).toBeDefined();
+    await lease.close();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("uses provider auto when no dedicated Taxonome model is configured", async () => {
+    const openTransport = vi.fn(async () => ({
+      complete: vi.fn(),
+      close: vi.fn(async () => undefined),
+    }));
+    const factory = createPromptExecutorFactory({
+      environment: {
+        MODEL: "claude-haiku-4.5",
+        REASONING_EFFORT: "high",
+      },
+      openTransport,
+    });
+
+    await factory(true);
+    expect(openTransport).toHaveBeenCalledWith(
+      "auto",
+      { reasoningEffort: false },
+    );
+  });
+
+  it("does not open a Copilot transport for deterministic elements", async () => {
+    const openTransport = vi.fn();
+    const factory = createPromptExecutorFactory({ openTransport });
+
+    const lease = await factory(false);
+
+    expect(openTransport).not.toHaveBeenCalled();
+    expect(lease.executor).toBeUndefined();
+    await expect(lease.close()).resolves.toBeUndefined();
+  });
+
   it("does not initialize a prompt executor for runs without a taxonomy", async () => {
     const executorFactory = vi.fn();
     const log = vi.fn(async () => undefined);

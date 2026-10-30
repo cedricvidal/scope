@@ -968,7 +968,7 @@ services:
       JUDGE_SERVICE_URL: http://judge:80
       # Taxonome resolves this lazily only for prompt-based elements.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      TAXONOME_MODEL: ${TAXONOME_MODEL:-claude-haiku-4.5}
+      TAXONOME_MODEL: ${TAXONOME_MODEL:-auto}
     depends_on:
       mongodb:
         condition: service_healthy

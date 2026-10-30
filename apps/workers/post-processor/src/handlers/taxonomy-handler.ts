@@ -16,6 +16,8 @@ import {
   copilotAI,
   openCopilotTransport,
   taxonomyPromptExecutor,
+  type OpenCopilotTransportOptions,
+  type CopilotTransport,
 } from "taxonomy-engine/copilot";
 import type {
   ExperimentDocument,
@@ -31,6 +33,7 @@ import type {
   PostProcessorMessage,
 } from "../types.js";
 import { POST_PROCESSOR_VERSION } from "../version.js";
+import { resolveTaxonomeModel } from "../taxonomy-config.js";
 
 const gzipAsync = promisify(gzip);
 const RUN_RESULT_SCHEMA_VERSION = "scope/taxonomy-run-result/v1";
@@ -44,19 +47,39 @@ export type PromptExecutorFactory = (
   hasPromptElements: boolean,
 ) => Promise<PromptExecutorLease>;
 
-async function defaultPromptExecutorFactory(
-  hasPromptElements: boolean,
-): Promise<PromptExecutorLease> {
-  if (!hasPromptElements) {
-    return { close: async () => undefined };
-  }
-  const model = process.env.TAXONOME_MODEL ?? "claude-haiku-4.5";
-  const transport = await openCopilotTransport(model);
-  return {
-    executor: taxonomyPromptExecutor(copilotAI(transport, model)),
-    close: () => transport.close(),
+export interface PromptExecutorFactoryDependencies {
+  /** Environment containing only dedicated post-processor configuration. */
+  environment?: NodeJS.ProcessEnv;
+  /** Injectable isolated transport factory for offline tests. */
+  openTransport?: (
+    model: string,
+    options: OpenCopilotTransportOptions,
+  ) => Promise<CopilotTransport>;
+}
+
+/** Builds the lazy production executor without consulting coding-run settings. */
+export function createPromptExecutorFactory(
+  dependencies: PromptExecutorFactoryDependencies = {},
+): PromptExecutorFactory {
+  return async (hasPromptElements): Promise<PromptExecutorLease> => {
+    if (!hasPromptElements) {
+      return { close: async () => undefined };
+    }
+
+    const model = resolveTaxonomeModel(dependencies.environment);
+    const transport = await (
+      dependencies.openTransport ??
+      ((configuredModel, options) =>
+        openCopilotTransport(configuredModel, undefined, options))
+    )(model, { reasoningEffort: false });
+    return {
+      executor: taxonomyPromptExecutor(copilotAI(transport, model)),
+      close: () => transport.close(),
+    };
   };
 }
+
+const defaultPromptExecutorFactory = createPromptExecutorFactory();
 
 function portableTaxonomy(
   revision: TaxonomyRevisionDocument,
