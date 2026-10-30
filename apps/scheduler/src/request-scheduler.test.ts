@@ -76,8 +76,6 @@ function makeCollections(
     aggregate: vi.fn().mockImplementation((pipeline: Array<Record<string, any>>) => ({
       toArray: async () => {
         const status = pipeline[0]?.$match?.["run.status"];
-        const requiresMissingVersion =
-          pipeline[0]?.$match?.agentVersion?.$exists === false;
         const grouped = new Map<
           string,
           {
@@ -91,10 +89,7 @@ function makeCollections(
         >();
         for (const request of requests.filter(
           (candidate) =>
-            candidate.run?.status === status &&
-            !candidate.deletedAt &&
-            (!requiresMissingVersion ||
-              candidate.agentVersion === undefined),
+            candidate.run?.status === status && !candidate.deletedAt,
         )) {
           const queuedQueueName =
             status === "queued" ? request.run?.queuedQueueName : undefined;
@@ -172,46 +167,14 @@ function makeCollections(
       async (
         filter: {
           workerType?: string;
-          agentVersion?: string | { $exists: false };
-          "run.status"?: string;
+          agentVersion?: string;
           "run.queuedQueueName"?: string | { $exists: false };
         },
         update: {
-          $set: {
-            "run.status"?: string;
-            "run.updatedAt"?: Date;
-            agentVersion?: string;
-            updatedAt?: Date;
-          };
+          $set: { "run.status": string };
           $unset?: { "run.queuedQueueName"?: string };
         },
       ) => {
-        if (
-          filter["run.status"] === "pending" &&
-          typeof filter.agentVersion === "object" &&
-          filter.agentVersion.$exists === false &&
-          update.$set.agentVersion
-        ) {
-          const matches = requests.filter(
-            (candidate) =>
-              candidate.run?.status === "pending" &&
-              !candidate.deletedAt &&
-              candidate.workerType === filter.workerType &&
-              candidate.agentVersion === undefined,
-          );
-          for (const request of matches) {
-            request.agentVersion = update.$set.agentVersion;
-            request.updatedAt = update.$set.updatedAt;
-            if (request.run) {
-              request.run.updatedAt = update.$set["run.updatedAt"];
-            }
-          }
-          return {
-            matchedCount: matches.length,
-            modifiedCount: matches.length,
-          };
-        }
-
         const matches = requests.filter((candidate) => {
           if (candidate.run?.status !== "queued" || candidate.deletedAt) return false;
           if (
@@ -300,64 +263,6 @@ describe("RequestScheduler", () => {
       workerType: "synthetic-worker-7f3",
       agentVersion: "synthetic-v9",
     });
-  });
-
-  it("reconciles one unambiguous missing version and dispatches it exactly once", async () => {
-    const request = makeRequest("versionless", "worker", undefined);
-    const { requestCollection, agentCollection } = makeCollections(
-      [request],
-      [makeAgent("worker", [{ agentVersion: "v1", queueName: "queue" }])],
-    );
-    const queue = makeQueueClient();
-    const scheduler = new RequestScheduler(
-      requestCollection,
-      agentCollection,
-      () => queue,
-    );
-
-    await (scheduler as any).dispatch();
-    await (scheduler as any).dispatch();
-
-    expect(request.agentVersion).toBe("v1");
-    expect(request.run?.status).toBe("queued");
-    expect(request.run?.queuedQueueName).toBe("queue");
-    expect(queue.sendMessage).toHaveBeenCalledTimes(1);
-    expect(
-      JSON.parse(
-        Buffer.from(queue.sendMessage.mock.calls[0][0], "base64").toString(),
-      ),
-    ).toEqual({
-      requestId: "versionless",
-      runId: "run-versionless",
-      workerType: "worker",
-      agentVersion: "v1",
-    });
-  });
-
-  it("retains a reconciled version when queue send fails and dispatches on retry", async () => {
-    const request = makeRequest("versionless", "worker", undefined);
-    const { requestCollection, agentCollection } = makeCollections(
-      [request],
-      [makeAgent("worker", [{ agentVersion: "v1", queueName: "queue" }])],
-    );
-    const queue = makeQueueClient();
-    queue.sendMessage.mockRejectedValueOnce(new Error("queue unavailable"));
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    const scheduler = new RequestScheduler(
-      requestCollection,
-      agentCollection,
-      () => queue,
-    );
-
-    await (scheduler as any).dispatch();
-    expect(request.agentVersion).toBe("v1");
-    expect(request.run?.status).toBe("pending");
-
-    await (scheduler as any).dispatch();
-
-    expect(request.agentVersion).toBe("v1");
-    expect(request.run?.status).toBe("queued");
-    expect(queue.sendMessage).toHaveBeenCalledTimes(2);
   });
 
   it("reconciles queued requests on a slower cadence than dispatch", async () => {
@@ -541,7 +446,6 @@ describe("RequestScheduler", () => {
     const { requestCollection, agentCollection } = makeCollections(requests, [
       makeAgent("known-worker", [
         { agentVersion: "active", queueName: "known-queue" },
-        { agentVersion: "other-active", queueName: "other-known-queue" },
         {
           agentVersion: "retired",
           queueName: "known-queue",
@@ -668,7 +572,6 @@ describe("RequestScheduler", () => {
     const aggregateImplementation =
       requestCollection.aggregate.getMockImplementation();
     requestCollection.aggregate
-      .mockImplementationOnce(aggregateImplementation)
       .mockImplementationOnce(aggregateImplementation)
       .mockImplementationOnce(() => ({
         toArray: vi.fn().mockRejectedValue(new Error("diagnostics unavailable")),
