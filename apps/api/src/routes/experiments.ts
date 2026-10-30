@@ -131,11 +131,31 @@ const ExperimentRequestSummarySchema = z.object({
   requestId: z.string(),
   runId: z.string(),
   task: z.string().optional(),
+  criteria: z.array(z.string()).optional(),
+  taskPromptId: z.string().optional(),
   status: z.string().optional(),
   outcome: z.string().optional(),
   workerType: z.string().optional(),
   model: z.string().optional(),
+  reasoningEffort: z.string().optional(),
+  agentVersion: z.string().optional(),
+  os: z.object({
+    platform: z.string(),
+    release: z.string(),
+    arch: z.string(),
+  }).optional(),
+  mcpServers: z.array(z.string()).optional(),
+  skillRevisions: z.array(z.string()).optional(),
+  extensions: z.array(z.string()).optional(),
   profileId: z.string().optional(),
+  priority: z.number().optional(),
+  attemptNumber: z.number().int().positive().optional(),
+  worker: z.object({
+    instanceId: z.string(),
+    podName: z.string().optional(),
+  }).optional(),
+  lastHeartbeatAt: z.coerce.date().optional(),
+  startedAt: z.coerce.date().optional(),
 });
 
 const ExperimentTemplateReportSummarySchema = z.object({
@@ -594,9 +614,17 @@ async function resolvedExecutionResponse(
             projection: {
               _id: 1,
               "scenario.task": 1,
+              "scenario.criteria": 1,
+              taskPromptId: 1,
               workerType: 1,
               model: 1,
+              reasoningEffort: 1,
+              agentVersion: 1,
+              mcpServers: 1,
+              skillRevisions: 1,
+              extensions: 1,
               profileId: 1,
+              priority: 1,
               deletedAt: 1,
               run: 1,
             },
@@ -627,6 +655,11 @@ async function resolvedExecutionResponse(
               _id: 1,
               status: 1,
               outcome: 1,
+              attemptNumber: 1,
+              os: 1,
+              worker: 1,
+              lastHeartbeatAt: 1,
+              startedAt: 1,
             },
           },
         )
@@ -647,11 +680,34 @@ async function resolvedExecutionResponse(
       requestId,
       runId,
       ...(request?.scenario.task ? { task: request.scenario.task } : {}),
+      ...(request?.scenario.criteria
+        ? { criteria: request.scenario.criteria }
+        : {}),
+      ...(request?.taskPromptId ? { taskPromptId: request.taskPromptId } : {}),
       status,
       ...(run?.outcome ? { outcome: run.outcome } : {}),
       ...(request?.workerType ? { workerType: request.workerType } : {}),
       ...(request?.model ? { model: request.model } : {}),
+      ...(request?.reasoningEffort
+        ? { reasoningEffort: request.reasoningEffort }
+        : {}),
+      ...(request?.agentVersion
+        ? { agentVersion: request.agentVersion }
+        : {}),
+      ...(run?.os ? { os: run.os } : {}),
+      ...(request?.mcpServers ? { mcpServers: request.mcpServers } : {}),
+      ...(request?.skillRevisions
+        ? { skillRevisions: request.skillRevisions }
+        : {}),
+      ...(request?.extensions ? { extensions: request.extensions } : {}),
       ...(request?.profileId ? { profileId: request.profileId } : {}),
+      ...(request?.priority !== undefined ? { priority: request.priority } : {}),
+      ...(run?.attemptNumber ? { attemptNumber: run.attemptNumber } : {}),
+      ...(run?.worker ? { worker: run.worker } : {}),
+      ...(run?.lastHeartbeatAt
+        ? { lastHeartbeatAt: run.lastHeartbeatAt }
+        : {}),
+      ...(run?.startedAt ? { startedAt: run.startedAt } : {}),
     };
   });
 

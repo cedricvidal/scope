@@ -161,6 +161,13 @@ identity without per-row lookups. A soft-deleted request remains visible with
 status `deleted`; a missing request or exact run remains visible with status
 `missing` so the immutable member vector is never silently shortened.
 
+The bounded summary includes only fields needed to render the shared run table:
+task/criteria identity, worker/model/version and reasoning effort, profile and
+priority, MCP/skills/extensions, plus exact-attempt status/outcome, OS,
+attempt number, worker identity, heartbeat, and start time. Full turns,
+artifacts, logs, reports, and mutable actions remain on the Run APIs and are
+loaded only when a user opens the shared Run preview or full detail view.
+
 ## FixedPayload storage
 
 `FixedPayload<T>` has two representations:

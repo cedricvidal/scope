@@ -49,11 +49,24 @@ export interface ExperimentRequestSummaryView {
   requestId: string;
   runId: string;
   task?: string;
+  criteria?: string[];
+  taskPromptId?: string;
   status?: string;
   outcome?: string;
   workerType?: string;
   model?: string;
+  reasoningEffort?: string;
+  agentVersion?: string;
+  os?: { platform: string; release: string; arch: string };
+  mcpServers?: string[];
+  skillRevisions?: string[];
+  extensions?: string[];
   profileId?: string;
+  priority?: number;
+  attemptNumber?: number;
+  worker?: { instanceId: string; podName?: string };
+  lastHeartbeatAt?: string;
+  startedAt?: string;
 }
 
 export interface ExperimentExecutionView {
@@ -259,15 +272,63 @@ function parseBlocker(value: unknown): ExperimentBlockerView {
 
 function parseRequestSummary(value: unknown): ExperimentRequestSummaryView {
   const item = record(value, "experiment request");
+  const osValue = item.os;
+  const os = osValue === undefined
+    ? undefined
+    : (() => {
+        const value = record(osValue, "experiment request os");
+        return {
+          platform: requiredString(value, "platform", "experiment request os"),
+          release: requiredString(value, "release", "experiment request os"),
+          arch: requiredString(value, "arch", "experiment request os"),
+        };
+      })();
+  const workerValue = item.worker;
+  const worker = workerValue === undefined
+    ? undefined
+    : (() => {
+        const value = record(workerValue, "experiment request worker");
+        return {
+          instanceId: requiredString(
+            value,
+            "instanceId",
+            "experiment request worker",
+          ),
+          podName: optionalString(value, "podName"),
+        };
+      })();
+  const strings = (key: string): string[] | undefined => {
+    const candidate = item[key];
+    if (candidate === undefined) return undefined;
+    if (!Array.isArray(candidate) || candidate.some((value) => typeof value !== "string")) {
+      throw new Error(`Invalid experiment request.${key} response from Scope`);
+    }
+    return candidate;
+  };
   return {
     requestId: requiredString(item, "requestId", "experiment request"),
     runId: requiredString(item, "runId", "experiment request"),
     task: optionalString(item, "task"),
+    criteria: strings("criteria"),
+    taskPromptId: optionalString(item, "taskPromptId"),
     status: optionalString(item, "status"),
     outcome: optionalString(item, "outcome"),
     workerType: optionalString(item, "workerType"),
     model: optionalString(item, "model"),
+    reasoningEffort: optionalString(item, "reasoningEffort"),
+    agentVersion: optionalString(item, "agentVersion"),
+    os,
+    mcpServers: strings("mcpServers"),
+    skillRevisions: strings("skillRevisions"),
+    extensions: strings("extensions"),
     profileId: optionalString(item, "profileId"),
+    priority:
+      typeof item.priority === "number" ? item.priority : undefined,
+    attemptNumber:
+      typeof item.attemptNumber === "number" ? item.attemptNumber : undefined,
+    worker,
+    lastHeartbeatAt: optionalString(item, "lastHeartbeatAt"),
+    startedAt: optionalString(item, "startedAt"),
   };
 }
 

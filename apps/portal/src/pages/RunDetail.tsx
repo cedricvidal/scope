@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { RetryConfirmDialog } from "@/components/RetryConfirmDialog";
@@ -58,6 +58,7 @@ import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { getRetryButtonState } from "@/components/RetryButton";
 import { deriveEnrichmentStatus } from "@/lib/enrichment";
 import { getRunSkillReferences } from "@/lib/skill-spec";
+import { resolveRunReturnState } from "@/lib/run-navigation";
 
 /** A compact labeled stat: a micro uppercase label above its value. */
 function MetaItem({ label, value, title }: { label: string; value: ReactNode; title?: string }) {
@@ -421,14 +422,11 @@ function WholeRunObservationsPanel({
 export function RunDetail() {
   const { id, tab } = useParams<{ id: string; tab?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const selectedRunId = searchParams.get("runId");
-  const fromExperimentId = searchParams.get("fromExperiment");
-  const fromExperimentExecutionId = searchParams.get("experimentExecution");
-  const experimentHref = fromExperimentId
-    ? `/experiments/${fromExperimentId}${fromExperimentExecutionId ? `?execution=${encodeURIComponent(fromExperimentExecutionId)}` : ""}`
-    : undefined;
+  const runReturn = resolveRunReturnState(location.state);
   const [copied, setCopied] = useState(false);
   const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
   const [reportsFilter, setReportsFilter] = useState<"latest" | "all">("latest");
@@ -711,10 +709,10 @@ export function RunDetail() {
   if (error || !run) {
     return (
       <div className="space-y-4">
-        <Link to={experimentHref ?? "/runs"}>
+        <Link to={runReturn.returnTo}>
           <Button variant="ghost" className="gap-1.5">
             <ArrowLeft className="h-4 w-4" />{" "}
-            {experimentHref ? "Back to experiment" : "Back to runs"}
+            {runReturn.returnLabel}
           </Button>
         </Link>
         <div className="text-center py-12 text-destructive">
@@ -811,14 +809,10 @@ export function RunDetail() {
     <div className="space-y-6">
       {/* Back link + header */}
       <div>
-        <Link
-          to={
-            experimentHref ?? "/runs"
-          }
-        >
+        <Link to={runReturn.returnTo}>
           <Button variant="ghost" size="sm" className="gap-1.5 mb-2">
             <ArrowLeft className="h-4 w-4" />{" "}
-            {experimentHref ? "Back to experiment" : "Back to runs"}
+            {runReturn.returnLabel}
           </Button>
         </Link>
 

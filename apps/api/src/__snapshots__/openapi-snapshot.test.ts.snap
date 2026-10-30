@@ -1939,13 +1939,70 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "requests": {
             "items": {
               "properties": {
+                "agentVersion": {
+                  "type": "string",
+                },
+                "attemptNumber": {
+                  "exclusiveMinimum": 0,
+                  "type": "integer",
+                },
+                "criteria": {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "extensions": {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "lastHeartbeatAt": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null",
+                  ],
+                },
+                "mcpServers": {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
                 "model": {
                   "type": "string",
+                },
+                "os": {
+                  "properties": {
+                    "arch": {
+                      "type": "string",
+                    },
+                    "platform": {
+                      "type": "string",
+                    },
+                    "release": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "platform",
+                    "release",
+                    "arch",
+                  ],
+                  "type": "object",
                 },
                 "outcome": {
                   "type": "string",
                 },
+                "priority": {
+                  "type": "number",
+                },
                 "profileId": {
+                  "type": "string",
+                },
+                "reasoningEffort": {
                   "type": "string",
                 },
                 "requestId": {
@@ -1954,11 +2011,41 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                 "runId": {
                   "type": "string",
                 },
+                "skillRevisions": {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "startedAt": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null",
+                  ],
+                },
                 "status": {
                   "type": "string",
                 },
                 "task": {
                   "type": "string",
+                },
+                "taskPromptId": {
+                  "type": "string",
+                },
+                "worker": {
+                  "properties": {
+                    "instanceId": {
+                      "type": "string",
+                    },
+                    "podName": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "instanceId",
+                  ],
+                  "type": "object",
                 },
                 "workerType": {
                   "type": "string",
@@ -2487,13 +2574,70 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "requests": {
                 "items": {
                   "properties": {
+                    "agentVersion": {
+                      "type": "string",
+                    },
+                    "attemptNumber": {
+                      "exclusiveMinimum": 0,
+                      "type": "integer",
+                    },
+                    "criteria": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "extensions": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "lastHeartbeatAt": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null",
+                      ],
+                    },
+                    "mcpServers": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
                     "model": {
                       "type": "string",
+                    },
+                    "os": {
+                      "properties": {
+                        "arch": {
+                          "type": "string",
+                        },
+                        "platform": {
+                          "type": "string",
+                        },
+                        "release": {
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "platform",
+                        "release",
+                        "arch",
+                      ],
+                      "type": "object",
                     },
                     "outcome": {
                       "type": "string",
                     },
+                    "priority": {
+                      "type": "number",
+                    },
                     "profileId": {
+                      "type": "string",
+                    },
+                    "reasoningEffort": {
                       "type": "string",
                     },
                     "requestId": {
@@ -2502,11 +2646,41 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "runId": {
                       "type": "string",
                     },
+                    "skillRevisions": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "startedAt": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null",
+                      ],
+                    },
                     "status": {
                       "type": "string",
                     },
                     "task": {
                       "type": "string",
+                    },
+                    "taskPromptId": {
+                      "type": "string",
+                    },
+                    "worker": {
+                      "properties": {
+                        "instanceId": {
+                          "type": "string",
+                        },
+                        "podName": {
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "instanceId",
+                      ],
+                      "type": "object",
                     },
                     "workerType": {
                       "type": "string",
