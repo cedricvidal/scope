@@ -8,9 +8,9 @@ import {
 } from "./taxonomy-config.js";
 
 describe("Taxonome model configuration", () => {
-  it("uses provider-resolved auto selection by default", () => {
-    expect(DEFAULT_TAXONOME_MODEL).toBe("auto");
-    expect(resolveTaxonomeModel({})).toBe("auto");
+  it("uses the dedicated Claude Haiku model by default", () => {
+    expect(DEFAULT_TAXONOME_MODEL).toBe("claude-haiku-4.5");
+    expect(resolveTaxonomeModel({})).toBe("claude-haiku-4.5");
   });
 
   it("preserves a trimmed explicit TAXONOME_MODEL override", () => {
@@ -22,6 +22,6 @@ describe("Taxonome model configuration", () => {
     expect(resolveTaxonomeModel({
       MODEL: "coding-model",
       REASONING_EFFORT: "xhigh",
-    })).toBe("auto");
+    })).toBe("claude-haiku-4.5");
   });
 });

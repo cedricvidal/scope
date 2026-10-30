@@ -196,7 +196,7 @@ describe("TaxonomyHandler", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
-  it("uses provider auto when no dedicated Taxonome model is configured", async () => {
+  it("uses the dedicated default when no Taxonome model is configured", async () => {
     const openTransport = vi.fn(async () => ({
       complete: vi.fn(),
       close: vi.fn(async () => undefined),
@@ -211,7 +211,7 @@ describe("TaxonomyHandler", () => {
 
     await factory(true);
     expect(openTransport).toHaveBeenCalledWith(
-      "auto",
+      "claude-haiku-4.5",
       { reasoningEffort: false },
     );
   });

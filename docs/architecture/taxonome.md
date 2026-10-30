@@ -65,10 +65,11 @@ taxonomies create no Copilot model transport. Prompt execution is injectable;
 tests use fake executors and make no paid or live calls. Production opens an
 isolated Copilot transport lazily only when at least one selected element is
 prompt-based. Scope's post-processor selects that transport through the
-dedicated `TAXONOME_MODEL` setting (provider-resolved `auto` by default), never
+dedicated `TAXONOME_MODEL` setting (`claude-haiku-4.5` by default), never
 through the originating coding run's model or reasoning effort. Explicit model
-IDs are validated against the Copilot SDK catalog, and the post-processor
-omits reasoning effort so models without configurable effort remain supported.
+IDs are validated against the Copilot SDK catalog (`auto` remains an explicit
+provider-resolved option), and the post-processor omits reasoning effort so
+models without configurable effort remain supported.
 
 Artifact paths are attempt/claim specific:
 

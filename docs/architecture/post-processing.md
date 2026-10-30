@@ -80,8 +80,8 @@ The worker uses `taxonomy-engine` directly:
 - prompt execution is injected, with production lazily creating an isolated
   Copilot transport and tests supplying a fake executor;
 - `TAXONOME_MODEL` independently selects the prompt-evaluation model and
-  defaults to provider-resolved `auto`; coding-run model and reasoning effort
-  are never forwarded;
+  defaults to `claude-haiku-4.5`; coding-run model and reasoning effort are
+  never forwarded, while `auto` remains an explicit provider-resolved option;
 - explicit Taxonome model IDs are validated against the SDK model catalog
   before session creation, while reasoning effort is omitted for provider/model
   compatibility;
