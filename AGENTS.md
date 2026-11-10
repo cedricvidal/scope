@@ -175,6 +175,8 @@ Built on `mongo-migrate-ts`. Migrations are TypeScript files with `up()` and `do
 ## Development
 
 ```bash
+pnpm start                        # Interactive guide: pick a task, check prerequisites, run the right command (alias: pnpm scope)
+pnpm start --list                 # Every contributor command, grouped by topic
 pnpm docker:up:infra              # Start backing services (MongoDB, Redis, Azurite, Lowkey Vault)
 pnpm docker:dev:copilot           # Full stack with Copilot worker + portal (hot reload)
 pnpm docker:dev:all               # All workers + portal + report generator (hot reload)
@@ -183,6 +185,12 @@ pnpm dev:portal                   # Portal only (native)
 pnpm dev:<worker-name>            # Individual worker (native)
 pnpm open:portal                  # Open portal in browser
 ```
+
+> **Contributor guide catalog**: `pnpm start` only runs existing root scripts listed in
+> `scripts/guide/catalog.ts` (menu questions live in `scripts/guide/tree.ts`). When you add,
+> rename or remove a contributor-facing root script, update its recipe (title, summary,
+> prerequisites, caution) so the guide stays accurate; unregistered scripts only appear under
+> "Other scripts". `scripts/guide/*.test.ts` fails if a recipe references a missing script.
 
 ### Shared Dev Infrastructure (CosmosDB)
 
